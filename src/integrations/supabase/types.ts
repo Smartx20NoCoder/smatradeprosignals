@@ -14,7 +14,114 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      api_usage: {
+        Row: {
+          calls: number
+          day: string
+          updated_at: string
+        }
+        Insert: {
+          calls?: number
+          day: string
+          updated_at?: string
+        }
+        Update: {
+          calls?: number
+          day?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      candle_cache: {
+        Row: {
+          candles: Json
+          fetched_at: string
+          id: string
+          pair: string
+          timeframe: string
+        }
+        Insert: {
+          candles: Json
+          fetched_at?: string
+          id?: string
+          pair: string
+          timeframe: string
+        }
+        Update: {
+          candles?: Json
+          fetched_at?: string
+          id?: string
+          pair?: string
+          timeframe?: string
+        }
+        Relationships: []
+      }
+      signals: {
+        Row: {
+          atr: number | null
+          closed_at: string | null
+          confidence: number
+          created_at: string
+          direction: string
+          entry: number
+          id: string
+          news_flag: boolean
+          notes: string | null
+          outcome_r: number | null
+          pair: string
+          rr: number
+          session_score: number
+          setup: string
+          status: string
+          stop_loss: number
+          timeframe: string
+          tp1: number
+          tp2: number
+        }
+        Insert: {
+          atr?: number | null
+          closed_at?: string | null
+          confidence: number
+          created_at?: string
+          direction: string
+          entry: number
+          id?: string
+          news_flag?: boolean
+          notes?: string | null
+          outcome_r?: number | null
+          pair: string
+          rr: number
+          session_score: number
+          setup: string
+          status?: string
+          stop_loss: number
+          timeframe: string
+          tp1: number
+          tp2: number
+        }
+        Update: {
+          atr?: number | null
+          closed_at?: string | null
+          confidence?: number
+          created_at?: string
+          direction?: string
+          entry?: number
+          id?: string
+          news_flag?: boolean
+          notes?: string | null
+          outcome_r?: number | null
+          pair?: string
+          rr?: number
+          session_score?: number
+          setup?: string
+          status?: string
+          stop_loss?: number
+          timeframe?: string
+          tp1?: number
+          tp2?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
