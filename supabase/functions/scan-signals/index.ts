@@ -356,27 +356,47 @@ Deno.serve(async (req) => {
     let apiCalls = 0;
     const signals: Signal[] = [];
     const errors: string[] = [];
+    const CHUNK = 4; // 4 pairs * 2 TFs = 8 credits = free-tier per-minute limit
+
+    const pairData: Record<string, { c5: Candle[]; c15: Candle[] } | null> = {};
+
+    for (let i = 0; i < PAIRS.length; i += CHUNK) {
+      const chunk = PAIRS.slice(i, i + CHUNK);
+      const results = await Promise.all(
+        chunk.map(async (pair) => {
+          try {
+            const [r5, r15] = await Promise.all([
+              fetchCandles(supabase, tdKey, pair, TFS[0]),
+              fetchCandles(supabase, tdKey, pair, TFS[1]),
+            ]);
+            apiCalls += r5.usedApi + r15.usedApi;
+            return { pair, c5: r5.candles, c15: r15.candles };
+          } catch (e) {
+            errors.push(`${pair}: ${(e as Error).message}`);
+            return { pair, c5: null, c15: null };
+          }
+        }),
+      );
+      for (const r of results) {
+        pairData[r.pair] = r.c5 && r.c15 ? { c5: r.c5, c15: r.c15 } : null;
+      }
+      // Throttle: respect 8 credits/minute on free tier — only wait if more pairs remain AND we hit network
+      if (i + CHUNK < PAIRS.length && apiCalls > 0) {
+        await new Promise((res) => setTimeout(res, 61_000));
+      }
+    }
 
     for (const pair of PAIRS) {
-      try {
-        const [r5, r15] = await Promise.all([
-          fetchCandles(supabase, tdKey, pair, TFS[0]),
-          fetchCandles(supabase, tdKey, pair, TFS[1]),
-        ]);
-        apiCalls += r5.usedApi + r15.usedApi;
-        const c5 = r5.candles;
-        const c15 = r15.candles;
-        const raw = [
-          emaPullback(pair, c5, c15),
-          bos(pair, c5, c15),
-          sessionRangeBreak(pair, c5),
-        ].filter(Boolean) as Signal[];
-        for (const r of raw) {
-          const q = qualifyAndScore(r, pair, c5);
-          if (q && q.confidence >= 55) signals.push(q);
-        }
-      } catch (e) {
-        errors.push(`${pair}: ${(e as Error).message}`);
+      const d = pairData[pair];
+      if (!d) continue;
+      const raw = [
+        emaPullback(pair, d.c5, d.c15),
+        bos(pair, d.c5, d.c15),
+        sessionRangeBreak(pair, d.c5),
+      ].filter(Boolean) as Signal[];
+      for (const r of raw) {
+        const q = qualifyAndScore(r, pair, d.c5);
+        if (q && q.confidence >= 55) signals.push(q);
       }
     }
 
