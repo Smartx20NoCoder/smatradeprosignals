@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   LineChart,
@@ -32,16 +32,48 @@ type Signal = {
   status: string;
   outcome_r: number | null;
   created_at: string;
+  order_type: string | null;
+  candle_time: string | null;
+  spread_pips: number | null;
+  notes: string | null;
+};
+
+type ReportCheck = {
+  setup: string;
+  status: "qualified" | "filtered" | "none";
+  reason?: string;
+  direction?: string;
+};
+type PairReport = {
+  pair: string;
+  cached: boolean;
+  candle_time?: string;
+  checks: ReportCheck[];
+};
+type ScanResult = {
+  when: string;
+  new: number;
+  used: number;
+  today: number;
+  errors: string[];
+  report: PairReport[];
 };
 
 const STATUSES = ["pending", "tp1", "tp2", "be", "loss"] as const;
 const DAILY_BUDGET = 800;
+const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "GBP/CHF", "USD/CHF"];
 
 function fmtPrice(p: number, pair: string) {
   const decimals = pair.includes("JPY") ? 3 : 5;
   return p.toFixed(decimals);
 }
-
+function fmtCandle(iso: string | null, tf: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${tf} candle · ${hh}:${mm} UTC`;
+}
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return "now";
@@ -54,16 +86,13 @@ function timeAgo(iso: string) {
 function ScalpEdge() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [lastScan, setLastScan] = useState<{
-    when: string;
-    new: number;
-    used: number;
-    today: number;
-    errors: string[];
-  } | null>(null);
+  const [scanProgress, setScanProgress] = useState<Record<string, "pending" | "checking" | "done">>({});
+  const [lastScan, setLastScan] = useState<ScanResult | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
   const [tab, setTab] = useState<"signals" | "edge">("signals");
   const [now, setNow] = useState(Date.now());
+  const autoResolvedRef = useRef(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -86,31 +115,67 @@ function ScalpEdge() {
     setBudgetToday((u?.calls as number) ?? 0);
   }
 
+  // Auto-resolve open signals on app open
   useEffect(() => {
-    loadSignals();
+    (async () => {
+      await loadSignals();
+      if (autoResolvedRef.current) return;
+      autoResolvedRef.current = true;
+      try {
+        await supabase.functions.invoke("resolve-signals");
+        await loadSignals();
+      } catch {
+        /* silent */
+      }
+    })();
   }, []);
 
   async function runScan() {
     setScanning(true);
+    // Init progress
+    const init: Record<string, "pending" | "checking" | "done"> = {};
+    PAIRS.forEach((p) => (init[p] = "pending"));
+    setScanProgress(init);
+
+    // Animate sequential "checking" indicator while server crunches
+    let cancelled = false;
+    (async () => {
+      for (const p of PAIRS) {
+        if (cancelled) return;
+        setScanProgress((s) => ({ ...s, [p]: "checking" }));
+        await new Promise((r) => setTimeout(r, 280));
+      }
+    })();
+
     try {
       const { data, error } = await supabase.functions.invoke("scan-signals");
       if (error) throw error;
-      setLastScan({
+      cancelled = true;
+      // Mark all done from report
+      const done: Record<string, "pending" | "checking" | "done"> = {};
+      PAIRS.forEach((p) => (done[p] = "done"));
+      setScanProgress(done);
+      const result: ScanResult = {
         when: new Date().toISOString(),
         new: data.new_signals ?? 0,
         used: data.api_calls_used ?? 0,
         today: data.api_calls_today ?? 0,
         errors: data.errors ?? [],
-      });
+        report: data.report ?? [],
+      };
+      setLastScan(result);
+      setReportOpen(true);
       setBudgetToday(data.api_calls_today ?? 0);
       await loadSignals();
     } catch (e) {
+      cancelled = true;
       setLastScan({
         when: new Date().toISOString(),
         new: 0,
         used: 0,
         today: budgetToday,
         errors: [(e as Error).message],
+        report: [],
       });
     } finally {
       setScanning(false);
@@ -122,7 +187,6 @@ function ScalpEdge() {
     await loadSignals();
   }
 
-  // Edge analytics
   const stats = useMemo(() => {
     const closed = signals.filter((s) => s.status !== "pending" && s.outcome_r !== null);
     const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
@@ -140,7 +204,6 @@ function ScalpEdge() {
       avgR: v.n ? v.rSum / v.n : 0,
       expectancy: v.n ? v.rSum / v.n : 0,
     }));
-    // P&L curve
     let cum = 0;
     const curve = [...closed]
       .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
@@ -160,7 +223,6 @@ function ScalpEdge() {
   return (
     <div className="min-h-screen scanline">
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {/* Header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -180,7 +242,7 @@ function ScalpEdge() {
               </div>
               <div className="w-32 h-1 mt-1 bg-secondary rounded overflow-hidden">
                 <div
-                  className="h-full bg-primary transition-all"
+                  className="h-full transition-all"
                   style={{
                     width: `${budgetPct}%`,
                     backgroundColor:
@@ -199,9 +261,41 @@ function ScalpEdge() {
           </div>
         </header>
 
+        {/* Live progress while scanning */}
+        {scanning && (
+          <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+              Live Scan
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-mono">
+              {PAIRS.map((p) => {
+                const st = scanProgress[p] ?? "pending";
+                return (
+                  <div key={p} className="flex items-center gap-2">
+                    <span
+                      className={
+                        st === "done"
+                          ? "text-bull"
+                          : st === "checking"
+                          ? "text-primary animate-pulse"
+                          : "text-muted-foreground/50"
+                      }
+                    >
+                      {st === "done" ? "✓" : st === "checking" ? "◌" : "·"}
+                    </span>
+                    <span className={st === "pending" ? "text-muted-foreground/60" : ""}>
+                      {p}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Last scan banner */}
-        {lastScan && (
-          <div className="mt-3 text-xs flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+        {lastScan && !scanning && (
+          <div className="mt-3 text-xs flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
             <span>
               LAST SCAN <span className="text-foreground">{timeAgo(lastScan.when)} ago</span>
             </span>
@@ -216,10 +310,22 @@ function ScalpEdge() {
                 {lastScan.errors.length} error(s): {lastScan.errors[0]}
               </span>
             )}
+            {lastScan.report.length > 0 && (
+              <button
+                onClick={() => setReportOpen((o) => !o)}
+                className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider border border-border rounded hover:border-primary/40 hover:text-foreground"
+              >
+                {reportOpen ? "▾ Hide" : "▸ Show"} Scan Report
+              </button>
+            )}
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Collapsible scan report */}
+        {lastScan && reportOpen && lastScan.report.length > 0 && (
+          <ScanReport report={lastScan.report} />
+        )}
+
         <nav className="mt-6 flex gap-1 border-b border-border">
           {(
             [
@@ -241,15 +347,65 @@ function ScalpEdge() {
           ))}
         </nav>
 
-        {tab === "signals" && (
-          <SignalList signals={signals} onOutcome={setOutcome} />
-        )}
-
+        {tab === "signals" && <SignalList signals={signals} onOutcome={setOutcome} />}
         {tab === "edge" && <EdgePanel stats={stats} />}
 
         <footer className="mt-12 text-center text-[10px] text-muted-foreground uppercase tracking-widest">
-          Not financial advice · Mechanical edge tracking only
+          Not financial advice · Mechanical edge tracking only · Prices spread-adjusted
         </footer>
+      </div>
+    </div>
+  );
+}
+
+function ScanReport({ report }: { report: PairReport[] }) {
+  return (
+    <div className="mt-3 border border-border rounded bg-card/60 p-3 animate-fade-in">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+        Scan Report · {report.length} pairs
+      </div>
+      <div className="space-y-2 text-xs">
+        {report.map((p) => (
+          <div key={p.pair} className="border-b border-border/40 pb-2 last:border-b-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold">{p.pair}</span>
+              {p.cached && (
+                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-secondary/60 text-muted-foreground">
+                  cached
+                </span>
+              )}
+              {p.candle_time && (
+                <span className="text-[10px] text-muted-foreground">
+                  last 5m: {new Date(p.candle_time).toISOString().slice(11, 16)} UTC
+                </span>
+              )}
+            </div>
+            <div className="mt-1 space-y-0.5 pl-2">
+              {p.checks.map((c, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span
+                    className={
+                      c.status === "qualified"
+                        ? "text-bull"
+                        : c.status === "filtered"
+                        ? "text-chart-4"
+                        : "text-muted-foreground/60"
+                    }
+                  >
+                    {c.status === "qualified" ? "✓" : c.status === "filtered" ? "⊘" : "—"}
+                  </span>
+                  <span className="text-foreground/80">{c.setup}</span>
+                  {c.direction && (
+                    <span className="text-muted-foreground">({c.direction})</span>
+                  )}
+                  {c.reason && (
+                    <span className="text-muted-foreground italic">— {c.reason}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -288,6 +444,7 @@ function SignalRow({
 }) {
   const long = s.direction === "Long";
   const closed = s.status !== "pending";
+  const orderType = s.order_type ?? (long ? "Buy Limit" : "Sell Limit");
   return (
     <div
       className={`border rounded p-3 transition-colors ${
@@ -295,7 +452,7 @@ function SignalRow({
       }`}
     >
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <span
             className={`px-2 py-0.5 text-xs font-bold rounded ${
               long ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
@@ -307,6 +464,9 @@ function SignalRow({
           <span className="text-xs text-muted-foreground">{s.timeframe}</span>
           <span className="text-xs text-muted-foreground">·</span>
           <span className="text-xs text-foreground/80">{s.setup}</span>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-primary/15 text-primary uppercase tracking-wider">
+            {orderType}
+          </span>
           {s.news_flag && (
             <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-destructive/20 text-destructive">
               NEWS
@@ -327,7 +487,15 @@ function SignalRow({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+      <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider">
+        <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
+        {s.spread_pips != null && <span>· spread {s.spread_pips}p applied</span>}
+        {s.notes?.includes("auto-resolved") && (
+          <span className="text-primary">· auto-resolved</span>
+        )}
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
         <Cell label="ENTRY" value={fmtPrice(s.entry, s.pair)} />
         <Cell label="SL" value={fmtPrice(s.stop_loss, s.pair)} color="bear" />
         <Cell label="TP1" value={fmtPrice(s.tp1, s.pair)} color="bull" />
@@ -427,13 +595,7 @@ function EdgePanel({
                     fontSize: 11,
                   }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="r"
-                  stroke="var(--primary)"
-                  strokeWidth={2}
-                  dot={false}
-                />
+                <Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -445,9 +607,7 @@ function EdgePanel({
           BY SETUP
         </div>
         {stats.summary.length === 0 ? (
-          <div className="text-xs text-muted-foreground py-6 text-center">
-            No closed trades yet
-          </div>
+          <div className="text-xs text-muted-foreground py-6 text-center">No closed trades yet</div>
         ) : (
           <table className="w-full text-xs">
             <thead className="text-[10px] uppercase text-muted-foreground tracking-wider">

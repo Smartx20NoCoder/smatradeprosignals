@@ -59,6 +59,7 @@ export type Database = {
       signals: {
         Row: {
           atr: number | null
+          candle_time: string | null
           closed_at: string | null
           confidence: number
           created_at: string
@@ -67,11 +68,13 @@ export type Database = {
           id: string
           news_flag: boolean
           notes: string | null
+          order_type: string | null
           outcome_r: number | null
           pair: string
           rr: number
           session_score: number
           setup: string
+          spread_pips: number | null
           status: string
           stop_loss: number
           timeframe: string
@@ -80,6 +83,7 @@ export type Database = {
         }
         Insert: {
           atr?: number | null
+          candle_time?: string | null
           closed_at?: string | null
           confidence: number
           created_at?: string
@@ -88,11 +92,13 @@ export type Database = {
           id?: string
           news_flag?: boolean
           notes?: string | null
+          order_type?: string | null
           outcome_r?: number | null
           pair: string
           rr: number
           session_score: number
           setup: string
+          spread_pips?: number | null
           status?: string
           stop_loss: number
           timeframe: string
@@ -101,6 +107,7 @@ export type Database = {
         }
         Update: {
           atr?: number | null
+          candle_time?: string | null
           closed_at?: string | null
           confidence?: number
           created_at?: string
@@ -109,11 +116,13 @@ export type Database = {
           id?: string
           news_flag?: boolean
           notes?: string | null
+          order_type?: string | null
           outcome_r?: number | null
           pair?: string
           rr?: number
           session_score?: number
           setup?: string
+          spread_pips?: number | null
           status?: string
           stop_loss?: number
           timeframe?: string
