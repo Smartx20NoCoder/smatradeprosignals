@@ -473,7 +473,7 @@ Deno.serve(async (req) => {
           return null;
         }
       }));
-      for (const r of results) if (r) pairData[r.pair] = r; else pairData[chunk[results.indexOf(r)]] = null;
+      results.forEach((r, idx) => { if (r) pairData[r.pair] = r; else pairData[chunk[idx]] = null; });
       if (i + CHUNK < PAIRS.length && hitNetwork) {
         await new Promise(res => setTimeout(res, 61_000));
       }
