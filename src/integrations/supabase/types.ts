@@ -65,12 +65,17 @@ export type Database = {
           created_at: string
           direction: string
           entry: number
+          executed_at: string | null
+          htf_bias: string | null
           id: string
+          mfi_divergence: boolean
+          mfi_score: number | null
           news_flag: boolean
           notes: string | null
           order_type: string | null
           outcome_r: number | null
           pair: string
+          partial_close: boolean
           rr: number
           session_score: number
           setup: string
@@ -89,12 +94,17 @@ export type Database = {
           created_at?: string
           direction: string
           entry: number
+          executed_at?: string | null
+          htf_bias?: string | null
           id?: string
+          mfi_divergence?: boolean
+          mfi_score?: number | null
           news_flag?: boolean
           notes?: string | null
           order_type?: string | null
           outcome_r?: number | null
           pair: string
+          partial_close?: boolean
           rr: number
           session_score: number
           setup: string
@@ -113,12 +123,17 @@ export type Database = {
           created_at?: string
           direction?: string
           entry?: number
+          executed_at?: string | null
+          htf_bias?: string | null
           id?: string
+          mfi_divergence?: boolean
+          mfi_score?: number | null
           news_flag?: boolean
           notes?: string | null
           order_type?: string | null
           outcome_r?: number | null
           pair?: string
+          partial_close?: boolean
           rr?: number
           session_score?: number
           setup?: string
