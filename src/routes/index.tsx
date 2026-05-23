@@ -40,18 +40,21 @@ type PairReport = { pair: string; cached: boolean; candle_time?: string; htf_bia
 type ScanResult = { when: string; new: number; used: number; today: number; mode: string; errors: string[]; report: PairReport[] };
 
 const DAILY_BUDGET = 800;
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "USD/CHF"];
+const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
 const MAX_CONCURRENT = 3;
+const EXPIRE_HOURS = 24;
 
-// Correlation pairs (same direction → blocked)
+// Correlation pairs (same direction → blocked when one is In-Trade)
 const CORRELATIONS: [string, string][] = [
   ["EUR/USD", "GBP/USD"],
   ["GBP/JPY", "EUR/JPY"],
 ];
 
 function isGold(p: string) { return p === "XAU/USD"; }
+function isBTC(p: string) { return p === "BTC/USD"; }
 function fmtPrice(p: number, pair: string) {
   if (isGold(pair)) return p.toFixed(2);
+  if (isBTC(pair)) return p.toFixed(1);
   return p.toFixed(pair.includes("JPY") ? 3 : 5);
 }
 function fmtCandle(iso: string | null, tf: string) {
@@ -68,26 +71,41 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d`;
 }
 
-// Beep using WebAudio (no asset import needed)
+// Loud multi-tone WebAudio alert for new signals
 function playBeep() {
   try {
     const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
     const ctx = new Ctx();
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = "sine"; o.frequency.value = 880;
-    o.connect(g); g.connect(ctx.destination);
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.55);
-    o.start(); o.stop(ctx.currentTime + 0.6);
-    setTimeout(() => ctx.close(), 700);
+    // Three ascending tones, each loud and sustained
+    const tones = [
+      { f: 880, start: 0.00, dur: 0.30 },
+      { f: 1320, start: 0.35, dur: 0.30 },
+      { f: 1760, start: 0.70, dur: 0.55 },
+    ];
+    const master = ctx.createGain();
+    master.gain.value = 0.9; // near-max
+    master.connect(ctx.destination);
+    for (const t of tones) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "square"; // square wave = more cut-through than sine
+      o.frequency.value = t.f;
+      o.connect(g); g.connect(master);
+      const s = ctx.currentTime + t.start;
+      g.gain.setValueAtTime(0.0001, s);
+      g.gain.exponentialRampToValueAtTime(0.8, s + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, s + t.dur);
+      o.start(s); o.stop(s + t.dur + 0.02);
+    }
+    setTimeout(() => ctx.close(), 1600);
   } catch { /* ignore */ }
 }
 
 // Stage helpers
+const CLOSED_STATUSES = ["tp1", "tp2", "be", "loss", "win", "expired"];
 function stageOf(s: Signal): 1 | 2 | 3 {
-  if (["tp1", "tp2", "be", "loss", "win"].includes(s.status)) return 3;
-  if (s.status === "executed" || s.executed_at) return 2;
+  if (CLOSED_STATUSES.includes(s.status)) return 3;
+  if (s.status === "executed") return 2;
   return 1;
 }
 
