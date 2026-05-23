@@ -381,7 +381,7 @@ function ScalpEdge() {
         </nav>
 
         {tab === "signals" && (
-          <SignalList signals={signals} onStage={setStage} exposureCheck={exposureCheck} />
+          <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be} exposureCheck={exposureCheck} />
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
         {tab === "settings" && (
