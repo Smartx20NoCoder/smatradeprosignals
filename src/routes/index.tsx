@@ -446,11 +446,14 @@ function ScanReport({ report }: { report: PairReport[] }) {
   );
 }
 
+type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
+
 function SignalList({
-  signals, onStage, exposureCheck,
+  signals, onStatus, onPartial, exposureCheck,
 }: {
   signals: Signal[];
-  onStage: (s: Signal, action: "execute" | "tp1" | "tp2" | "be" | "loss" | "partial-tp1-be" | "reset") => void;
+  onStatus: (s: Signal, status: StatusKey) => void;
+  onPartial: (s: Signal) => void;
   exposureCheck: (s: Signal) => string | null;
 }) {
   if (signals.length === 0) {
@@ -464,25 +467,30 @@ function SignalList({
   return (
     <div className="mt-4 space-y-2">
       {signals.map((s) => (
-        <SignalRow key={s.id} s={s} onStage={onStage} warning={stageOf(s) === 1 ? exposureCheck(s) : null} />
+        <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
+          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null} />
       ))}
     </div>
   );
 }
 
 function SignalRow({
-  s, onStage, warning,
+  s, onStatus, onPartial, warning,
 }: {
   s: Signal;
-  onStage: (s: Signal, action: "execute" | "tp1" | "tp2" | "be" | "loss" | "partial-tp1-be" | "reset") => void;
+  onStatus: (s: Signal, status: StatusKey) => void;
+  onPartial: (s: Signal) => void;
   warning: string | null;
 }) {
   const long = s.direction === "Long";
   const stage = stageOf(s);
   const orderType = s.order_type ?? (long ? "Buy Limit" : "Sell Limit");
   const spreadLabel = s.spread_pips != null
-    ? (isGold(s.pair) ? `$0.40 spread` : `${s.spread_pips}p spread`)
+    ? (isGold(s.pair) ? `$0.40 spread` : isBTC(s.pair) ? `$2.00 spread` : `${s.spread_pips}p spread`)
     : null;
+
+  // Correlation blocks moving to In-Trade
+  const blockedExecute = warning && s.status === "pending";
 
   return (
     <div className={`border rounded p-3 transition-colors ${
@@ -532,7 +540,6 @@ function SignalRow({
       <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
         {spreadLabel && <span>· {spreadLabel} applied</span>}
-        {s.notes?.includes("auto-resolved") && <span className="text-primary">· auto-resolved</span>}
       </div>
 
       <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
@@ -543,43 +550,36 @@ function SignalRow({
         <Cell label="R:R" value={`1 : ${s.rr.toFixed(1)}`} />
       </div>
 
-      {/* Stage flow */}
+      {warning && (
+        <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+          ⚠ {warning}
+        </div>
+      )}
+
+      {/* Manual status tiles — clickable at any time */}
       <div className="mt-3">
-        <StageFlow stage={stage} />
-        {warning && stage === 1 && (
-          <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
-            ⚠ {warning}
-          </div>
-        )}
-        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-          {stage === 1 && (
-            <button onClick={() => onStage(s, "execute")}
-              className="px-3 py-1 text-[10px] uppercase tracking-wider rounded border border-primary text-primary hover:bg-primary/15">
-              ✓ Mark Entry Filled
-            </button>
-          )}
-          {stage === 2 && (
-            <>
-              <button onClick={() => onStage(s, "tp1")} className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-bull text-bull hover:bg-bull/15">TP1 Hit</button>
-              <button onClick={() => onStage(s, "tp2")} className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-bull text-bull hover:bg-bull/15">TP2 Hit</button>
-              <button onClick={() => onStage(s, "partial-tp1-be")} className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-chart-4 text-chart-4 hover:bg-chart-4/15">TP1 + BE runner</button>
-              <button onClick={() => onStage(s, "be")} className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-border text-muted-foreground hover:text-foreground">BE</button>
-              <button onClick={() => onStage(s, "loss")} className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-bear text-bear hover:bg-bear/15">SL Hit</button>
-              <button onClick={() => onStage(s, "reset")} className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider rounded text-muted-foreground hover:text-foreground">↺ Undo</button>
-            </>
-          )}
-          {stage === 3 && (
-            <>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{s.status}</span>
-              {s.outcome_r !== null && (
-                <span className="text-xs font-bold" style={{
-                  color: s.outcome_r > 0 ? "var(--bull)" : s.outcome_r < 0 ? "var(--bear)" : "var(--muted-foreground)"
-                }}>
-                  {s.outcome_r > 0 ? "+" : ""}{s.outcome_r.toFixed(2)}R
-                </span>
-              )}
-              <button onClick={() => onStage(s, "reset")} className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider rounded text-muted-foreground hover:text-foreground">↺ Reopen</button>
-            </>
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Status — click to set</div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+          <StatusTile label="Pending"  active={s.status === "pending"}  onClick={() => onStatus(s, "pending")} />
+          <StatusTile label="In-Trade" active={s.status === "executed"} onClick={() => onStatus(s, "executed")}
+            disabled={!!blockedExecute && s.status !== "executed"} tone="primary" />
+          <StatusTile label="TP 1"     active={s.status === "tp1" && !s.partial_close} onClick={() => onStatus(s, "tp1")} tone="bull" />
+          <StatusTile label="TP 2"     active={s.status === "tp2"}     onClick={() => onStatus(s, "tp2")} tone="bull" />
+          <StatusTile label="BE"       active={s.status === "be"}      onClick={() => onStatus(s, "be")} />
+          <StatusTile label="SL"       active={s.status === "loss"}    onClick={() => onStatus(s, "loss")} tone="bear" />
+          <StatusTile label="Expired"  active={s.status === "expired"} onClick={() => onStatus(s, "expired")} />
+        </div>
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+          <button onClick={() => onPartial(s)}
+            className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/15">
+            TP1 + BE runner (partial)
+          </button>
+          {stage === 3 && s.outcome_r !== null && (
+            <span className="text-xs font-bold" style={{
+              color: s.outcome_r > 0 ? "var(--bull)" : s.outcome_r < 0 ? "var(--bear)" : "var(--muted-foreground)"
+            }}>
+              {s.outcome_r > 0 ? "+" : ""}{s.outcome_r.toFixed(2)}R
+            </span>
           )}
         </div>
       </div>
@@ -587,27 +587,39 @@ function SignalRow({
   );
 }
 
-function StageFlow({ stage }: { stage: 1 | 2 | 3 }) {
-  const steps = [
-    { n: 1, label: "Signal" },
-    { n: 2, label: "Executed" },
-    { n: 3, label: "Exit" },
-  ];
+function StatusTile({
+  label, active, onClick, tone, disabled,
+}: {
+  label: string; active: boolean; onClick: () => void;
+  tone?: "primary" | "bull" | "bear"; disabled?: boolean;
+}) {
+  const toneColor = tone === "bull" ? "bull" : tone === "bear" ? "bear" : tone === "primary" ? "primary" : "foreground";
+  const activeCls =
+    tone === "bull" ? "bg-bull/20 border-bull text-bull"
+    : tone === "bear" ? "bg-bear/20 border-bear text-bear"
+    : tone === "primary" ? "bg-primary/20 border-primary text-primary"
+    : "bg-secondary border-foreground text-foreground";
+  const idleCls =
+    tone === "bull" ? "border-border text-muted-foreground hover:border-bull hover:text-bull"
+    : tone === "bear" ? "border-border text-muted-foreground hover:border-bear hover:text-bear"
+    : tone === "primary" ? "border-border text-muted-foreground hover:border-primary hover:text-primary"
+    : "border-border text-muted-foreground hover:text-foreground";
   return (
-    <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider">
-      {steps.map((s, i) => (
-        <div key={s.n} className="flex items-center gap-1">
-          <span className={`px-1.5 py-0.5 rounded ${
-            stage >= s.n ? "bg-primary/20 text-primary" : "bg-secondary/40 text-muted-foreground"
-          }`}>
-            {s.n}. {s.label}
-          </span>
-          {i < steps.length - 1 && <span className={stage > s.n ? "text-primary" : "text-muted-foreground/40"}>→</span>}
-        </div>
-      ))}
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? "Blocked by correlation rule" : `Set status to ${label}`}
+      data-tone={toneColor}
+      className={`px-2 py-1.5 text-[10px] uppercase tracking-wider font-semibold rounded border transition-colors ${
+        active ? activeCls : idleCls
+      } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+    >
+      {label}
+    </button>
   );
 }
+
 
 function Cell({ label, value, color }: { label: string; value: string; color?: "bull" | "bear" }) {
   return (
