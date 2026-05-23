@@ -160,15 +160,7 @@ function ScalpEdge() {
   }
 
   useEffect(() => {
-    (async () => {
-      await loadSignals();
-      if (autoResolvedRef.current) return;
-      autoResolvedRef.current = true;
-      try {
-        await supabase.functions.invoke("resolve-signals");
-        await loadSignals();
-      } catch { /* silent */ }
-    })();
+    loadSignals();
   }, []);
 
   async function runScan(mode: "full" | "latest" = "full") {
@@ -234,35 +226,18 @@ function ScalpEdge() {
     };
   }, [autoScan, autoInterval]);
 
-  async function setStage(s: Signal, action: "execute" | "tp1" | "tp2" | "be" | "loss" | "partial-tp1-be" | "reset") {
-    if (action === "execute") {
-      await supabase.from("signals")
-        .update({ status: "executed", executed_at: new Date().toISOString() })
-        .eq("id", s.id);
-      await loadSignals();
-      return;
-    }
-    if (action === "reset") {
-      await supabase.from("signals")
-        .update({ status: "pending", executed_at: null, partial_close: false })
-        .eq("id", s.id);
-      await loadSignals();
-      return;
-    }
-    if (action === "partial-tp1-be") {
-      // TP1 hit, runner moved to BE → outcome = (TP1 R + 0) / 2 effectively, but spec says reflect partial.
-      // We log TP1 result = +R from TP1 portion, BE on remainder. Final outcome = average (assume 50/50 size).
-      const risk = Math.abs(s.entry - s.stop_loss);
-      const tp1R = risk > 0 ? Math.abs(s.tp1 - s.entry) / risk : 0;
-      const blended = +(tp1R / 2).toFixed(2);
-      await supabase.from("signals")
-        .update({ status: "tp1", partial_close: true, outcome_r: blended, closed_at: new Date().toISOString() })
-        .eq("id", s.id);
-      await loadSignals();
-      return;
-    }
-    // tp1/tp2/be/loss
-    await supabase.functions.invoke("update-signal", { body: { id: s.id, status: action } });
+  // Manual status setter — user can click any tile at any time to correct outcome.
+  async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
+    await supabase.functions.invoke("update-signal", { body: { id: s.id, status } });
+    await loadSignals();
+  }
+  async function markPartialTp1Be(s: Signal) {
+    const risk = Math.abs(s.entry - s.stop_loss);
+    const tp1R = risk > 0 ? Math.abs(s.tp1 - s.entry) / risk : 0;
+    const blended = +(tp1R / 2).toFixed(2);
+    await supabase.from("signals")
+      .update({ status: "tp1", partial_close: true, outcome_r: blended, closed_at: new Date().toISOString() })
+      .eq("id", s.id);
     await loadSignals();
   }
 
