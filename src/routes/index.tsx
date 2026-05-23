@@ -124,7 +124,7 @@ function ScalpEdge() {
   const [autoInterval, setAutoInterval] = useState<15 | 30>(30);
   const [soundOn, setSoundOn] = useState(true);
 
-  const autoResolvedRef = useRef(false);
+  // (auto-resolve removed — statuses are manual)
   const autoTimerRef = useRef<number | null>(null);
   const lastSignalCountRef = useRef(0);
 
