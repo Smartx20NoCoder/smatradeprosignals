@@ -1,8 +1,8 @@
-// ScalpEdge scan engine v2
-// 7 pairs (XAU/USD replaces GBP/CHF), 5 setups (EMA Pullback, BOS Retest,
-// Session Range Break, SMC, CHOCH), 1H HTF bias filter, MFI confirmation,
-// spread cushion, correlation-aware. Latest-only mode minimizes API calls
-// for auto-scans.
+// ScalpEdge scan engine v3
+// 7 pairs (XAU/USD + BTC/USD replace GBP/CHF + USD/CHF), 5 setups, 1H HTF bias filter,
+// MFI confirmation, spread cushion. Sequential per-pair fetch with ~8.5s spacing
+// to respect TwelveData 8 calls/min free tier. One signal per pair per direction
+// (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -10,7 +10,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "USD/CHF"];
+const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -18,28 +18,35 @@ const TFS = [
 ];
 const CACHE_TTL_MIN = 10;
 const DAILY_BUDGET = 800;
+// Spacing between API-touching pair fetches: 8.5s → ~7 pairs/min < 8/min limit.
+const PAIR_SPACING_MS = 8500;
 
-// Spread cushion: pips for FX, absolute $ for gold.
+// Spread cushion: pips for FX, absolute $ for gold/BTC.
 const SPREAD_PIPS: Record<string, number> = {
-  "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2, "USD/CHF": 1.2,
+  "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2,
   "GBP/JPY": 2.5, "EUR/JPY": 2.5,
 };
 const XAU_SPREAD = 0.40; // USD
+const BTC_SPREAD = 2.00; // USD
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
 
 const isGold = (p: string) => p === "XAU/USD";
+const isBTC = (p: string) => p === "BTC/USD";
 function pipSize(pair: string): number {
-  if (isGold(pair)) return 0.01; // gold "pip" = $0.01
+  if (isGold(pair)) return 0.01;
+  if (isBTC(pair)) return 1.0;
   return pair.includes("JPY") ? 0.01 : 0.0001;
 }
 function spreadPrice(pair: string): number {
   if (isGold(pair)) return XAU_SPREAD;
+  if (isBTC(pair)) return BTC_SPREAD;
   return (SPREAD_PIPS[pair] ?? 1.5) * pipSize(pair);
 }
 function spreadDisplay(pair: string): number {
-  // Display value: pips for FX, "40" for gold ($0.40 = 40 cents)
-  return isGold(pair) ? 40 : (SPREAD_PIPS[pair] ?? 1.5);
+  if (isGold(pair)) return 40;
+  if (isBTC(pair)) return 200; // $2.00 = 200 cents
+  return SPREAD_PIPS[pair] ?? 1.5;
 }
 
 // ---------- Indicators ----------
@@ -59,7 +66,6 @@ function atr(c: Candle[], period = 14): number {
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 function mfi(c: Candle[], period = 14): { value: number; series: number[] } {
-  // Tick volume MFI. If volume missing, fall back to range-as-proxy.
   if (c.length < period + 2) return { value: 50, series: [] };
   const series: number[] = [];
   for (let end = period + 1; end <= c.length; end++) {
@@ -95,6 +101,7 @@ function sessionScore(pair: string, dUTC: Date): number {
   const isLondon = h >= 7 && h < 12;
   const isNY = h >= 16 && h < 21;
   const isAsian = h >= 0 && h < 7;
+  if (isBTC(pair)) return 70; // crypto 24/7
   if (isOverlap) return 95;
   if (isGold(pair) && (isLondon || isNY)) return 90;
   if (isGold(pair) && isAsian) return 30;
@@ -146,15 +153,16 @@ async function fetchCandles(
     o: +v.open, h: +v.high, l: +v.low, c: +v.close,
     v: v.volume ? +v.volume : undefined,
   })).reverse();
-  // Merge with prior cache so latest-only mode still has history
   if (cached) {
     const prev = cached.candles as Candle[];
     const merged = [...prev];
     const seen = new Set(merged.map((x) => x.t));
-    for (const f of fresh) if (!seen.has(f.t)) merged.push(f);
-    else {
-      const idx = merged.findIndex((x) => x.t === f.t);
-      if (idx >= 0) merged[idx] = f;
+    for (const f of fresh) {
+      if (!seen.has(f.t)) merged.push(f);
+      else {
+        const idx = merged.findIndex((x) => x.t === f.t);
+        if (idx >= 0) merged[idx] = f;
+      }
     }
     merged.sort((a, b) => a.t - b.t);
     fresh = merged.slice(-200);
@@ -260,7 +268,6 @@ function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
   return null;
 }
 
-// SMC: Order Block + FVG retest
 function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   if (c5.length < 40) return null;
   const a = atr(c5); if (a === 0) return null;
@@ -268,21 +275,17 @@ function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | n
   const e50_15 = ema(c15.map(x => x.c), 50).at(-1)!;
   const last = c5.at(-1)!;
   const ct = new Date(last.t).toISOString();
-  // Find a recent strong impulse (3+ candles same direction, body > 0.7*ATR each)
   for (let i = c5.length - 4; i >= c5.length - 20 && i >= 3; i--) {
     const seq = c5.slice(i - 2, i + 1);
     const bullSeq = seq.every(x => x.c > x.o && (x.c - x.o) > a * 0.5);
     const bearSeq = seq.every(x => x.c < x.o && (x.o - x.c) > a * 0.5);
     if (!bullSeq && !bearSeq) continue;
-    // Order Block = the last opposite-color candle right before the impulse
     let obIdx = i - 3;
     while (obIdx >= 0 && ((bullSeq && c5[obIdx].c > c5[obIdx].o) || (bearSeq && c5[obIdx].c < c5[obIdx].o))) obIdx--;
     if (obIdx < 0) continue;
     const ob = c5[obIdx];
-    // Look for FVG: gap between c5[obIdx+1].h and c5[obIdx+3].l (bull) or vice versa
     const fvgBull = bullSeq && obIdx + 3 < c5.length && c5[obIdx + 1].h < c5[obIdx + 3].l;
     const fvgBear = bearSeq && obIdx + 3 < c5.length && c5[obIdx + 1].l > c5[obIdx + 3].h;
-    // Price must be retesting OB now
     if (bullSeq && e21_15 > e50_15 && last.l <= ob.h && last.l >= ob.l && last.c > last.o) {
       const entry = ob.h, sl = ob.l - a * 0.3, risk = entry - sl;
       if (risk <= 0) return null;
@@ -299,12 +302,9 @@ function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | n
   return null;
 }
 
-// CHOCH: change of character — most recent swing high broken in downtrend (or vice versa)
-// after a liquidity sweep.
 function choch(pair: string, c5: Candle[]): RawSignal | null {
   if (c5.length < 30) return null;
   const a = atr(c5); if (a === 0) return null;
-  // Identify pivots in the last 25 candles
   const window = c5.slice(-25);
   const highs: { i: number; v: number }[] = [], lows: { i: number; v: number }[] = [];
   for (let i = 2; i < window.length - 2; i++) {
@@ -318,7 +318,6 @@ function choch(pair: string, c5: Candle[]): RawSignal | null {
   const ct = new Date(last.t).toISOString();
   const lh1 = highs.at(-1)!, lh2 = highs.at(-2)!;
   const ll1 = lows.at(-1)!, ll2 = lows.at(-2)!;
-  // Bearish-to-bullish CHOCH: lower lows pattern, then sweep ll1 and break lh1
   const sweptLow = window.some((x, i) => i > ll1.i && x.l < ll1.v);
   const brokeHigh = last.c > lh1.v;
   if (lh1.v < lh2.v && ll1.v < ll2.v && sweptLow && brokeHigh) {
@@ -338,11 +337,9 @@ function choch(pair: string, c5: Candle[]): RawSignal | null {
   return null;
 }
 
-// MFI confirmation: returns boost (-10..+15)
 function mfiBoost(c5: Candle[], dir: "Long" | "Short"): { value: number; div: boolean; boost: number } {
   const m = mfi(c5);
   const v = m.value;
-  // Divergence: last 10 candles, price makes LL/HH but MFI doesn't (or vice versa)
   let div = false;
   if (m.series.length >= 10) {
     const ps = c5.slice(-10).map(x => x.c);
@@ -364,12 +361,22 @@ function mfiBoost(c5: Candle[], dir: "Long" | "Short"): { value: number; div: bo
   return { value: +v.toFixed(1), div, boost };
 }
 
-function orderTypeFor(dir: "Long" | "Short", entry: number, currentPrice: number): string {
-  // Buy Limit: price has passed entry going up (current > entry, retrace down to enter long)
-  // Wait — Buy Limit means price must drop to entry. So: long entry < current → Buy Limit.
-  // Buy Stop: long entry > current → wait for breakout up.
-  if (dir === "Long") return entry < currentPrice ? "Buy Limit" : "Buy Stop";
-  return entry > currentPrice ? "Sell Limit" : "Sell Stop";
+// Stop vs Limit rule (using spread-adjusted entry):
+// - If entry is BEYOND current price in the trade's direction (price must move
+//   further to trigger), it's a STOP order.
+// - If price has already PASSED the entry level, it's a LIMIT order
+//   (we wait for retrace back to entry).
+function orderTypeFor(dir: "Long" | "Short", entry: number, currentPrice: number, atrVal: number): string {
+  // tiny tolerance so a near-zero gap doesn't flip the label
+  const tol = atrVal * 0.05;
+  if (dir === "Long") {
+    if (entry > currentPrice + tol) return "Buy Stop";   // price needs to rise to entry
+    if (entry < currentPrice - tol) return "Buy Limit";  // price already above entry, wait retrace
+    return "Buy Market";
+  }
+  if (entry < currentPrice - tol) return "Sell Stop";    // price needs to fall to entry
+  if (entry > currentPrice + tol) return "Sell Limit";   // price already below entry, wait retrace
+  return "Sell Market";
 }
 
 type Signal = RawSignal & {
@@ -383,10 +390,9 @@ function qualifyAndScore(
 ): { signal: Signal | null; reason?: string } {
   const pair = raw.pair, ps = pipSize(pair), a = raw.atr;
   const atrPips = a / ps;
-  const minAtrPips = isGold(pair) ? 80 : 4; // gold: $0.80
+  const minAtrPips = isGold(pair) ? 80 : isBTC(pair) ? 20 : 4;
   if (atrPips < minAtrPips) return { signal: null, reason: `ATR too flat (${atrPips.toFixed(1)})` };
 
-  // HTF bias filter: setup direction must align with 1H bias (neutral allowed)
   if (bias === "bull" && raw.direction === "Short") return { signal: null, reason: "Against 1H bias (1H bull)" };
   if (bias === "bear" && raw.direction === "Long") return { signal: null, reason: "Against 1H bias (1H bear)" };
 
@@ -417,7 +423,7 @@ function qualifyAndScore(
     signal: {
       ...raw, entry, stop_loss: sl, tp1, tp2, rr: +rr.toFixed(2),
       session_score: ss, confidence: conf, news_flag: news,
-      order_type: orderTypeFor(raw.direction, entry, currentPrice),
+      order_type: orderTypeFor(raw.direction, entry, currentPrice, a),
       spread_pips: sDisp, htf_bias: bias, mfi_score: mb.value, mfi_divergence: mb.div,
     },
   };
@@ -435,7 +441,6 @@ Deno.serve(async (req) => {
     let body: { mode?: "full" | "latest" } = {};
     try { body = await req.json(); } catch { /* GET ok */ }
     const mode = body.mode === "latest" ? "latest" : "full";
-    // Latest mode: small outputsize, only 5m + 15m (skip 1H — use cached). Full: 80 candles all 3 TFs.
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
 
@@ -449,36 +454,38 @@ Deno.serve(async (req) => {
 
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
     const pairData: Record<string, PD | null> = {};
-    const CHUNK = 3; // 3 pairs * up to 3 TFs = up to 9 calls per chunk; under 8/min limit when some cached
 
-    for (let i = 0; i < PAIRS.length; i += CHUNK) {
-      const chunk = PAIRS.slice(i, i + CHUNK);
+    // Sequential per-pair fetch with rate-limit spacing.
+    for (let pi = 0; pi < PAIRS.length; pi++) {
+      const pair = PAIRS[pi];
       let hitNetwork = false;
-      const results = await Promise.all(chunk.map(async (pair) => {
-        try {
-          const fetches = await Promise.all(tfsToFetch.map(tf => fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label))));
-          const used = fetches.reduce((a, b) => a + b.usedApi, 0);
-          apiCalls += used;
-          if (fetches.some(f => !f.cached)) hitNetwork = true;
-          // For latest mode, pull 1H from cache if missing
-          let c1h: Candle[] = [];
-          if (tfsToFetch.length < 3) {
-            const { data } = await supabase.from("candle_cache").select("candles")
-              .eq("pair", pair).eq("timeframe", "1h").maybeSingle();
-            c1h = (data?.candles as Candle[]) ?? [];
-          } else c1h = fetches[2].candles;
-          return { pair, c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
-        } catch (e) {
-          errors.push(`${pair}: ${(e as Error).message}`);
-          return null;
+      try {
+        const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+        for (const tf of tfsToFetch) {
+          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label));
+          fetches.push(f);
+          apiCalls += f.usedApi;
+          if (!f.cached) hitNetwork = true;
         }
-      }));
-      results.forEach((r, idx) => { if (r) pairData[r.pair] = r; else pairData[chunk[idx]] = null; });
-      if (i + CHUNK < PAIRS.length && hitNetwork) {
-        await new Promise(res => setTimeout(res, 61_000));
+        let c1h: Candle[] = [];
+        if (tfsToFetch.length < 3) {
+          const { data } = await supabase.from("candle_cache").select("candles")
+            .eq("pair", pair).eq("timeframe", "1h").maybeSingle();
+          c1h = (data?.candles as Candle[]) ?? [];
+        } else c1h = fetches[2].candles;
+        pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
+      } catch (e) {
+        errors.push(`${pair}: ${(e as Error).message}`);
+        pairData[pair] = null;
+      }
+      // Space out only if we actually hit the network AND more pairs remain
+      if (hitNetwork && pi < PAIRS.length - 1) {
+        await new Promise((res) => setTimeout(res, PAIR_SPACING_MS));
       }
     }
 
+    // Build candidate signals (may contain multiple per pair+direction)
+    const candidates: Signal[] = [];
     for (const pair of PAIRS) {
       const d = pairData[pair];
       const pairReport = {
@@ -507,18 +514,36 @@ Deno.serve(async (req) => {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
           pairReport.checks.push({ setup: name, status: "qualified", direction: q.signal.direction });
-          signals.push(q.signal);
+          candidates.push(q.signal);
         }
       }
       report.push(pairReport);
     }
 
-    // Dedupe vs last 60min same pair+setup+direction
+    // One signal per pair per direction → keep highest confidence; merge setup names
+    const byKey = new Map<string, Signal>();
+    for (const s of candidates) {
+      const key = `${s.pair}|${s.direction}`;
+      const existing = byKey.get(key);
+      if (!existing) { byKey.set(key, s); continue; }
+      if (s.confidence > existing.confidence) {
+        s.setup = `${s.setup} + ${existing.setup}`;
+        byKey.set(key, s);
+      } else {
+        existing.setup = `${existing.setup} + ${s.setup}`;
+      }
+    }
+    const merged = Array.from(byKey.values());
+    signals.push(...merged);
+
+    // Dedupe vs last 60min same pair+direction (any setup)
     const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data: recent } = await supabase.from("signals")
-      .select("pair, setup, direction").gte("created_at", since);
-    const seen = new Set((recent ?? []).map((r: any) => `${r.pair}|${r.setup}|${r.direction}`));
-    const toInsert = signals.filter(s => !seen.has(`${s.pair}|${s.setup}|${s.direction}`));
+      .select("pair, direction, status").gte("created_at", since);
+    const seen = new Set((recent ?? [])
+      .filter((r: any) => r.status === "pending" || r.status === "executed")
+      .map((r: any) => `${r.pair}|${r.direction}`));
+    const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
     if (toInsert.length) await supabase.from("signals").insert(toInsert);
 
     const day = new Date().toISOString().slice(0, 10);

@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
   try {
     const { id, status } = await req.json();
     if (!id || !status) throw new Error("id and status required");
-    const allowed = ["pending", "win", "loss", "be", "tp1", "tp2"];
+    const allowed = ["pending", "executed", "win", "loss", "be", "tp1", "tp2", "expired"];
     if (!allowed.includes(status)) throw new Error("invalid status");
 
     const supabase = createClient(
@@ -18,10 +18,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
     const { data: sig } = await supabase
-      .from("signals")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
+      .from("signals").select("*").eq("id", id).maybeSingle();
     if (!sig) throw new Error("signal not found");
 
     let outcome_r: number | null = null;
@@ -31,15 +28,18 @@ Deno.serve(async (req) => {
       else if (status === "tp2" || status === "win") outcome_r = Math.abs(sig.tp2 - sig.entry) / risk;
       else if (status === "loss") outcome_r = -1;
       else if (status === "be") outcome_r = 0;
+      else if (status === "expired") outcome_r = 0;
     }
 
     const update: Record<string, unknown> = { status };
-    if (status !== "pending") {
+    if (status === "pending") {
+      update.outcome_r = null; update.closed_at = null; update.executed_at = null; update.partial_close = false;
+    } else if (status === "executed") {
+      update.outcome_r = null; update.closed_at = null;
+      update.executed_at = new Date().toISOString();
+    } else {
       update.outcome_r = outcome_r;
       update.closed_at = new Date().toISOString();
-    } else {
-      update.outcome_r = null;
-      update.closed_at = null;
     }
 
     const { error } = await supabase.from("signals").update(update).eq("id", id);
@@ -49,8 +49,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
