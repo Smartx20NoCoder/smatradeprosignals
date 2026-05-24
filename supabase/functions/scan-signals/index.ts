@@ -477,18 +477,12 @@ function qualifyAndScore(
   };
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
-    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    let body: { mode?: "full" | "latest" } = {};
-    try { body = await req.json(); } catch { /* GET ok */ }
-    const mode = body.mode === "latest" ? "latest" : "full";
+async function runScanJob(
+  supabase: ReturnType<typeof createClient>,
+  tdKey: string,
+  mode: "full" | "latest",
+  emit?: ProgressEmitter,
+) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
 
@@ -503,17 +497,16 @@ Deno.serve(async (req) => {
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
-    // Sequential per-pair fetch with rate-limit spacing.
+    // Sequential pair loop; each pair+timeframe fetch is independently throttled.
     for (let pi = 0; pi < PAIRS.length; pi++) {
       const pair = PAIRS[pi];
-      let hitNetwork = false;
+      emit?.({ type: "pair_start", pair, status: "pending", message: `Analyzing ${pair}` });
       try {
         const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label));
+          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label), emit);
           fetches.push(f);
           apiCalls += f.usedApi;
-          if (!f.cached) hitNetwork = true;
         }
         let c1h: Candle[] = [];
         if (tfsToFetch.length < 3) {
@@ -522,13 +515,11 @@ Deno.serve(async (req) => {
           c1h = (data?.candles as Candle[]) ?? [];
         } else c1h = fetches[2].candles;
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
+        emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
-      }
-      // Space out only if we actually hit the network AND more pairs remain
-      if (hitNetwork && pi < PAIRS.length - 1) {
-        await new Promise((res) => setTimeout(res, PAIR_SPACING_MS));
+        emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
       }
     }
 
@@ -600,12 +591,47 @@ Deno.serve(async (req) => {
     await supabase.from("api_usage").upsert(
       { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
 
-    return new Response(JSON.stringify({
+    return {
       signals, new_signals: toInsert.length,
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
+    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    let body: { mode?: "full" | "latest"; stream?: boolean } = {};
+    try { body = await req.json(); } catch { /* GET ok */ }
+    const mode = body.mode === "latest" ? "latest" : "full";
+
+    if (body.stream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (payload: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+          try {
+            const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
+            send({ type: "complete", result });
+            controller.close();
+          } catch (e) {
+            send({ type: "error", error: (e as Error).message });
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
+    }
+
+    const result = await runScanJob(supabase, tdKey, mode);
+    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
