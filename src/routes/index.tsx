@@ -38,6 +38,17 @@ type Signal = {
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
 type PairReport = { pair: string; cached: boolean; candle_time?: string; htf_bias?: string; checks: ReportCheck[] };
 type ScanResult = { when: string; new: number; used: number; today: number; mode: string; errors: string[]; report: PairReport[] };
+type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
+type ProgressItem = { status: ProgressStatus; message?: string; updatedAt?: number };
+type ProgressEvent = {
+  type: "progress" | "pair_start" | "pair_done" | "complete" | "error";
+  pair?: string;
+  timeframe?: string;
+  status?: ProgressStatus;
+  message?: string;
+  result?: any;
+  error?: string;
+};
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
@@ -112,7 +123,8 @@ function stageOf(s: Signal): 1 | 2 | 3 {
 function ScalpEdge() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState<Record<string, "pending" | "checking" | "done">>({});
+  const [scanProgress, setScanProgress] = useState<Record<string, ProgressItem>>({});
+  const [currentFetch, setCurrentFetch] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
