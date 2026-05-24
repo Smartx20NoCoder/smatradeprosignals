@@ -1,8 +1,8 @@
 // ScalpEdge scan engine v3
 // 7 pairs (XAU/USD + BTC/USD replace GBP/CHF + USD/CHF), 5 setups, 1H HTF bias filter,
-// MFI confirmation, spread cushion. Sequential per-pair fetch with ~8.5s spacing
-// to respect TwelveData 8 calls/min free tier. One signal per pair per direction
-// (highest confidence wins).
+// MFI confirmation, spread cushion. Every individual TwelveData call is serialized
+// with an ~8s gap and pair+timeframe candle data is cached for at least 10 minutes.
+// One signal per pair per direction (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -18,8 +18,12 @@ const TFS = [
 ];
 const CACHE_TTL_MIN = 10;
 const DAILY_BUDGET = 800;
-// Spacing between API-touching pair fetches: 8.5s → ~7 pairs/min < 8/min limit.
-const PAIR_SPACING_MS = 8500;
+// Spacing between every individual TwelveData request: 8.2s → safely under 8/min.
+const API_CALL_SPACING_MS = 8200;
+const RATE_LIMIT_RETRY_MS = 60_000;
+const MAX_429_RETRIES = 2;
+let twelveDataQueue: Promise<void> = Promise.resolve();
+let lastTwelveDataCallStartedAt = 0;
 
 // Spread cushion: pips for FX, absolute $ for gold/BTC.
 const SPREAD_PIPS: Record<string, number> = {
@@ -30,6 +34,18 @@ const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
+type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
+type ProgressEvent = {
+  type: "progress" | "pair_start" | "pair_done";
+  pair: string;
+  timeframe?: string;
+  status?: ProgressStatus;
+  message?: string;
+  attempt?: number;
+};
+type ProgressEmitter = (event: ProgressEvent) => void;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isGold = (p: string) => p === "XAU/USD";
 const isBTC = (p: string) => p === "BTC/USD";
