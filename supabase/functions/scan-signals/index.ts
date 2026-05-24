@@ -144,24 +144,55 @@ function newsFlag(dUTC: Date, pair: string): boolean {
 }
 
 // ---------- Data fetch ----------
+async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, context?: { pair: string; timeframe: string }): Promise<Response> {
+  const run = async () => {
+    const waitMs = Math.max(0, API_CALL_SPACING_MS - (Date.now() - lastTwelveDataCallStartedAt));
+    if (waitMs > 0) {
+      emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "waiting", message: `Waiting ${Math.ceil(waitMs / 1000)}s for rate limit slot` });
+      await delay(waitMs);
+    }
+    lastTwelveDataCallStartedAt = Date.now();
+    emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "fetching", message: `Fetching ${context?.pair ?? "market"} ${context?.timeframe ?? "candles"}` });
+    return fetch(url);
+  };
+  const next = twelveDataQueue.then(run, run);
+  twelveDataQueue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
+  emit?: ProgressEmitter,
 ): Promise<{ candles: Candle[]; usedApi: number; cached: boolean }> {
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
   if (cached) {
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
-    if (ageMin < CACHE_TTL_MIN) return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    if (ageMin < CACHE_TTL_MIN) {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cache hit (${ageMin.toFixed(1)}m old)` });
+      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    }
   }
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${apiKey}`;
-  const r = await fetch(url);
-  const j = await r.json();
+  let r: Response | null = null;
+  let usedApi = 0;
+  for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
+    r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+    usedApi += 1;
+    if (r.status !== 429) break;
+    if (attempt > MAX_429_RETRIES) break;
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: "429 rate limit — retrying this call in 60s" });
+    await delay(RATE_LIMIT_RETRY_MS);
+  }
+  if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
+  const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
     throw new Error(`TwelveData ${pair} ${tf.label}: ${JSON.stringify(j).slice(0, 180)}`);
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
@@ -187,7 +218,8 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  return { candles: fresh, usedApi: 1, cached: false };
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: "Fetched and cached" });
+  return { candles: fresh, usedApi, cached: false };
 }
 
 // ---------- Setups ----------
