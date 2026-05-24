@@ -363,19 +363,27 @@ function ScalpEdge() {
 
         {scanning && (
           <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Live Scan</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-mono">
-              {PAIRS.map((p) => {
-                const st = scanProgress[p] ?? "pending";
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live Scan</div>
+              {currentFetch && <div className="text-[10px] uppercase tracking-wider text-primary animate-pulse">Now: {currentFetch}</div>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 text-xs font-mono">
+              {PAIRS.flatMap((p) => scanTimeframes.map((tf) => {
+                const item = scanProgress[`${p}|${tf}`] ?? { status: "pending" as ProgressStatus };
+                const st = item.status;
+                const active = st === "fetching" || st === "waiting" || st === "rate_limited";
                 return (
-                  <div key={p} className="flex items-center gap-2">
-                    <span className={st === "done" ? "text-bull" : st === "checking" ? "text-primary animate-pulse" : "text-muted-foreground/50"}>
-                      {st === "done" ? "✓" : st === "checking" ? "◌" : "·"}
+                  <div key={`${p}|${tf}`} className="flex items-center gap-2 min-w-0" title={item.message}>
+                    <span className={st === "done" || st === "cached" ? "text-bull" : st === "error" || st === "rate_limited" ? "text-chart-4" : active ? "text-primary animate-pulse" : "text-muted-foreground/50"}>
+                      {st === "done" ? "✓" : st === "cached" ? "↺" : st === "error" ? "!" : active ? "◌" : "·"}
                     </span>
-                    <span className={st === "pending" ? "text-muted-foreground/60" : ""}>{p}</span>
+                    <span className={st === "pending" ? "text-muted-foreground/60 truncate" : "truncate"}>{p} {tf}</span>
+                    {st === "cached" && <span className="text-[9px] text-bull uppercase">cache</span>}
+                    {st === "waiting" && <span className="text-[9px] text-primary uppercase">queued</span>}
+                    {st === "rate_limited" && <span className="text-[9px] text-chart-4 uppercase">429 retry</span>}
                   </div>
                 );
-              })}
+              }))}
             </div>
           </div>
         )}
