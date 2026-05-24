@@ -16,7 +16,7 @@ const TFS = [
   { label: "15m", td: "15min" },
   { label: "1h", td: "1h" },
 ];
-const CACHE_TTL_MIN = 10;
+const CACHE_TTL_MIN = 30;
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 8.2s → safely under 8/min.
 const API_CALL_SPACING_MS = 8200;
