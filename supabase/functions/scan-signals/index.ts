@@ -1,8 +1,8 @@
 // ScalpEdge scan engine v3
 // 7 pairs (XAU/USD + BTC/USD replace GBP/CHF + USD/CHF), 5 setups, 1H HTF bias filter,
-// MFI confirmation, spread cushion. Sequential per-pair fetch with ~8.5s spacing
-// to respect TwelveData 8 calls/min free tier. One signal per pair per direction
-// (highest confidence wins).
+// MFI confirmation, spread cushion. Every individual TwelveData call is serialized
+// with an ~8s gap and pair+timeframe candle data is cached for at least 10 minutes.
+// One signal per pair per direction (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -16,10 +16,14 @@ const TFS = [
   { label: "15m", td: "15min" },
   { label: "1h", td: "1h" },
 ];
-const CACHE_TTL_MIN = 10;
+const CACHE_TTL_MIN = 30;
 const DAILY_BUDGET = 800;
-// Spacing between API-touching pair fetches: 8.5s → ~7 pairs/min < 8/min limit.
-const PAIR_SPACING_MS = 8500;
+// Spacing between every individual TwelveData request: 8.2s → safely under 8/min.
+const API_CALL_SPACING_MS = 8200;
+const RATE_LIMIT_RETRY_MS = 60_000;
+const MAX_429_RETRIES = 2;
+let twelveDataQueue: Promise<void> = Promise.resolve();
+let lastTwelveDataCallStartedAt = 0;
 
 // Spread cushion: pips for FX, absolute $ for gold/BTC.
 const SPREAD_PIPS: Record<string, number> = {
@@ -30,6 +34,18 @@ const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
+type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
+type ProgressEvent = {
+  type: "progress" | "pair_start" | "pair_done";
+  pair: string;
+  timeframe?: string;
+  status?: ProgressStatus;
+  message?: string;
+  attempt?: number;
+};
+type ProgressEmitter = (event: ProgressEvent) => void;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isGold = (p: string) => p === "XAU/USD";
 const isBTC = (p: string) => p === "BTC/USD";
@@ -128,24 +144,55 @@ function newsFlag(dUTC: Date, pair: string): boolean {
 }
 
 // ---------- Data fetch ----------
+async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, context?: { pair: string; timeframe: string }): Promise<Response> {
+  const run = async () => {
+    const waitMs = Math.max(0, API_CALL_SPACING_MS - (Date.now() - lastTwelveDataCallStartedAt));
+    if (waitMs > 0) {
+      emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "waiting", message: `Waiting ${Math.ceil(waitMs / 1000)}s for rate limit slot` });
+      await delay(waitMs);
+    }
+    lastTwelveDataCallStartedAt = Date.now();
+    emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "fetching", message: `Fetching ${context?.pair ?? "market"} ${context?.timeframe ?? "candles"}` });
+    return fetch(url);
+  };
+  const next = twelveDataQueue.then(run, run);
+  twelveDataQueue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
+  emit?: ProgressEmitter,
 ): Promise<{ candles: Candle[]; usedApi: number; cached: boolean }> {
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
   if (cached) {
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
-    if (ageMin < CACHE_TTL_MIN) return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    if (ageMin < CACHE_TTL_MIN) {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cache hit (${ageMin.toFixed(1)}m old)` });
+      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    }
   }
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${apiKey}`;
-  const r = await fetch(url);
-  const j = await r.json();
+  let r: Response | null = null;
+  let usedApi = 0;
+  for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
+    r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+    usedApi += 1;
+    if (r.status !== 429) break;
+    if (attempt > MAX_429_RETRIES) break;
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: "429 rate limit — retrying this call in 60s" });
+    await delay(RATE_LIMIT_RETRY_MS);
+  }
+  if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
+  const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
     throw new Error(`TwelveData ${pair} ${tf.label}: ${JSON.stringify(j).slice(0, 180)}`);
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
@@ -171,7 +218,8 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  return { candles: fresh, usedApi: 1, cached: false };
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: "Fetched and cached" });
+  return { candles: fresh, usedApi, cached: false };
 }
 
 // ---------- Setups ----------
@@ -429,18 +477,12 @@ function qualifyAndScore(
   };
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
-    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    let body: { mode?: "full" | "latest" } = {};
-    try { body = await req.json(); } catch { /* GET ok */ }
-    const mode = body.mode === "latest" ? "latest" : "full";
+async function runScanJob(
+  supabase: ReturnType<typeof createClient>,
+  tdKey: string,
+  mode: "full" | "latest",
+  emit?: ProgressEmitter,
+) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
 
@@ -455,17 +497,16 @@ Deno.serve(async (req) => {
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
-    // Sequential per-pair fetch with rate-limit spacing.
+    // Sequential pair loop; each pair+timeframe fetch is independently throttled.
     for (let pi = 0; pi < PAIRS.length; pi++) {
       const pair = PAIRS[pi];
-      let hitNetwork = false;
+      emit?.({ type: "pair_start", pair, status: "pending", message: `Analyzing ${pair}` });
       try {
         const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label));
+          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label), emit);
           fetches.push(f);
           apiCalls += f.usedApi;
-          if (!f.cached) hitNetwork = true;
         }
         let c1h: Candle[] = [];
         if (tfsToFetch.length < 3) {
@@ -474,13 +515,11 @@ Deno.serve(async (req) => {
           c1h = (data?.candles as Candle[]) ?? [];
         } else c1h = fetches[2].candles;
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
+        emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
-      }
-      // Space out only if we actually hit the network AND more pairs remain
-      if (hitNetwork && pi < PAIRS.length - 1) {
-        await new Promise((res) => setTimeout(res, PAIR_SPACING_MS));
+        emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
       }
     }
 
@@ -552,12 +591,47 @@ Deno.serve(async (req) => {
     await supabase.from("api_usage").upsert(
       { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
 
-    return new Response(JSON.stringify({
+    return {
       signals, new_signals: toInsert.length,
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
+    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    let body: { mode?: "full" | "latest"; stream?: boolean } = {};
+    try { body = await req.json(); } catch { /* GET ok */ }
+    const mode = body.mode === "latest" ? "latest" : "full";
+
+    if (body.stream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (payload: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+          try {
+            const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
+            send({ type: "complete", result });
+            controller.close();
+          } catch (e) {
+            send({ type: "error", error: (e as Error).message });
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
+    }
+
+    const result = await runScanJob(supabase, tdKey, mode);
+    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },

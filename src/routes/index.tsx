@@ -38,9 +38,21 @@ type Signal = {
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
 type PairReport = { pair: string; cached: boolean; candle_time?: string; htf_bias?: string; checks: ReportCheck[] };
 type ScanResult = { when: string; new: number; used: number; today: number; mode: string; errors: string[]; report: PairReport[] };
+type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
+type ProgressItem = { status: ProgressStatus; message?: string; updatedAt?: number };
+type ProgressEvent = {
+  type: "progress" | "pair_start" | "pair_done" | "complete" | "error";
+  pair?: string;
+  timeframe?: string;
+  status?: ProgressStatus;
+  message?: string;
+  result?: any;
+  error?: string;
+};
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
+const TFS = ["5m", "15m", "1h"] as const;
 const MAX_CONCURRENT = 3;
 const EXPIRE_HOURS = 24;
 
@@ -112,7 +124,9 @@ function stageOf(s: Signal): 1 | 2 | 3 {
 function ScalpEdge() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState<Record<string, "pending" | "checking" | "done">>({});
+  const [scanProgress, setScanProgress] = useState<Record<string, ProgressItem>>({});
+  const [currentFetch, setCurrentFetch] = useState<string | null>(null);
+  const [scanTimeframes, setScanTimeframes] = useState<string[]>([...TFS]);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
@@ -165,24 +179,46 @@ function ScalpEdge() {
 
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
-    const init: Record<string, "pending" | "checking" | "done"> = {};
-    PAIRS.forEach((p) => (init[p] = "pending"));
+    const activeTfs = mode === "latest" ? ["5m", "15m"] : [...TFS];
+    setScanTimeframes(activeTfs);
+    const init: Record<string, ProgressItem> = {};
+    PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = { status: "pending" })));
     setScanProgress(init);
-    let cancelled = false;
-    (async () => {
-      for (const p of PAIRS) {
-        if (cancelled) return;
-        setScanProgress((s) => ({ ...s, [p]: "checking" }));
-        await new Promise((r) => setTimeout(r, 240));
-      }
-    })();
+    setCurrentFetch(null);
     try {
-      const { data, error } = await supabase.functions.invoke("scan-signals", { body: { mode } });
-      if (error) throw error;
-      cancelled = true;
-      const done: Record<string, "pending" | "checking" | "done"> = {};
-      PAIRS.forEach((p) => (done[p] = "done"));
-      setScanProgress(done);
+      const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const res = await fetch(`${projectUrl}/functions/v1/scan-signals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        body: JSON.stringify({ mode, stream: true }),
+      });
+      if (!res.ok) throw new Error(`Scan failed (${res.status})`);
+      if (!res.body) throw new Error("Live scan stream unavailable");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let data: any = null;
+      const handleEvent = (evt: ProgressEvent) => {
+        if (evt.type === "complete") { data = evt.result; return; }
+        if (evt.type === "error") throw new Error(evt.error ?? "Scan failed");
+        if (!evt.pair || !evt.timeframe || !evt.status) return;
+        const label = `${evt.pair} ${evt.timeframe}`;
+        setCurrentFetch(evt.status === "fetching" || evt.status === "waiting" || evt.status === "rate_limited" ? label : null);
+        setScanProgress((s) => ({ ...s, [`${evt.pair}|${evt.timeframe}`]: { status: evt.status!, message: evt.message, updatedAt: Date.now() } }));
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+        if (done) break;
+      }
+      if (buffer.trim()) handleEvent(JSON.parse(buffer));
+      if (!data) throw new Error("Scan completed without a result");
+
       const result: ScanResult = {
         when: new Date().toISOString(),
         new: data.new_signals ?? 0,
@@ -196,16 +232,15 @@ function ScalpEdge() {
       setReportOpen(true);
       setBudgetToday(data.api_calls_today ?? 0);
       await loadSignals();
-      // Notification beep on new qualifying signals (auto-scan only)
       if (mode === "latest" && soundOn && (data.new_signals ?? 0) > 0) playBeep();
       lastSignalCountRef.current = (data.new_signals ?? 0);
     } catch (e) {
-      cancelled = true;
       setLastScan({
         when: new Date().toISOString(), new: 0, used: 0, today: budgetToday,
         mode, errors: [(e as Error).message], report: [],
       });
     } finally {
+      setCurrentFetch(null);
       setScanning(false);
     }
   }
@@ -328,19 +363,27 @@ function ScalpEdge() {
 
         {scanning && (
           <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Live Scan</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-mono">
-              {PAIRS.map((p) => {
-                const st = scanProgress[p] ?? "pending";
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live Scan</div>
+              {currentFetch && <div className="text-[10px] uppercase tracking-wider text-primary animate-pulse">Now: {currentFetch}</div>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 text-xs font-mono">
+              {PAIRS.flatMap((p) => scanTimeframes.map((tf) => {
+                const item = scanProgress[`${p}|${tf}`] ?? { status: "pending" as ProgressStatus };
+                const st = item.status;
+                const active = st === "fetching" || st === "waiting" || st === "rate_limited";
                 return (
-                  <div key={p} className="flex items-center gap-2">
-                    <span className={st === "done" ? "text-bull" : st === "checking" ? "text-primary animate-pulse" : "text-muted-foreground/50"}>
-                      {st === "done" ? "✓" : st === "checking" ? "◌" : "·"}
+                  <div key={`${p}|${tf}`} className="flex items-center gap-2 min-w-0" title={item.message}>
+                    <span className={st === "done" || st === "cached" ? "text-bull" : st === "error" || st === "rate_limited" ? "text-chart-4" : active ? "text-primary animate-pulse" : "text-muted-foreground/50"}>
+                      {st === "done" ? "✓" : st === "cached" ? "↺" : st === "error" ? "!" : active ? "◌" : "·"}
                     </span>
-                    <span className={st === "pending" ? "text-muted-foreground/60" : ""}>{p}</span>
+                    <span className={st === "pending" ? "text-muted-foreground/60 truncate" : "truncate"}>{p} {tf}</span>
+                    {st === "cached" && <span className="text-[9px] text-bull uppercase">cache</span>}
+                    {st === "waiting" && <span className="text-[9px] text-primary uppercase">queued</span>}
+                    {st === "rate_limited" && <span className="text-[9px] text-chart-4 uppercase">429 retry</span>}
                   </div>
                 );
-              })}
+              }))}
             </div>
           </div>
         )}
