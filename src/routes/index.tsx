@@ -126,6 +126,7 @@ function ScalpEdge() {
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<Record<string, ProgressItem>>({});
   const [currentFetch, setCurrentFetch] = useState<string | null>(null);
+  const [scanTimeframes, setScanTimeframes] = useState<string[]>([...TFS]);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
@@ -178,24 +179,46 @@ function ScalpEdge() {
 
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
-    const init: Record<string, "pending" | "checking" | "done"> = {};
-    PAIRS.forEach((p) => (init[p] = "pending"));
+    const activeTfs = mode === "latest" ? ["5m", "15m"] : [...TFS];
+    setScanTimeframes(activeTfs);
+    const init: Record<string, ProgressItem> = {};
+    PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = { status: "pending" })));
     setScanProgress(init);
-    let cancelled = false;
-    (async () => {
-      for (const p of PAIRS) {
-        if (cancelled) return;
-        setScanProgress((s) => ({ ...s, [p]: "checking" }));
-        await new Promise((r) => setTimeout(r, 240));
-      }
-    })();
+    setCurrentFetch(null);
     try {
-      const { data, error } = await supabase.functions.invoke("scan-signals", { body: { mode } });
-      if (error) throw error;
-      cancelled = true;
-      const done: Record<string, "pending" | "checking" | "done"> = {};
-      PAIRS.forEach((p) => (done[p] = "done"));
-      setScanProgress(done);
+      const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const res = await fetch(`${projectUrl}/functions/v1/scan-signals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        body: JSON.stringify({ mode, stream: true }),
+      });
+      if (!res.ok) throw new Error(`Scan failed (${res.status})`);
+      if (!res.body) throw new Error("Live scan stream unavailable");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let data: any = null;
+      const handleEvent = (evt: ProgressEvent) => {
+        if (evt.type === "complete") { data = evt.result; return; }
+        if (evt.type === "error") throw new Error(evt.error ?? "Scan failed");
+        if (!evt.pair || !evt.timeframe || !evt.status) return;
+        const label = `${evt.pair} ${evt.timeframe}`;
+        setCurrentFetch(evt.status === "fetching" || evt.status === "waiting" || evt.status === "rate_limited" ? label : null);
+        setScanProgress((s) => ({ ...s, [`${evt.pair}|${evt.timeframe}`]: { status: evt.status!, message: evt.message, updatedAt: Date.now() } }));
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+        if (done) break;
+      }
+      if (buffer.trim()) handleEvent(JSON.parse(buffer));
+      if (!data) throw new Error("Scan completed without a result");
+
       const result: ScanResult = {
         when: new Date().toISOString(),
         new: data.new_signals ?? 0,
@@ -209,16 +232,15 @@ function ScalpEdge() {
       setReportOpen(true);
       setBudgetToday(data.api_calls_today ?? 0);
       await loadSignals();
-      // Notification beep on new qualifying signals (auto-scan only)
       if (mode === "latest" && soundOn && (data.new_signals ?? 0) > 0) playBeep();
       lastSignalCountRef.current = (data.new_signals ?? 0);
     } catch (e) {
-      cancelled = true;
       setLastScan({
         when: new Date().toISOString(), new: 0, used: 0, today: budgetToday,
         mode, errors: [(e as Error).message], report: [],
       });
     } finally {
+      setCurrentFetch(null);
       setScanning(false);
     }
   }
