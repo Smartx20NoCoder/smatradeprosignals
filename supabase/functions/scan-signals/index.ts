@@ -480,6 +480,42 @@ function qualifyAndScore(
   };
 }
 
+async function sendTelegramAlerts(signals: Signal[]) {
+  const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
+  if (!token || !chatId || !signals.length) return;
+  for (const s of signals) {
+    const arrow = s.direction === "Long" ? "🟢 BUY" : "🔴 SELL";
+    const session =
+      s.session_score >= 90 ? "London/NY Overlap" :
+      s.session_score >= 85 ? "London" :
+      s.session_score >= 80 ? "New York" :
+      s.session_score >= 70 ? "Asian/Crypto" : "Off-session";
+    const fmt = (n: number) => {
+      if (s.pair === "XAU/USD") return n.toFixed(2);
+      if (s.pair === "BTC/USD") return n.toFixed(1);
+      return n.toFixed(s.pair.includes("JPY") ? 3 : 5);
+    };
+    const text =
+      `${arrow}  *${s.pair}*  (${s.timeframe})\n` +
+      `Order: *${s.order_type ?? ""}*\n` +
+      `Entry: \`${fmt(s.entry)}\`\n` +
+      `SL: \`${fmt(s.stop_loss)}\`\n` +
+      `TP1: \`${fmt(s.tp1)}\`   TP2: \`${fmt(s.tp2)}\`\n` +
+      `R:R 1:${s.rr.toFixed(2)}  ·  Conf *${s.confidence}%*\n` +
+      `Setup: ${s.setup}\n` +
+      `Session: ${session}` +
+      (s.htf_bias && s.htf_bias !== "neutral" ? `  ·  1H ${s.htf_bias}` : "");
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+      });
+    } catch (_) { /* skip silently */ }
+  }
+}
+
 async function runScanJob(
   supabase: ReturnType<typeof createClient>,
   tdKey: string,
@@ -586,7 +622,10 @@ async function runScanJob(
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
     const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
-    if (toInsert.length) await supabase.from("signals").insert(toInsert);
+    if (toInsert.length) {
+      await supabase.from("signals").insert(toInsert);
+      await sendTelegramAlerts(toInsert);
+    }
 
     const day = new Date().toISOString().slice(0, 10);
     const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
@@ -604,16 +643,41 @@ async function runScanJob(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  let body: { mode?: "full" | "latest"; stream?: boolean; source?: string } = {};
+  try { body = await req.json(); } catch { /* GET ok */ }
+  const mode = body.mode === "full" ? "full" : "latest";
+  const source = body.source ?? req.headers.get("x-scan-source") ?? "manual";
+
+  // Open a scan_runs row immediately so the health panel always reflects the latest attempt.
+  let runId: string | null = null;
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const { data: runRow } = await supabase.from("scan_runs").insert({
+      mode, source, started_at: new Date().toISOString(),
+    }).select("id").maybeSingle();
+    runId = (runRow?.id as string) ?? null;
+  } catch (_) { /* ignore */ }
+
+  const finalize = async (result: any, ok: boolean, errMsg?: string) => {
+    if (!runId) return;
+    try {
+      await supabase.from("scan_runs").update({
+        finished_at: new Date().toISOString(),
+        new_signals: result?.new_signals ?? 0,
+        api_calls_used: result?.api_calls_used ?? 0,
+        api_calls_today: result?.api_calls_today ?? 0,
+        errors: errMsg ? [errMsg, ...(result?.errors ?? [])] : (result?.errors ?? []),
+        ok,
+      }).eq("id", runId);
+    } catch (_) { /* ignore */ }
+  };
+
+  try {
     const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
     if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    let body: { mode?: "full" | "latest"; stream?: boolean } = {};
-    try { body = await req.json(); } catch { /* GET ok */ }
-    const mode = body.mode === "latest" ? "latest" : "full";
 
     if (body.stream) {
       const encoder = new TextEncoder();
@@ -623,9 +687,11 @@ Deno.serve(async (req) => {
           try {
             const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
             send({ type: "complete", result });
+            await finalize(result, true);
             controller.close();
           } catch (e) {
             send({ type: "error", error: (e as Error).message });
+            await finalize(null, false, (e as Error).message);
             controller.close();
           }
         },
@@ -634,8 +700,10 @@ Deno.serve(async (req) => {
     }
 
     const result = await runScanJob(supabase, tdKey, mode);
+    await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
+    await finalize(null, false, (e as Error).message);
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
