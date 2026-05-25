@@ -439,15 +439,25 @@ function ScalpEdge() {
 
         {/* Server-side cron status pill */}
         <div className="mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2 flex-wrap">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          SERVER CRON · every {CRON_INTERVAL_MIN}m · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
-          {lastCron && (
-            <span className="text-muted-foreground normal-case">
-              · last cron {timeAgo(lastCron.started_at)} ago
-              {nextCronAt && nextCronAt.getTime() > Date.now() && (
-                <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+          {appSettings.paused ? (
+            <>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-bear" />
+              <span className="text-bear font-bold">CRON PAUSED</span>
+              <span className="text-muted-foreground normal-case">· toggle in Settings to resume</span>
+            </>
+          ) : (
+            <>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              SERVER CRON · every {CRON_INTERVAL_MIN}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+              {lastCron && (
+                <span className="text-muted-foreground normal-case">
+                  · last cron {timeAgo(lastCron.started_at)} ago
+                  {nextCronAt && nextCronAt.getTime() > Date.now() && (
+                    <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+                  )}
+                </span>
               )}
-            </span>
+            </>
           )}
         </div>
 
