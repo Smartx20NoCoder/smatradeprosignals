@@ -824,10 +824,16 @@ function Cell({ label, value, color }: { label: string; value: string; color?: "
 
 function SettingsPanel({
   soundOn, setSoundOn, projectedDaily,
+  appSettings, saveAppSettings, refreshNewsCalendar, todaysEvents,
 }: {
   soundOn: boolean; setSoundOn: (v: boolean) => void;
   projectedDaily: number;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  refreshNewsCalendar: () => Promise<void>;
+  todaysEvents: EconomicEvent[];
 }) {
+  void appSettings; void saveAppSettings; void refreshNewsCalendar; void todaysEvents;
   return (
     <div className="mt-4 space-y-3">
       <div className="border border-border rounded bg-card p-4">
