@@ -643,16 +643,41 @@ async function runScanJob(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  let body: { mode?: "full" | "latest"; stream?: boolean; source?: string } = {};
+  try { body = await req.json(); } catch { /* GET ok */ }
+  const mode = body.mode === "full" ? "full" : "latest";
+  const source = body.source ?? req.headers.get("x-scan-source") ?? "manual";
+
+  // Open a scan_runs row immediately so the health panel always reflects the latest attempt.
+  let runId: string | null = null;
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const { data: runRow } = await supabase.from("scan_runs").insert({
+      mode, source, started_at: new Date().toISOString(),
+    }).select("id").maybeSingle();
+    runId = (runRow?.id as string) ?? null;
+  } catch (_) { /* ignore */ }
+
+  const finalize = async (result: any, ok: boolean, errMsg?: string) => {
+    if (!runId) return;
+    try {
+      await supabase.from("scan_runs").update({
+        finished_at: new Date().toISOString(),
+        new_signals: result?.new_signals ?? 0,
+        api_calls_used: result?.api_calls_used ?? 0,
+        api_calls_today: result?.api_calls_today ?? 0,
+        errors: errMsg ? [errMsg, ...(result?.errors ?? [])] : (result?.errors ?? []),
+        ok,
+      }).eq("id", runId);
+    } catch (_) { /* ignore */ }
+  };
+
+  try {
     const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
     if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    let body: { mode?: "full" | "latest"; stream?: boolean } = {};
-    try { body = await req.json(); } catch { /* GET ok */ }
-    const mode = body.mode === "latest" ? "latest" : "full";
 
     if (body.stream) {
       const encoder = new TextEncoder();
@@ -662,9 +687,11 @@ Deno.serve(async (req) => {
           try {
             const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
             send({ type: "complete", result });
+            await finalize(result, true);
             controller.close();
           } catch (e) {
             send({ type: "error", error: (e as Error).message });
+            await finalize(null, false, (e as Error).message);
             controller.close();
           }
         },
@@ -673,8 +700,10 @@ Deno.serve(async (req) => {
     }
 
     const result = await runScanJob(supabase, tdKey, mode);
+    await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
+    await finalize(null, false, (e as Error).message);
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
