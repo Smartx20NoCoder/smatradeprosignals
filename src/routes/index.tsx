@@ -392,13 +392,19 @@ function ScalpEdge() {
           </div>
         </header>
 
-        {/* Auto-scan status pill */}
-        {autoScan && (
-          <div className="mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            AUTO-SCAN ON · every {autoInterval}m · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
-          </div>
-        )}
+        {/* Server-side cron status pill */}
+        <div className="mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2 flex-wrap">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+          SERVER CRON · every {CRON_INTERVAL_MIN}m · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+          {lastCron && (
+            <span className="text-muted-foreground normal-case">
+              · last cron {timeAgo(lastCron.started_at)} ago
+              {nextCronAt && nextCronAt.getTime() > Date.now() && (
+                <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+              )}
+            </span>
+          )}
+        </div>
 
         {scanning && (
           <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
