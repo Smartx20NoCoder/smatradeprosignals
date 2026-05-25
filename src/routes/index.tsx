@@ -166,6 +166,11 @@ function ScalpEdge() {
   const lastSignalCountRef = useRef(0);
   const lastSeenSignalIdsRef = useRef<Set<string>>(new Set());
 
+  const [appSettings, setAppSettings] = useState<AppSettings>({
+    paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
+  });
+  const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
