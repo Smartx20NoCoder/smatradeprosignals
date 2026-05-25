@@ -550,7 +550,8 @@ function ScalpEdge() {
               openRiskPct={openRiskPct}
               correlationWarnings={correlationWarnings}
             />
-            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be} exposureCheck={exposureCheck} />
+            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
+              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck} />
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
@@ -561,12 +562,18 @@ function ScalpEdge() {
             budgetToday={budgetToday}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
+            appSettings={appSettings}
+            todaysEvents={todaysEvents}
           />
         )}
         {tab === "settings" && (
           <SettingsPanel
             soundOn={soundOn} setSoundOn={setSoundOn}
             projectedDaily={projectedDaily}
+            appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
+            refreshNewsCalendar={refreshNewsCalendar}
+            todaysEvents={todaysEvents}
           />
         )}
 
