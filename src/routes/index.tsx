@@ -633,12 +633,13 @@ function ScanReport({ report }: { report: PairReport[] }) {
 type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
 
 function SignalList({
-  signals, onStatus, onPartial, exposureCheck,
+  signals, onStatus, onPartial, exposureCheck, newsRiskCheck,
 }: {
   signals: Signal[];
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   exposureCheck: (s: Signal) => string | null;
+  newsRiskCheck: (s: Signal) => string | null;
 }) {
   if (signals.length === 0) {
     return (
@@ -652,7 +653,8 @@ function SignalList({
     <div className="mt-4 space-y-2">
       {signals.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
-          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null} />
+          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
+          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
       ))}
     </div>
   );
