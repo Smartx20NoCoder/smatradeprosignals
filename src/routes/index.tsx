@@ -663,6 +663,11 @@ function SignalList({
   exposureCheck: (s: Signal) => string | null;
   newsRiskCheck: (s: Signal) => string | null;
 }) {
+  const PAGE = 50;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(signals.length / PAGE));
+  const cur = Math.min(page, totalPages - 1);
+  const slice = signals.slice(cur * PAGE, cur * PAGE + PAGE);
   if (signals.length === 0) {
     return (
       <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
@@ -673,11 +678,26 @@ function SignalList({
   }
   return (
     <div className="mt-4 space-y-2">
-      {signals.map((s) => (
+      {slice.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
           warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
           newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
       ))}
+      {signals.length > PAGE && (
+        <div className="flex items-center justify-between gap-3 pt-3 text-xs">
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            ← Prev
+          </button>
+          <span className="text-muted-foreground uppercase tracking-wider">
+            Page {cur + 1} / {totalPages} · {signals.length} signals
+          </span>
+          <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={cur >= totalPages - 1}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
