@@ -621,6 +621,7 @@ async function runScanJob(
     const seen = new Set((recent ?? [])
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
+    const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
     if (toInsert.length) {
       await supabase.from("signals").insert(toInsert);
       await sendTelegramAlerts(toInsert);
