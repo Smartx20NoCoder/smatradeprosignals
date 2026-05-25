@@ -180,9 +180,12 @@ async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, con
   return next;
 }
 
+type KeySet = { primary: string; secondary?: string };
+
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
-  apiKey: string,
+  keys: KeySet,
+  activeKeyRef: { idx: 1 | 2 },
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
@@ -199,18 +202,36 @@ async function fetchCandles(
       return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
     }
   }
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m)` });
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${apiKey}`;
-  let r: Response | null = null;
-  let usedApi = 0;
-  for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
-    r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
-    usedApi += 1;
-    if (r.status !== 429) break;
-    if (attempt > MAX_429_RETRIES) break;
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: "429 rate limit — retrying this call in 60s" });
-    await delay(RATE_LIMIT_RETRY_MS);
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
+
+  const tryKey = async (key: string): Promise<{ resp: Response; calls: number }> => {
+    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${key}`;
+    let resp: Response | null = null;
+    let calls = 0;
+    for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
+      resp = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+      calls += 1;
+      if (resp.status !== 429) break;
+      if (attempt > MAX_429_RETRIES) break;
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: `429 on key #${activeKeyRef.idx} — retrying in 60s` });
+      await delay(RATE_LIMIT_RETRY_MS);
+    }
+    return { resp: resp!, calls };
+  };
+
+  // Active key first; if it 429s after retries, fail over to the other key.
+  const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
+  let { resp: r, calls: usedApi } = await tryKey(primaryKey);
+  if (r.status === 429 && keys.secondary && keys.secondary !== primaryKey) {
+    const fallbackIdx: 1 | 2 = activeKeyRef.idx === 1 ? 2 : 1;
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Failing over to key #${fallbackIdx}` });
+    activeKeyRef.idx = fallbackIdx;
+    const fallbackKey = fallbackIdx === 1 ? keys.primary : keys.secondary;
+    const second = await tryKey(fallbackKey);
+    r = second.resp;
+    usedApi += second.calls;
   }
+
   if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
@@ -240,7 +261,7 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: "Fetched and cached" });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
   return { candles: fresh, usedApi, cached: false };
 }
 
