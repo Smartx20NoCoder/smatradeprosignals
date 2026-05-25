@@ -26,6 +26,25 @@ const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
 let lastTwelveDataCallStartedAt = 0;
 
+// Currencies relevant to each pair (used for the news blackout match)
+function pairCurrencies(pair: string): string[] {
+  if (pair === "XAU/USD") return ["USD", "XAU"];
+  if (pair === "BTC/USD") return ["USD"];
+  return [pair.slice(0, 3), pair.slice(4, 7)];
+}
+
+// Weekend / Friday-late filter: forex + gold pause from Fri 22:00 UTC to Sun 22:00 UTC.
+// Only BTC/USD trades in that window.
+function isPairAllowedNow(pair: string, d: Date): boolean {
+  if (pair === "BTC/USD") return true;
+  const day = d.getUTCDay(); // 0 Sun, 5 Fri, 6 Sat
+  const h = d.getUTCHours();
+  if (day === 6) return false;                  // Saturday: closed
+  if (day === 0 && h < 22) return false;        // Sunday before 22:00 UTC
+  if (day === 5 && h >= 22) return false;       // Friday 22:00 UTC onwards
+  return true;
+}
+
 // Spread cushion: pips for FX, absolute $ for gold/BTC.
 const SPREAD_PIPS: Record<string, number> = {
   "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2,
@@ -161,9 +180,12 @@ async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, con
   return next;
 }
 
+type KeySet = { primary: string; secondary?: string };
+
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
-  apiKey: string,
+  keys: KeySet,
+  activeKeyRef: { idx: 1 | 2 },
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
@@ -180,18 +202,36 @@ async function fetchCandles(
       return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
     }
   }
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m)` });
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${apiKey}`;
-  let r: Response | null = null;
-  let usedApi = 0;
-  for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
-    r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
-    usedApi += 1;
-    if (r.status !== 429) break;
-    if (attempt > MAX_429_RETRIES) break;
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: "429 rate limit — retrying this call in 60s" });
-    await delay(RATE_LIMIT_RETRY_MS);
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
+
+  const tryKey = async (key: string): Promise<{ resp: Response; calls: number }> => {
+    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${key}`;
+    let resp: Response | null = null;
+    let calls = 0;
+    for (let attempt = 1; attempt <= MAX_429_RETRIES + 1; attempt++) {
+      resp = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+      calls += 1;
+      if (resp.status !== 429) break;
+      if (attempt > MAX_429_RETRIES) break;
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: `429 on key #${activeKeyRef.idx} — retrying in 60s` });
+      await delay(RATE_LIMIT_RETRY_MS);
+    }
+    return { resp: resp!, calls };
+  };
+
+  // Active key first; if it 429s after retries, fail over to the other key.
+  const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
+  let { resp: r, calls: usedApi } = await tryKey(primaryKey);
+  if (r.status === 429 && keys.secondary && keys.secondary !== primaryKey) {
+    const fallbackIdx: 1 | 2 = activeKeyRef.idx === 1 ? 2 : 1;
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Failing over to key #${fallbackIdx}` });
+    activeKeyRef.idx = fallbackIdx;
+    const fallbackKey = fallbackIdx === 1 ? keys.primary : keys.secondary;
+    const second = await tryKey(fallbackKey);
+    r = second.resp;
+    usedApi += second.calls;
   }
+
   if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
@@ -221,7 +261,7 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: "Fetched and cached" });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
   return { candles: fresh, usedApi, cached: false };
 }
 
@@ -516,14 +556,68 @@ async function sendTelegramAlerts(signals: Signal[]) {
   }
 }
 
+type ActiveSettings = {
+  paused: boolean;
+  trading_hours_start_utc: number;
+  trading_hours_end_utc: number;
+  active_td_key: 1 | 2;
+};
+
+async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
+  const { data } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+  return {
+    paused: !!data?.paused,
+    trading_hours_start_utc: Number(data?.trading_hours_start_utc ?? 1),
+    trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
+    active_td_key: ((data?.active_td_key ?? 1) === 2 ? 2 : 1),
+  };
+}
+
+function isWithinTradingHours(d: Date, settings: ActiveSettings): boolean {
+  const h = d.getUTCHours();
+  const a = settings.trading_hours_start_utc, b = settings.trading_hours_end_utc;
+  return a <= b ? (h >= a && h < b) : (h >= a || h < b);
+}
+
+// Returns titles of high-impact events within ±30min for any of the given currencies.
+function blackoutHits(
+  events: Array<{ event_time: string; currency: string; title: string }>,
+  currencies: string[], now: Date,
+): { title: string; ccy: string; minsTo: number }[] {
+  const t = now.getTime();
+  const hits: { title: string; ccy: string; minsTo: number }[] = [];
+  for (const e of events) {
+    if (!currencies.includes(e.currency)) continue;
+    const dt = new Date(e.event_time).getTime();
+    const diffMin = Math.abs(dt - t) / 60000;
+    if (diffMin <= 30) hits.push({ title: e.title, ccy: e.currency, minsTo: Math.round((dt - t) / 60000) });
+  }
+  return hits;
+}
+
 async function runScanJob(
   supabase: ReturnType<typeof createClient>,
-  tdKey: string,
+  keys: KeySet,
+  settings: ActiveSettings,
   mode: "full" | "latest",
   emit?: ProgressEmitter,
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
+    const activeKeyRef: { idx: 1 | 2 } = { idx: settings.active_td_key };
+
+    const nowDate = new Date();
+    // Filter pair list for weekend / Friday-late: only BTC trades.
+    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
+
+    // Load today's high-impact news once.
+    const dayStart = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate())).toISOString();
+    const dayEnd = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate() + 1)).toISOString();
+    const { data: newsRows } = await supabase.from("economic_events")
+      .select("event_time, currency, title")
+      .gte("event_time", dayStart).lt("event_time", dayEnd);
+    const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
     const signals: Signal[] = [];
@@ -533,17 +627,21 @@ async function runScanJob(
       checks: Array<{ setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string }>;
     }> = [];
 
+    for (const p of skippedPairs) {
+      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason: "Market closed (weekend / Fri 22:00+ UTC)" }] });
+      emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
+    }
+
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
     // Sequential pair loop; each pair+timeframe fetch is independently throttled.
-    for (let pi = 0; pi < PAIRS.length; pi++) {
-      const pair = PAIRS[pi];
+    for (const pair of allowedPairs) {
       emit?.({ type: "pair_start", pair, status: "pending", message: `Analyzing ${pair}` });
       try {
         const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label), emit);
+          const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit);
           fetches.push(f);
           apiCalls += f.usedApi;
         }
@@ -562,9 +660,18 @@ async function runScanJob(
       }
     }
 
+    // Persist whichever key we ended on (in case a failover happened).
+    if (activeKeyRef.idx !== settings.active_td_key) {
+      try {
+        await supabase.from("app_settings").update({
+          active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
+        }).eq("id", "singleton");
+      } catch (_) { /* ignore */ }
+    }
+
     // Build candidate signals (may contain multiple per pair+direction)
     const candidates: Signal[] = [];
-    for (const pair of PAIRS) {
+    for (const pair of allowedPairs) {
       const d = pairData[pair];
       const pairReport = {
         pair, cached: d?.cached ?? false,
@@ -585,8 +692,16 @@ async function runScanJob(
         ["SMC OB/FVG", smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH", choch(pair, d.c5)],
       ];
+      const ccys = pairCurrencies(pair);
+      const hits = blackoutHits(events, ccys, nowDate);
       for (const [name, raw] of setups) {
         if (!raw) { pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" }); continue; }
+        if (hits.length > 0) {
+          const h = hits[0];
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
+            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+          continue;
+        }
         const q = qualifyAndScore(raw, d.c5, bias, currentPrice);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
@@ -638,6 +753,8 @@ async function runScanJob(
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
+      active_td_key: activeKeyRef.idx, skipped_pairs: skippedPairs,
+      news_events_loaded: events.length,
     };
 }
 
@@ -676,8 +793,26 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
-    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY");
+    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") || undefined;
+    if (!tdKey1) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const keys: KeySet = { primary: tdKey1, secondary: tdKey2 };
+
+    const settings = await loadSettings(supabase);
+
+    // Pause + trading-hours short-circuit (cron only — manual scans always run).
+    if (source === "cron") {
+      if (settings.paused) {
+        const skipResult = { skipped: true, reason: "paused", new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        await finalize(skipResult, true);
+        return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (!isWithinTradingHours(new Date(), settings)) {
+        const skipResult = { skipped: true, reason: `outside trading hours (${settings.trading_hours_start_utc}-${settings.trading_hours_end_utc} UTC)`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        await finalize(skipResult, true);
+        return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     if (body.stream) {
       const encoder = new TextEncoder();
@@ -685,7 +820,7 @@ Deno.serve(async (req) => {
         async start(controller) {
           const send = (payload: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
           try {
-            const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
+            const result = await runScanJob(supabase, keys, settings, mode, (event) => send(event));
             send({ type: "complete", result });
             await finalize(result, true);
             controller.close();
@@ -699,7 +834,7 @@ Deno.serve(async (req) => {
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
     }
 
-    const result = await runScanJob(supabase, tdKey, mode);
+    const result = await runScanJob(supabase, keys, settings, mode);
     await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {

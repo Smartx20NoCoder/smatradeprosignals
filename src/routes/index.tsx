@@ -62,6 +62,13 @@ type ScanRun = {
   ok: boolean;
 };
 type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type AppSettings = {
+  paused: boolean;
+  trading_hours_start_utc: number;
+  trading_hours_end_utc: number;
+  active_td_key: number;
+};
+type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
@@ -159,14 +166,20 @@ function ScalpEdge() {
   const lastSignalCountRef = useRef(0);
   const lastSeenSignalIdsRef = useRef<Set<string>>(new Set());
 
+  const [appSettings, setAppSettings] = useState<AppSettings>({
+    paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
+  });
+  const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
 
-  // Persist settings (sound only — auto-scan is server-side)
+  // Persist settings (sound only — auto-scan is server-side). SSR-safe.
   useEffect(() => {
-    const raw = localStorage.getItem("scalpedge-settings");
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem("scalpedge-settings");
     if (raw) {
       try {
         const s = JSON.parse(raw);
@@ -175,7 +188,8 @@ function ScalpEdge() {
     }
   }, []);
   useEffect(() => {
-    localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
   }, [soundOn]);
 
   async function loadSignals() {
@@ -204,6 +218,37 @@ function ScalpEdge() {
     const { data: cache } = await supabase.from("candle_cache")
       .select("pair, timeframe, fetched_at");
     setCacheRows((cache as CacheRow[]) ?? []);
+    const { data: cfg } = await (supabase as any).from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+    if (cfg) setAppSettings({
+      paused: !!cfg.paused,
+      trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
+      trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
+      active_td_key: Number(cfg.active_td_key ?? 1),
+    });
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+    const { data: ev } = await (supabase as any).from("economic_events")
+      .select("*").gte("event_time", dayStart.toISOString()).lt("event_time", dayEnd.toISOString())
+      .order("event_time", { ascending: true });
+    setTodaysEvents((ev as EconomicEvent[]) ?? []);
+  }
+
+  async function saveAppSettings(patch: Partial<AppSettings>) {
+    const next = { ...appSettings, ...patch };
+    setAppSettings(next);
+    await (supabase as any).from("app_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() }).eq("id", "singleton");
+  }
+
+  async function refreshNewsCalendar() {
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      body: JSON.stringify({ source: "manual" }),
+    });
+    await loadHealth();
   }
 
   useEffect(() => {
@@ -314,6 +359,23 @@ function ScalpEdge() {
     return null;
   }
 
+  // Live news-risk check: any high-impact event within ±30min for a relevant currency.
+  function newsRiskCheck(s: Signal): string | null {
+    const ccys = s.pair === "XAU/USD" ? ["USD", "XAU"]
+      : s.pair === "BTC/USD" ? ["USD"]
+      : [s.pair.slice(0, 3), s.pair.slice(4, 7)];
+    const t = Date.now();
+    for (const e of todaysEvents) {
+      if (!ccys.includes(e.currency)) continue;
+      const dt = new Date(e.event_time).getTime();
+      const diff = Math.round((dt - t) / 60000);
+      if (Math.abs(diff) <= 30) {
+        return `${e.title} (${e.currency}) ${diff >= 0 ? `in ${diff}m` : `${-diff}m ago`}`;
+      }
+    }
+    return null;
+  }
+
   const stats = useMemo(() => {
     const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
     const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
@@ -394,15 +456,25 @@ function ScalpEdge() {
 
         {/* Server-side cron status pill */}
         <div className="mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2 flex-wrap">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          SERVER CRON · every {CRON_INTERVAL_MIN}m · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
-          {lastCron && (
-            <span className="text-muted-foreground normal-case">
-              · last cron {timeAgo(lastCron.started_at)} ago
-              {nextCronAt && nextCronAt.getTime() > Date.now() && (
-                <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+          {appSettings.paused ? (
+            <>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-bear" />
+              <span className="text-bear font-bold">CRON PAUSED</span>
+              <span className="text-muted-foreground normal-case">· toggle in Settings to resume</span>
+            </>
+          ) : (
+            <>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              SERVER CRON · every {CRON_INTERVAL_MIN}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+              {lastCron && (
+                <span className="text-muted-foreground normal-case">
+                  · last cron {timeAgo(lastCron.started_at)} ago
+                  {nextCronAt && nextCronAt.getTime() > Date.now() && (
+                    <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+                  )}
+                </span>
               )}
-            </span>
+            </>
           )}
         </div>
 
@@ -478,7 +550,8 @@ function ScalpEdge() {
               openRiskPct={openRiskPct}
               correlationWarnings={correlationWarnings}
             />
-            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be} exposureCheck={exposureCheck} />
+            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
+              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck} />
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
@@ -489,12 +562,18 @@ function ScalpEdge() {
             budgetToday={budgetToday}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
+            appSettings={appSettings}
+            todaysEvents={todaysEvents}
           />
         )}
         {tab === "settings" && (
           <SettingsPanel
             soundOn={soundOn} setSoundOn={setSoundOn}
             projectedDaily={projectedDaily}
+            appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
+            refreshNewsCalendar={refreshNewsCalendar}
+            todaysEvents={todaysEvents}
           />
         )}
 
@@ -554,12 +633,13 @@ function ScanReport({ report }: { report: PairReport[] }) {
 type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
 
 function SignalList({
-  signals, onStatus, onPartial, exposureCheck,
+  signals, onStatus, onPartial, exposureCheck, newsRiskCheck,
 }: {
   signals: Signal[];
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   exposureCheck: (s: Signal) => string | null;
+  newsRiskCheck: (s: Signal) => string | null;
 }) {
   if (signals.length === 0) {
     return (
@@ -573,19 +653,21 @@ function SignalList({
     <div className="mt-4 space-y-2">
       {signals.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
-          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null} />
+          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
+          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
       ))}
     </div>
   );
 }
 
 function SignalRow({
-  s, onStatus, onPartial, warning,
+  s, onStatus, onPartial, warning, newsRisk,
 }: {
   s: Signal;
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   warning: string | null;
+  newsRisk: string | null;
 }) {
   const long = s.direction === "Long";
   const stage = stageOf(s);
@@ -658,6 +740,11 @@ function SignalRow({
       {warning && (
         <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
           ⚠ {warning}
+        </div>
+      )}
+      {newsRisk && (
+        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1">
+          ⚠ News Risk · {newsRisk} — signal suppressed by 30-min blackout
         </div>
       )}
 
