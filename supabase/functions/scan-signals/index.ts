@@ -793,8 +793,26 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const tdKey = Deno.env.get("TWELVE_DATA_API_KEY");
-    if (!tdKey) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY");
+    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") || undefined;
+    if (!tdKey1) throw new Error("TWELVE_DATA_API_KEY not configured");
+    const keys: KeySet = { primary: tdKey1, secondary: tdKey2 };
+
+    const settings = await loadSettings(supabase);
+
+    // Pause + trading-hours short-circuit (cron only — manual scans always run).
+    if (source === "cron") {
+      if (settings.paused) {
+        const skipResult = { skipped: true, reason: "paused", new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        await finalize(skipResult, true);
+        return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (!isWithinTradingHours(new Date(), settings)) {
+        const skipResult = { skipped: true, reason: `outside trading hours (${settings.trading_hours_start_utc}-${settings.trading_hours_end_utc} UTC)`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        await finalize(skipResult, true);
+        return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     if (body.stream) {
       const encoder = new TextEncoder();
@@ -802,7 +820,7 @@ Deno.serve(async (req) => {
         async start(controller) {
           const send = (payload: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
           try {
-            const result = await runScanJob(supabase, tdKey, mode, (event) => send(event));
+            const result = await runScanJob(supabase, keys, settings, mode, (event) => send(event));
             send({ type: "complete", result });
             await finalize(result, true);
             controller.close();
@@ -816,7 +834,7 @@ Deno.serve(async (req) => {
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
     }
 
-    const result = await runScanJob(supabase, tdKey, mode);
+    const result = await runScanJob(supabase, keys, settings, mode);
     await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
