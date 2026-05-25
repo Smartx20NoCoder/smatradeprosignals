@@ -742,6 +742,11 @@ function SignalRow({
           ⚠ {warning}
         </div>
       )}
+      {newsRisk && (
+        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1">
+          ⚠ News Risk · {newsRisk} — signal suppressed by 30-min blackout
+        </div>
+      )}
 
       {/* Manual status tiles — clickable at any time */}
       <div className="mt-3">
