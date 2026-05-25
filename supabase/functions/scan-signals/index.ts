@@ -556,14 +556,68 @@ async function sendTelegramAlerts(signals: Signal[]) {
   }
 }
 
+type ActiveSettings = {
+  paused: boolean;
+  trading_hours_start_utc: number;
+  trading_hours_end_utc: number;
+  active_td_key: 1 | 2;
+};
+
+async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
+  const { data } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+  return {
+    paused: !!data?.paused,
+    trading_hours_start_utc: Number(data?.trading_hours_start_utc ?? 1),
+    trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
+    active_td_key: ((data?.active_td_key ?? 1) === 2 ? 2 : 1),
+  };
+}
+
+function isWithinTradingHours(d: Date, settings: ActiveSettings): boolean {
+  const h = d.getUTCHours();
+  const a = settings.trading_hours_start_utc, b = settings.trading_hours_end_utc;
+  return a <= b ? (h >= a && h < b) : (h >= a || h < b);
+}
+
+// Returns titles of high-impact events within ±30min for any of the given currencies.
+function blackoutHits(
+  events: Array<{ event_time: string; currency: string; title: string }>,
+  currencies: string[], now: Date,
+): { title: string; ccy: string; minsTo: number }[] {
+  const t = now.getTime();
+  const hits: { title: string; ccy: string; minsTo: number }[] = [];
+  for (const e of events) {
+    if (!currencies.includes(e.currency)) continue;
+    const dt = new Date(e.event_time).getTime();
+    const diffMin = Math.abs(dt - t) / 60000;
+    if (diffMin <= 30) hits.push({ title: e.title, ccy: e.currency, minsTo: Math.round((dt - t) / 60000) });
+  }
+  return hits;
+}
+
 async function runScanJob(
   supabase: ReturnType<typeof createClient>,
-  tdKey: string,
+  keys: KeySet,
+  settings: ActiveSettings,
   mode: "full" | "latest",
   emit?: ProgressEmitter,
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
+    const activeKeyRef: { idx: 1 | 2 } = { idx: settings.active_td_key };
+
+    const nowDate = new Date();
+    // Filter pair list for weekend / Friday-late: only BTC trades.
+    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
+
+    // Load today's high-impact news once.
+    const dayStart = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate())).toISOString();
+    const dayEnd = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate() + 1)).toISOString();
+    const { data: newsRows } = await supabase.from("economic_events")
+      .select("event_time, currency, title")
+      .gte("event_time", dayStart).lt("event_time", dayEnd);
+    const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
     const signals: Signal[] = [];
@@ -573,17 +627,21 @@ async function runScanJob(
       checks: Array<{ setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string }>;
     }> = [];
 
+    for (const p of skippedPairs) {
+      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason: "Market closed (weekend / Fri 22:00+ UTC)" }] });
+      emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
+    }
+
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
     // Sequential pair loop; each pair+timeframe fetch is independently throttled.
-    for (let pi = 0; pi < PAIRS.length; pi++) {
-      const pair = PAIRS[pi];
+    for (const pair of allowedPairs) {
       emit?.({ type: "pair_start", pair, status: "pending", message: `Analyzing ${pair}` });
       try {
         const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, tdKey, pair, tf, sizeFor(tf.label), emit);
+          const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit);
           fetches.push(f);
           apiCalls += f.usedApi;
         }
@@ -602,9 +660,18 @@ async function runScanJob(
       }
     }
 
+    // Persist whichever key we ended on (in case a failover happened).
+    if (activeKeyRef.idx !== settings.active_td_key) {
+      try {
+        await supabase.from("app_settings").update({
+          active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
+        }).eq("id", "singleton");
+      } catch (_) { /* ignore */ }
+    }
+
     // Build candidate signals (may contain multiple per pair+direction)
     const candidates: Signal[] = [];
-    for (const pair of PAIRS) {
+    for (const pair of allowedPairs) {
       const d = pairData[pair];
       const pairReport = {
         pair, cached: d?.cached ?? false,
@@ -625,8 +692,16 @@ async function runScanJob(
         ["SMC OB/FVG", smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH", choch(pair, d.c5)],
       ];
+      const ccys = pairCurrencies(pair);
+      const hits = blackoutHits(events, ccys, nowDate);
       for (const [name, raw] of setups) {
         if (!raw) { pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" }); continue; }
+        if (hits.length > 0) {
+          const h = hits[0];
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
+            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+          continue;
+        }
         const q = qualifyAndScore(raw, d.c5, bias, currentPrice);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
@@ -678,6 +753,8 @@ async function runScanJob(
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
+      active_td_key: activeKeyRef.idx, skipped_pairs: skippedPairs,
+      news_events_loaded: events.length,
     };
 }
 
