@@ -151,7 +151,7 @@ function ScalpEdge() {
   const [now, setNow] = useState(Date.now());
 
   // Settings
-  const [autoScan, setAutoScan] = useState(true); // server-side cron — display only
+  // (Auto-scan is server-side cron now; no client toggle state needed.)
   const [soundOn, setSoundOn] = useState(true);
   const [scanRuns, setScanRuns] = useState<ScanRun[]>([]);
   const [cacheRows, setCacheRows] = useState<CacheRow[]>([]);
