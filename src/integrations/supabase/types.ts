@@ -56,6 +56,45 @@ export type Database = {
         }
         Relationships: []
       }
+      scan_runs: {
+        Row: {
+          api_calls_today: number
+          api_calls_used: number
+          errors: Json
+          finished_at: string | null
+          id: string
+          mode: string
+          new_signals: number
+          ok: boolean
+          source: string
+          started_at: string
+        }
+        Insert: {
+          api_calls_today?: number
+          api_calls_used?: number
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          mode?: string
+          new_signals?: number
+          ok?: boolean
+          source?: string
+          started_at?: string
+        }
+        Update: {
+          api_calls_today?: number
+          api_calls_used?: number
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          mode?: string
+          new_signals?: number
+          ok?: boolean
+          source?: string
+          started_at?: string
+        }
+        Relationships: []
+      }
       signals: {
         Row: {
           atr: number | null
