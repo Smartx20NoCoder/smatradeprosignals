@@ -824,10 +824,16 @@ function Cell({ label, value, color }: { label: string; value: string; color?: "
 
 function SettingsPanel({
   soundOn, setSoundOn, projectedDaily,
+  appSettings, saveAppSettings, refreshNewsCalendar, todaysEvents,
 }: {
   soundOn: boolean; setSoundOn: (v: boolean) => void;
   projectedDaily: number;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  refreshNewsCalendar: () => Promise<void>;
+  todaysEvents: EconomicEvent[];
 }) {
+  void appSettings; void saveAppSettings; void refreshNewsCalendar; void todaysEvents;
   return (
     <div className="mt-4 space-y-3">
       <div className="border border-border rounded bg-card p-4">
@@ -929,13 +935,17 @@ function RiskExposureWidget({
 
 function HealthPanel({
   scanRuns, cacheRows, budgetToday, lastCron, nextCronAt,
+  appSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
   cacheRows: CacheRow[];
   budgetToday: number;
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
+  appSettings: AppSettings;
+  todaysEvents: EconomicEvent[];
 }) {
+  void appSettings; void todaysEvents;
   // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
   const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
   const lastOk = lastCron?.ok ?? false;
