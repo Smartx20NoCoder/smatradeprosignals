@@ -833,18 +833,40 @@ function SettingsPanel({
   refreshNewsCalendar: () => Promise<void>;
   todaysEvents: EconomicEvent[];
 }) {
-  void appSettings; void saveAppSettings; void refreshNewsCalendar; void todaysEvents;
+  void refreshNewsCalendar; void todaysEvents;
   return (
     <div className="mt-4 space-y-3">
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Server-Side Scan Engine</div>
-        <div className="text-sm">Auto-scans run server-side every {CRON_INTERVAL_MIN} minutes via scheduled cron.</div>
-        <div className="mt-1 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              {appSettings.paused ? "Scanner Paused" : "Scanner Running"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {appSettings.paused
+                ? "Cron job exits immediately. No API calls are made."
+                : `Auto-scans every ${CRON_INTERVAL_MIN} minutes server-side.`}
+            </div>
+          </div>
+          <button
+            onClick={() => saveAppSettings({ paused: !appSettings.paused })}
+            className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition-colors ${
+              appSettings.paused
+                ? "bg-bull/15 text-bull border-bull/40 hover:bg-bull/25"
+                : "bg-bear/15 text-bear border-bear/40 hover:bg-bear/25"
+            }`}
+          >
+            {appSettings.paused ? "▶ Resume Scanner" : "⏸ Pause Scanner"}
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
           Browser tab does not need to be open. Estimated{" "}
           <span className="text-foreground font-semibold">{projectedDaily}</span> API calls/day.
           Use ▶ SCAN at the top for an on-demand full scan.
         </div>
       </div>
+
 
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
