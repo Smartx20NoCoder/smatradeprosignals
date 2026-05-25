@@ -62,6 +62,13 @@ type ScanRun = {
   ok: boolean;
 };
 type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type AppSettings = {
+  paused: boolean;
+  trading_hours_start_utc: number;
+  trading_hours_end_utc: number;
+  active_td_key: number;
+};
+type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
