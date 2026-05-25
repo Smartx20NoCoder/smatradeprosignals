@@ -736,55 +736,222 @@ function Cell({ label, value, color }: { label: string; value: string; color?: "
 }
 
 function SettingsPanel({
-  autoScan, setAutoScan, autoInterval, setAutoInterval, soundOn, setSoundOn, projectedDaily,
+  soundOn, setSoundOn, projectedDaily,
 }: {
-  autoScan: boolean; setAutoScan: (v: boolean) => void;
-  autoInterval: 15 | 30; setAutoInterval: (v: 15 | 30) => void;
   soundOn: boolean; setSoundOn: (v: boolean) => void;
   projectedDaily: number;
 }) {
   return (
     <div className="mt-4 space-y-3">
       <div className="border border-border rounded bg-card p-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Auto-Scan</div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm">Run scans automatically</span>
-          <Toggle on={autoScan} onChange={setAutoScan} />
-        </div>
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-sm">Interval</span>
-          <div className="flex gap-1">
-            {([15, 30] as const).map((m) => (
-              <button key={m} onClick={() => setAutoInterval(m)} disabled={!autoScan}
-                className={`px-3 py-1 text-xs rounded border ${
-                  autoInterval === m ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"
-                } disabled:opacity-40`}>
-                {m}m
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mt-3 text-xs text-muted-foreground">
-          Each auto-scan = ~14 API calls (5m + 15m only; 1H from cache).
-          {autoScan ? <> Estimated <span className="text-foreground font-semibold">{projectedDaily}</span> calls/day.</> : null}
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Server-Side Scan Engine</div>
+        <div className="text-sm">Auto-scans run server-side every {CRON_INTERVAL_MIN} minutes via scheduled cron.</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Browser tab does not need to be open. Estimated{" "}
+          <span className="text-foreground font-semibold">{projectedDaily}</span> API calls/day.
+          Use ▶ SCAN at the top for an on-demand full scan.
         </div>
       </div>
 
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
         <div className="flex items-center justify-between">
-          <span className="text-sm">Sound on new signal</span>
+          <span className="text-sm">Sound on new signal (browser)</span>
           <Toggle on={soundOn} onChange={setSoundOn} />
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Telegram alerts are sent server-side whenever a new signal is saved (if bot token + chat ID are configured).
         </div>
       </div>
 
       <div className="border border-border rounded bg-card p-4 text-xs text-muted-foreground space-y-1">
         <div className="text-[10px] uppercase tracking-wider mb-2">Risk Rules</div>
-        <div>• Max 3 concurrent open trades</div>
+        <div>• Max {MAX_CONCURRENT} concurrent open trades</div>
         <div>• EUR/USD ↔ GBP/USD: max 1 same-direction</div>
         <div>• GBP/JPY ↔ EUR/JPY: max 1 same-direction</div>
         <div>• XAU/USD: independent</div>
-        <div>• Spreads: USD majors 1.2p · crosses 2.5p · XAU/USD $0.40</div>
+        <div>• Spreads: USD majors 1.2p · crosses 2.5p · XAU/USD $0.40 · BTC/USD $2.00</div>
+      </div>
+    </div>
+  );
+}
+
+function RiskExposureWidget({
+  openSignals, openRiskPct, correlationWarnings,
+}: {
+  openSignals: Signal[];
+  openRiskPct: number;
+  correlationWarnings: string[];
+}) {
+  const overCap = openSignals.length >= MAX_CONCURRENT;
+  const meterPct = Math.min(100, (openSignals.length / MAX_CONCURRENT) * 100);
+  const meterColor = overCap ? "var(--bear)" : openSignals.length >= 2 ? "var(--chart-4)" : "var(--bull)";
+  return (
+    <div className="mt-4 border border-border rounded bg-card p-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Open Risk Exposure</div>
+        <div className="text-xs text-muted-foreground">
+          Notional <span className="text-foreground">${NOTIONAL_ACCOUNT.toLocaleString()}</span>
+          {" · "}{RISK_PER_TRADE_PCT}% per trade
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Open Trades</div>
+          <div className="font-semibold text-base" style={{ color: overCap ? "var(--bear)" : "var(--foreground)" }}>
+            {openSignals.length} / {MAX_CONCURRENT}
+          </div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Total Risk</div>
+          <div className="font-semibold text-base">{openRiskPct.toFixed(1)}%</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">$ At Risk</div>
+          <div className="font-semibold text-base">
+            ${((openRiskPct / 100) * NOTIONAL_ACCOUNT).toFixed(0)}
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 w-full h-1 bg-secondary rounded overflow-hidden">
+        <div className="h-full transition-all" style={{ width: `${meterPct}%`, backgroundColor: meterColor }} />
+      </div>
+      {correlationWarnings.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {correlationWarnings.map((w, i) => (
+            <div key={i} className="text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+              ⚠ {w}
+            </div>
+          ))}
+        </div>
+      )}
+      {openSignals.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {openSignals.map((s) => (
+            <span key={s.id} className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+              s.direction === "Long" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
+            }`}>
+              {s.direction === "Long" ? "▲" : "▼"} {s.pair}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthPanel({
+  scanRuns, cacheRows, budgetToday, lastCron, nextCronAt,
+}: {
+  scanRuns: ScanRun[];
+  cacheRows: CacheRow[];
+  budgetToday: number;
+  lastCron: ScanRun | null;
+  nextCronAt: Date | null;
+}) {
+  // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
+  const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
+  const lastOk = lastCron?.ok ?? false;
+  const status: "green" | "amber" | "red" =
+    lastCron && lastOk && lastCronAgeMin < 20 ? "green"
+    : lastCron && lastCronAgeMin < 40 ? "amber"
+    : "red";
+  const statusColor = status === "green" ? "var(--bull)" : status === "amber" ? "var(--chart-4)" : "var(--bear)";
+  const statusLabel = status === "green" ? "HEALTHY" : status === "amber" ? "DEGRADED" : "STALLED";
+  const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
+
+  // Group cache rows by pair
+  const cacheByPair: Record<string, Record<string, string>> = {};
+  for (const c of cacheRows) {
+    if (!cacheByPair[c.pair]) cacheByPair[c.pair] = {};
+    cacheByPair[c.pair][c.timeframe] = c.fetched_at;
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="border border-border rounded bg-card p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Scan Engine Status</div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusColor }} />
+            <span className="text-xs font-bold tracking-wider" style={{ color: statusColor }}>{statusLabel}</span>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Cron</div>
+            <div className="font-semibold">{lastCron ? `${timeAgo(lastCron.started_at)} ago` : "—"}</div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Next Cron</div>
+            <div className="font-semibold">
+              {nextCronAt
+                ? (nextCronAt.getTime() > Date.now()
+                    ? `~${Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m`
+                    : "due now")
+                : "—"}
+            </div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">API Today</div>
+            <div className="font-semibold">{budgetToday} / {DAILY_BUDGET}</div>
+            <div className="w-full h-1 mt-1 bg-secondary rounded overflow-hidden">
+              <div className="h-full" style={{
+                width: `${budgetPct}%`,
+                backgroundColor: budgetPct > 85 ? "var(--bear)" : budgetPct > 60 ? "var(--chart-4)" : "var(--bull)",
+              }}/>
+            </div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Interval</div>
+            <div className="font-semibold">{CRON_INTERVAL_MIN}m</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Per-Pair Cache Freshness</div>
+        <div className="space-y-1 text-xs font-mono">
+          {PAIRS.map((p) => (
+            <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+              <span className="font-bold w-20">{p}</span>
+              {(["5m", "15m", "1h"] as const).map((tf) => {
+                const at = cacheByPair[p]?.[tf];
+                const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
+                const ttl = tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
+                const fresh = ageMin !== null && ageMin < ttl;
+                return (
+                  <span key={tf} className="flex items-center gap-1">
+                    <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
+                    <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
+                      {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Recent Scan Runs (last 20)</div>
+        <div className="space-y-1 text-xs font-mono">
+          {scanRuns.length === 0 && <div className="text-muted-foreground">No scan runs recorded yet.</div>}
+          {scanRuns.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+              <span className={r.ok ? "text-bull" : "text-bear"}>{r.ok ? "✓" : "✗"}</span>
+              <span className="text-foreground">{new Date(r.started_at).toISOString().slice(11, 19)} UTC</span>
+              <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-secondary/60 text-muted-foreground">{r.source}</span>
+              <span className="text-[10px] uppercase text-muted-foreground">{r.mode}</span>
+              <span>new <span className="text-primary font-semibold">{r.new_signals}</span></span>
+              <span>used <span className="text-foreground">{r.api_calls_used}</span></span>
+              {Array.isArray(r.errors) && r.errors.length > 0 && (
+                <span className="text-bear truncate max-w-md">⚠ {String(r.errors[0]).slice(0, 80)}</span>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
