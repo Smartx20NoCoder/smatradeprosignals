@@ -556,11 +556,29 @@ async function sendTelegramAlerts(signals: Signal[]) {
   }
 }
 
+type SessionWindow = { enabled: boolean; start: number; end: number };
+type SessionConfig = {
+  scan_active_sessions_only: boolean;
+  sessions: { london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow };
+  custom_overrides: Record<string, { start: number; end: number } | null>;
+};
 type ActiveSettings = {
   paused: boolean;
   trading_hours_start_utc: number;
   trading_hours_end_utc: number;
   active_td_key: 1 | 2;
+  session_config: SessionConfig;
+};
+
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  scan_active_sessions_only: false,
+  sessions: {
+    london: { enabled: true, start: 7, end: 16 },
+    ny:     { enabled: true, start: 12, end: 21 },
+    tokyo:  { enabled: true, start: 0, end: 9 },
+    sydney: { enabled: true, start: 22, end: 7 },
+  },
+  custom_overrides: {},
 };
 
 async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
@@ -570,14 +588,30 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
     trading_hours_start_utc: Number(data?.trading_hours_start_utc ?? 1),
     trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
     active_td_key: ((data?.active_td_key ?? 1) === 2 ? 2 : 1),
+    session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
   };
+}
+
+function hourInWindow(h: number, start: number, end: number): boolean {
+  return start <= end ? (h >= start && h < end) : (h >= start || h < end);
 }
 
 function isWithinTradingHours(d: Date, settings: ActiveSettings): boolean {
   const h = d.getUTCHours();
-  const a = settings.trading_hours_start_utc, b = settings.trading_hours_end_utc;
-  return a <= b ? (h >= a && h < b) : (h >= a || h < b);
+  const dow = String(d.getUTCDay()); // 0=Sun..6=Sat
+  const cfg = settings.session_config ?? DEFAULT_SESSION_CONFIG;
+  const override = cfg.custom_overrides?.[dow];
+  if (override && typeof override.start === "number" && typeof override.end === "number") {
+    return hourInWindow(h, override.start, override.end);
+  }
+  if (cfg.scan_active_sessions_only) {
+    const ss = cfg.sessions ?? DEFAULT_SESSION_CONFIG.sessions;
+    return Object.values(ss).some((w) => w.enabled && hourInWindow(h, w.start, w.end));
+  }
+  // Fallback to legacy global window
+  return hourInWindow(h, settings.trading_hours_start_utc, settings.trading_hours_end_utc);
 }
+
 
 // Returns titles of high-impact events within ±30min for any of the given currencies.
 function blackoutHits(
@@ -808,7 +842,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       if (!isWithinTradingHours(new Date(), settings)) {
-        const skipResult = { skipped: true, reason: `outside trading hours (${settings.trading_hours_start_utc}-${settings.trading_hours_end_utc} UTC)`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        const skipResult = { skipped: true, reason: `outside active trading window`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
         await finalize(skipResult, true);
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }

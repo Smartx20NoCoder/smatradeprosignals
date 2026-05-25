@@ -62,13 +62,31 @@ type ScanRun = {
   ok: boolean;
 };
 type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type SessionWindow = { enabled: boolean; start: number; end: number };
+type SessionConfig = {
+  scan_active_sessions_only: boolean;
+  sessions: { london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow };
+  custom_overrides: Record<string, { start: number; end: number } | null>;
+};
 type AppSettings = {
   paused: boolean;
   trading_hours_start_utc: number;
   trading_hours_end_utc: number;
   active_td_key: number;
+  session_config: SessionConfig;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
+
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  scan_active_sessions_only: false,
+  sessions: {
+    london: { enabled: true, start: 7, end: 16 },
+    ny:     { enabled: true, start: 12, end: 21 },
+    tokyo:  { enabled: true, start: 0, end: 9 },
+    sydney: { enabled: true, start: 22, end: 7 },
+  },
+  custom_overrides: {},
+};
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
@@ -154,7 +172,7 @@ function ScalpEdge() {
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
-  const [tab, setTab] = useState<"signals" | "edge" | "health" | "settings">("signals");
+  const [tab, setTab] = useState<"signals" | "edge" | "history" | "health" | "settings">("signals");
   const [now, setNow] = useState(Date.now());
 
   // Settings
@@ -168,6 +186,7 @@ function ScalpEdge() {
 
   const [appSettings, setAppSettings] = useState<AppSettings>({
     paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
+    session_config: DEFAULT_SESSION_CONFIG,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
@@ -195,7 +214,7 @@ function ScalpEdge() {
   async function loadSignals() {
     const { data } = await supabase
       .from("signals").select("*")
-      .order("created_at", { ascending: false }).limit(200);
+      .order("created_at", { ascending: false }).limit(1000);
     const next = (data as Signal[]) ?? [];
     // Detect new signal IDs from server-side cron and beep
     const incoming = next.map((s) => s.id);
@@ -224,6 +243,7 @@ function ScalpEdge() {
       trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
       trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
       active_td_key: Number(cfg.active_td_key ?? 1),
+      session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
@@ -531,6 +551,7 @@ function ScalpEdge() {
           {([
             ["signals", `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
             ["edge", "EDGE"],
+            ["history", "HISTORY"],
             ["health", "HEALTH"],
             ["settings", "SETTINGS"],
           ] as const).map(([k, label]) => (
@@ -555,6 +576,7 @@ function ScalpEdge() {
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "history" && <HistoryPanel signals={signals} />}
         {tab === "health" && (
           <HealthPanel
             scanRuns={scanRuns}
@@ -641,6 +663,11 @@ function SignalList({
   exposureCheck: (s: Signal) => string | null;
   newsRiskCheck: (s: Signal) => string | null;
 }) {
+  const PAGE = 50;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(signals.length / PAGE));
+  const cur = Math.min(page, totalPages - 1);
+  const slice = signals.slice(cur * PAGE, cur * PAGE + PAGE);
   if (signals.length === 0) {
     return (
       <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
@@ -651,11 +678,26 @@ function SignalList({
   }
   return (
     <div className="mt-4 space-y-2">
-      {signals.map((s) => (
+      {slice.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
           warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
           newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
       ))}
+      {signals.length > PAGE && (
+        <div className="flex items-center justify-between gap-3 pt-3 text-xs">
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            ← Prev
+          </button>
+          <span className="text-muted-foreground uppercase tracking-wider">
+            Page {cur + 1} / {totalPages} · {signals.length} signals
+          </span>
+          <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={cur >= totalPages - 1}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -867,6 +909,7 @@ function SettingsPanel({
         </div>
       </div>
 
+      <TradingHoursPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
@@ -1170,3 +1213,334 @@ function KPI({ label, value, color }: { label: string; value: string; color?: "b
     </div>
   );
 }
+
+// ---------- Trading Hours / Sessions ----------
+const SESSION_LABELS: { key: keyof SessionConfig["sessions"]; label: string }[] = [
+  { key: "sydney", label: "Sydney" },
+  { key: "tokyo",  label: "Tokyo" },
+  { key: "london", label: "London" },
+  { key: "ny",     label: "New York" },
+];
+const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function hhmm(h: number) { return `${String(h).padStart(2, "0")}:00`; }
+function parseHour(v: string): number {
+  const n = parseInt(v.split(":")[0] ?? "0", 10);
+  return isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+}
+
+function TradingHoursPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const cfg = appSettings.session_config ?? DEFAULT_SESSION_CONFIG;
+  const updateCfg = (next: SessionConfig) => saveAppSettings({ session_config: next });
+  const setSession = (k: keyof SessionConfig["sessions"], patch: Partial<SessionWindow>) => {
+    updateCfg({ ...cfg, sessions: { ...cfg.sessions, [k]: { ...cfg.sessions[k], ...patch } } });
+  };
+  const setOverride = (dow: string, patch: { start: number; end: number } | null) => {
+    const overrides = { ...(cfg.custom_overrides ?? {}) };
+    if (patch === null) delete overrides[dow]; else overrides[dow] = patch;
+    updateCfg({ ...cfg, custom_overrides: overrides });
+  };
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trading Hours</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            All times UTC. Day overrides take priority over session windows.
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="uppercase tracking-wider">Scan only during active sessions</span>
+          <Toggle on={cfg.scan_active_sessions_only} onChange={(v) => updateCfg({ ...cfg, scan_active_sessions_only: v })} />
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        {SESSION_LABELS.map(({ key, label }) => {
+          const w = cfg.sessions[key];
+          return (
+            <div key={key} className="flex items-center gap-3 flex-wrap border-b border-border/40 pb-1.5 last:border-b-0">
+              <label className="flex items-center gap-2 min-w-32">
+                <Toggle on={w.enabled} onChange={(v) => setSession(key, { enabled: v })} />
+                <span className="text-sm font-semibold">{label}</span>
+              </label>
+              <div className="flex items-center gap-2 text-xs">
+                <input type="time" step={3600} value={hhmm(w.start)}
+                  onChange={(e) => setSession(key, { start: parseHour(e.target.value) })}
+                  className="bg-secondary border border-border rounded px-2 py-1" />
+                <span className="text-muted-foreground">to</span>
+                <input type="time" step={3600} value={hhmm(w.end)}
+                  onChange={(e) => setSession(key, { end: parseHour(e.target.value) })}
+                  className="bg-secondary border border-border rounded px-2 py-1" />
+                <span className="text-muted-foreground">UTC</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Custom Day Overrides</div>
+        <div className="space-y-1">
+          {DOW_LABELS.map((label, i) => {
+            const dow = String(i);
+            const ov = cfg.custom_overrides?.[dow] ?? null;
+            return (
+              <div key={dow} className="flex items-center gap-3 flex-wrap text-xs">
+                <span className="w-10 font-semibold">{label}</span>
+                <Toggle on={!!ov} onChange={(v) => setOverride(dow, v ? { start: 7, end: 20 } : null)} />
+                {ov ? (
+                  <>
+                    <input type="time" step={3600} value={hhmm(ov.start)}
+                      onChange={(e) => setOverride(dow, { ...ov, start: parseHour(e.target.value) })}
+                      className="bg-secondary border border-border rounded px-2 py-1" />
+                    <span className="text-muted-foreground">to</span>
+                    <input type="time" step={3600} value={hhmm(ov.end)}
+                      onChange={(e) => setOverride(dow, { ...ov, end: parseHour(e.target.value) })}
+                      className="bg-secondary border border-border rounded px-2 py-1" />
+                    <span className="text-muted-foreground">UTC (replaces sessions)</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">Use session windows</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- History Panel ----------
+function sessionOf(s: Signal): "London" | "New York" | "Asian" | "Off" {
+  const h = new Date(s.created_at).getUTCHours();
+  if (h >= 12 && h < 16) return "London"; // overlap counts as either; pick LDN by default
+  if (h >= 7  && h < 12) return "London";
+  if (h >= 16 && h < 21) return "New York";
+  if (h >= 0  && h < 9)  return "Asian";
+  if (h >= 22)           return "Asian";
+  return "Off";
+}
+
+function HistoryPanel({ signals }: { signals: Signal[] }) {
+  const closed = useMemo(
+    () => signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null),
+    [signals]
+  );
+
+  const [pairFilter, setPairFilter] = useState<string>("all");
+  const [setupFilter, setSetupFilter] = useState<string>("all");
+  const [sessionFilter, setSessionFilter] = useState<string>("all");
+  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+
+  const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
+  const setups = useMemo(() => Array.from(new Set(closed.map((s) => s.setup))).sort(), [closed]);
+  const sessions = ["London", "New York", "Asian", "Off"];
+
+  const filtered = useMemo(() => closed.filter((s) =>
+    (pairFilter === "all" || s.pair === pairFilter) &&
+    (setupFilter === "all" || s.setup === setupFilter) &&
+    (sessionFilter === "all" || sessionOf(s) === sessionFilter)
+  ), [closed, pairFilter, setupFilter, sessionFilter]);
+
+  // Group by Month-Year (most recent first)
+  type MonthGroup = { key: string; label: string; items: Signal[] };
+  const groups: MonthGroup[] = useMemo(() => {
+    const map = new Map<string, MonthGroup>();
+    for (const s of filtered) {
+      const d = new Date(s.created_at);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, "0")}`;
+      const label = d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+      if (!map.has(key)) map.set(key, { key, label, items: [] });
+      map.get(key)!.items.push(s);
+    }
+    return Array.from(map.values()).sort((a, b) => (a.key < b.key ? 1 : -1));
+  }, [filtered]);
+
+  // Equity curve (chronological)
+  const curve = useMemo(() => {
+    let cum = 0;
+    return [...filtered]
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+      .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
+  }, [filtered]);
+
+  // Per-strategy win rate over time (per month)
+  const strategyTrends = useMemo(() => {
+    const m: Record<string, Record<string, { n: number; wins: number }>> = {};
+    for (const s of filtered) {
+      const d = new Date(s.created_at);
+      const mo = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      m[s.setup] ??= {};
+      m[s.setup][mo] ??= { n: 0, wins: 0 };
+      m[s.setup][mo].n++;
+      if ((s.outcome_r ?? 0) > 0) m[s.setup][mo].wins++;
+    }
+    const months = Array.from(new Set(Object.values(m).flatMap(Object.keys))).sort();
+    const setupsList = Object.keys(m).sort();
+    return { months, setups: setupsList, data: m };
+  }, [filtered]);
+
+  function exportCSV() {
+    const headers = ["created_at", "pair", "timeframe", "setup", "direction", "entry", "stop_loss", "tp1", "tp2", "rr", "status", "outcome_r", "session"];
+    const rows = filtered.map((s) => [
+      s.created_at, s.pair, s.timeframe, s.setup, s.direction, s.entry, s.stop_loss, s.tp1, s.tp2, s.rr, s.status, s.outcome_r ?? "", sessionOf(s),
+    ]);
+    const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `scalpedge-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  if (closed.length === 0) {
+    return (
+      <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
+        <div className="text-sm">NO CLOSED SIGNALS YET</div>
+        <div className="text-xs mt-1">Close out signals (TP/SL/BE) to build your history.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      {/* Filters + export */}
+      <div className="border border-border rounded bg-card p-3 flex items-center gap-2 flex-wrap text-xs">
+        <span className="uppercase tracking-wider text-muted-foreground">Filters</span>
+        <select value={pairFilter} onChange={(e) => setPairFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All pairs</option>
+          {pairs.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={setupFilter} onChange={(e) => setSetupFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All strategies</option>
+          {setups.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All sessions</option>
+          {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <button onClick={exportCSV}
+          className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
+          ⬇ Export CSV
+        </button>
+      </div>
+
+      {/* Equity curve */}
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Equity Curve · {filtered.length} closed</div>
+        <div className="h-56">
+          {curve.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-xs">No data for these filters</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={curve}>
+                <CartesianGrid stroke="var(--grid)" strokeDasharray="2 2" />
+                <XAxis dataKey="i" stroke="var(--muted-foreground)" fontSize={10} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", fontSize: 11 }} />
+                <Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Per-strategy trends */}
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Strategy Win Rate by Month</div>
+        {strategyTrends.setups.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-6 text-center">No data</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground text-[10px] uppercase tracking-wider">
+                  <th className="text-left py-2 pr-3">Strategy</th>
+                  {strategyTrends.months.map((m) => <th key={m} className="text-right px-2">{m}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {strategyTrends.setups.map((setup) => (
+                  <tr key={setup} className="border-b border-border/40">
+                    <td className="py-1.5 pr-3 text-foreground">{setup}</td>
+                    {strategyTrends.months.map((m) => {
+                      const v = strategyTrends.data[setup][m];
+                      if (!v) return <td key={m} className="text-right text-muted-foreground/50 px-2">—</td>;
+                      const wr = (v.wins / v.n) * 100;
+                      const color = wr >= 50 ? "var(--bull)" : "var(--bear)";
+                      return <td key={m} className="text-right px-2" style={{ color }}>{wr.toFixed(0)}% <span className="text-muted-foreground">({v.n})</span></td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Month groups */}
+      <div className="space-y-2">
+        {groups.map((g) => {
+          const wins = g.items.filter((s) => (s.outcome_r ?? 0) > 0).length;
+          const wr = (wins / g.items.length) * 100;
+          const avgR = g.items.reduce((a, s) => a + (s.outcome_r ?? 0), 0) / g.items.length;
+          const pairTally: Record<string, number> = {};
+          g.items.forEach((s) => { pairTally[s.pair] = (pairTally[s.pair] ?? 0) + 1; });
+          const bestPair = Object.entries(pairTally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+          const open = !!openMonths[g.key];
+          return (
+            <div key={g.key} className="border border-border rounded bg-card">
+              <button onClick={() => setOpenMonths((m) => ({ ...m, [g.key]: !m[g.key] }))}
+                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary/30 flex-wrap">
+                <span className="text-primary">{open ? "▾" : "▸"}</span>
+                <span className="font-bold">{g.label}</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs">{g.items.length} signals</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs" style={{ color: wr >= 50 ? "var(--bull)" : "var(--bear)" }}>{wr.toFixed(0)}% win</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs" style={{ color: avgR >= 0 ? "var(--bull)" : "var(--bear)" }}>
+                  {avgR >= 0 ? "+" : ""}{avgR.toFixed(2)}R avg
+                </span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs">best: {bestPair}</span>
+              </button>
+              {open && (
+                <div className="border-t border-border px-3 py-2 space-y-1 text-xs font-mono">
+                  {g.items.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 flex-wrap py-1 border-b border-border/30 last:border-b-0">
+                      <span className="text-muted-foreground w-32">{new Date(s.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${s.direction === "Long" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"}`}>
+                        {s.direction === "Long" ? "▲" : "▼"} {s.pair}
+                      </span>
+                      <span className="text-muted-foreground">{s.timeframe}</span>
+                      <span>{s.setup}</span>
+                      <span className="text-muted-foreground uppercase text-[10px]">{s.status}</span>
+                      <span className="ml-auto font-bold" style={{
+                        color: (s.outcome_r ?? 0) > 0 ? "var(--bull)" : (s.outcome_r ?? 0) < 0 ? "var(--bear)" : "var(--muted-foreground)"
+                      }}>
+                        {(s.outcome_r ?? 0) > 0 ? "+" : ""}{(s.outcome_r ?? 0).toFixed(2)}R
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
