@@ -164,9 +164,10 @@ function ScalpEdge() {
     return () => clearInterval(t);
   }, []);
 
-  // Persist settings (sound only — auto-scan is server-side)
+  // Persist settings (sound only — auto-scan is server-side). SSR-safe.
   useEffect(() => {
-    const raw = localStorage.getItem("scalpedge-settings");
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem("scalpedge-settings");
     if (raw) {
       try {
         const s = JSON.parse(raw);
@@ -175,7 +176,8 @@ function ScalpEdge() {
     }
   }, []);
   useEffect(() => {
-    localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
   }, [soundOn]);
 
   async function loadSignals() {
