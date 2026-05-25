@@ -186,6 +186,7 @@ function ScalpEdge() {
 
   const [appSettings, setAppSettings] = useState<AppSettings>({
     paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
+    session_config: DEFAULT_SESSION_CONFIG,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
