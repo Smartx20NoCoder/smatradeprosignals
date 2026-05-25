@@ -214,7 +214,7 @@ function ScalpEdge() {
   async function loadSignals() {
     const { data } = await supabase
       .from("signals").select("*")
-      .order("created_at", { ascending: false }).limit(200);
+      .order("created_at", { ascending: false }).limit(1000);
     const next = (data as Signal[]) ?? [];
     // Detect new signal IDs from server-side cron and beep
     const incoming = next.map((s) => s.id);
