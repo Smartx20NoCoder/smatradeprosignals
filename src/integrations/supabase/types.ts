@@ -37,6 +37,7 @@ export type Database = {
           active_td_key: number
           id: string
           paused: boolean
+          session_config: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
           updated_at: string
@@ -45,6 +46,7 @@ export type Database = {
           active_td_key?: number
           id?: string
           paused?: boolean
+          session_config?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
           updated_at?: string
@@ -53,6 +55,7 @@ export type Database = {
           active_td_key?: number
           id?: string
           paused?: boolean
+          session_config?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
           updated_at?: string
