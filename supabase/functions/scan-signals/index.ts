@@ -842,7 +842,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       if (!isWithinTradingHours(new Date(), settings)) {
-        const skipResult = { skipped: true, reason: `outside trading hours (${settings.trading_hours_start_utc}-${settings.trading_hours_end_utc} UTC)`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        const skipResult = { skipped: true, reason: `outside active trading window`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
         await finalize(skipResult, true);
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
