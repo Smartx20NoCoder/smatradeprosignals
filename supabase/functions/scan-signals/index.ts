@@ -26,6 +26,25 @@ const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
 let lastTwelveDataCallStartedAt = 0;
 
+// Currencies relevant to each pair (used for the news blackout match)
+function pairCurrencies(pair: string): string[] {
+  if (pair === "XAU/USD") return ["USD", "XAU"];
+  if (pair === "BTC/USD") return ["USD"];
+  return [pair.slice(0, 3), pair.slice(4, 7)];
+}
+
+// Weekend / Friday-late filter: forex + gold pause from Fri 22:00 UTC to Sun 22:00 UTC.
+// Only BTC/USD trades in that window.
+function isPairAllowedNow(pair: string, d: Date): boolean {
+  if (pair === "BTC/USD") return true;
+  const day = d.getUTCDay(); // 0 Sun, 5 Fri, 6 Sat
+  const h = d.getUTCHours();
+  if (day === 6) return false;                  // Saturday: closed
+  if (day === 0 && h < 22) return false;        // Sunday before 22:00 UTC
+  if (day === 5 && h >= 22) return false;       // Friday 22:00 UTC onwards
+  return true;
+}
+
 // Spread cushion: pips for FX, absolute $ for gold/BTC.
 const SPREAD_PIPS: Record<string, number> = {
   "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2,
