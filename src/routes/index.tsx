@@ -282,21 +282,7 @@ function ScalpEdge() {
     }
   }
 
-  // Auto-scan loop
-  useEffect(() => {
-    if (autoTimerRef.current) {
-      clearInterval(autoTimerRef.current);
-      autoTimerRef.current = null;
-    }
-    if (autoScan) {
-      autoTimerRef.current = window.setInterval(() => {
-        if (!scanning) runScan("latest");
-      }, autoInterval * 60 * 1000);
-    }
-    return () => {
-      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
-    };
-  }, [autoScan, autoInterval]);
+  // Server-side cron handles auto-scans every 15 min; no client interval needed.
 
   // Manual status setter — user can click any tile at any time to correct outcome.
   async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
