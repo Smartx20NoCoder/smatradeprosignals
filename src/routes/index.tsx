@@ -243,6 +243,7 @@ function ScalpEdge() {
       trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
       trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
       active_td_key: Number(cfg.active_td_key ?? 1),
+      session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
