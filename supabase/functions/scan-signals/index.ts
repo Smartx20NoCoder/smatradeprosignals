@@ -480,6 +480,42 @@ function qualifyAndScore(
   };
 }
 
+async function sendTelegramAlerts(signals: Signal[]) {
+  const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
+  if (!token || !chatId || !signals.length) return;
+  for (const s of signals) {
+    const arrow = s.direction === "Long" ? "🟢 BUY" : "🔴 SELL";
+    const session =
+      s.session_score >= 90 ? "London/NY Overlap" :
+      s.session_score >= 85 ? "London" :
+      s.session_score >= 80 ? "New York" :
+      s.session_score >= 70 ? "Asian/Crypto" : "Off-session";
+    const fmt = (n: number) => {
+      if (s.pair === "XAU/USD") return n.toFixed(2);
+      if (s.pair === "BTC/USD") return n.toFixed(1);
+      return n.toFixed(s.pair.includes("JPY") ? 3 : 5);
+    };
+    const text =
+      `${arrow}  *${s.pair}*  (${s.timeframe})\n` +
+      `Order: *${s.order_type ?? ""}*\n` +
+      `Entry: \`${fmt(s.entry)}\`\n` +
+      `SL: \`${fmt(s.stop_loss)}\`\n` +
+      `TP1: \`${fmt(s.tp1)}\`   TP2: \`${fmt(s.tp2)}\`\n` +
+      `R:R 1:${s.rr.toFixed(2)}  ·  Conf *${s.confidence}%*\n` +
+      `Setup: ${s.setup}\n` +
+      `Session: ${session}` +
+      (s.htf_bias && s.htf_bias !== "neutral" ? `  ·  1H ${s.htf_bias}` : "");
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+      });
+    } catch (_) { /* skip silently */ }
+  }
+}
+
 async function runScanJob(
   supabase: ReturnType<typeof createClient>,
   tdKey: string,
