@@ -172,13 +172,15 @@ async function fetchCandles(
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
+  const ttlMin = CACHE_TTL_MIN_BY_TF[tf.label] ?? DEFAULT_CACHE_TTL_MIN;
   if (cached) {
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
-    if (ageMin < CACHE_TTL_MIN) {
-      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cache hit (${ageMin.toFixed(1)}m old)` });
+    if (ageMin < ttlMin) {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cached (${ageMin.toFixed(1)}m / ${ttlMin}m TTL)` });
       return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
     }
   }
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m)` });
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${apiKey}`;
   let r: Response | null = null;
   let usedApi = 0;
