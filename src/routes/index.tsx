@@ -661,12 +661,13 @@ function SignalList({
 }
 
 function SignalRow({
-  s, onStatus, onPartial, warning,
+  s, onStatus, onPartial, warning, newsRisk,
 }: {
   s: Signal;
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   warning: string | null;
+  newsRisk: string | null;
 }) {
   const long = s.direction === "Long";
   const stage = stageOf(s);
