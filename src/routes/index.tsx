@@ -218,6 +218,37 @@ function ScalpEdge() {
     const { data: cache } = await supabase.from("candle_cache")
       .select("pair, timeframe, fetched_at");
     setCacheRows((cache as CacheRow[]) ?? []);
+    const { data: cfg } = await (supabase as any).from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+    if (cfg) setAppSettings({
+      paused: !!cfg.paused,
+      trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
+      trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
+      active_td_key: Number(cfg.active_td_key ?? 1),
+    });
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+    const { data: ev } = await (supabase as any).from("economic_events")
+      .select("*").gte("event_time", dayStart.toISOString()).lt("event_time", dayEnd.toISOString())
+      .order("event_time", { ascending: true });
+    setTodaysEvents((ev as EconomicEvent[]) ?? []);
+  }
+
+  async function saveAppSettings(patch: Partial<AppSettings>) {
+    const next = { ...appSettings, ...patch };
+    setAppSettings(next);
+    await (supabase as any).from("app_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() }).eq("id", "singleton");
+  }
+
+  async function refreshNewsCalendar() {
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      body: JSON.stringify({ source: "manual" }),
+    });
+    await loadHealth();
   }
 
   useEffect(() => {
