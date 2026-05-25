@@ -359,6 +359,23 @@ function ScalpEdge() {
     return null;
   }
 
+  // Live news-risk check: any high-impact event within ±30min for a relevant currency.
+  function newsRiskCheck(s: Signal): string | null {
+    const ccys = s.pair === "XAU/USD" ? ["USD", "XAU"]
+      : s.pair === "BTC/USD" ? ["USD"]
+      : [s.pair.slice(0, 3), s.pair.slice(4, 7)];
+    const t = Date.now();
+    for (const e of todaysEvents) {
+      if (!ccys.includes(e.currency)) continue;
+      const dt = new Date(e.event_time).getTime();
+      const diff = Math.round((dt - t) / 60000);
+      if (Math.abs(diff) <= 30) {
+        return `${e.title} (${e.currency}) ${diff >= 0 ? `in ${diff}m` : `${-diff}m ago`}`;
+      }
+    }
+    return null;
+  }
+
   const stats = useMemo(() => {
     const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
     const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
