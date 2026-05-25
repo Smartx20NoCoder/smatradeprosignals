@@ -455,14 +455,15 @@ function ScalpEdge() {
 
         {lastScan && reportOpen && lastScan.report.length > 0 && <ScanReport report={lastScan.report} />}
 
-        <nav className="mt-6 flex gap-1 border-b border-border">
+        <nav className="mt-6 flex gap-1 border-b border-border overflow-x-auto">
           {([
             ["signals", `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
             ["edge", "EDGE"],
+            ["health", "HEALTH"],
             ["settings", "SETTINGS"],
           ] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 text-xs uppercase tracking-wider font-semibold border-b-2 transition-colors ${
+              className={`px-4 py-2 text-xs uppercase tracking-wider font-semibold border-b-2 transition-colors whitespace-nowrap ${
                 tab === k ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}>
               {label}
@@ -471,13 +472,27 @@ function ScalpEdge() {
         </nav>
 
         {tab === "signals" && (
-          <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be} exposureCheck={exposureCheck} />
+          <>
+            <RiskExposureWidget
+              openSignals={openOnly}
+              openRiskPct={openRiskPct}
+              correlationWarnings={correlationWarnings}
+            />
+            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be} exposureCheck={exposureCheck} />
+          </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "health" && (
+          <HealthPanel
+            scanRuns={scanRuns}
+            cacheRows={cacheRows}
+            budgetToday={budgetToday}
+            lastCron={lastCron ?? null}
+            nextCronAt={nextCronAt}
+          />
+        )}
         {tab === "settings" && (
           <SettingsPanel
-            autoScan={autoScan} setAutoScan={setAutoScan}
-            autoInterval={autoInterval} setAutoInterval={setAutoInterval}
             soundOn={soundOn} setSoundOn={setSoundOn}
             projectedDaily={projectedDaily}
           />
