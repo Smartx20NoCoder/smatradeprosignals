@@ -341,10 +341,26 @@ function ScalpEdge() {
   const openSignals = signals.filter((s) => stageOf(s) === 2);
   const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
 
-  // Auto-scan budget projection (calls/day)
-  const autoCallsPerScan = 14; // 7 pairs * 2 TFs (5m + 15m). 1H pulled from cache.
-  const scansPerDay = autoScan ? Math.floor((24 * 60) / autoInterval) : 0;
+  // Server cron projected budget (every 15 min, ~14 calls per latest-mode scan)
+  const autoCallsPerScan = 14;
+  const scansPerDay = Math.floor((24 * 60) / CRON_INTERVAL_MIN);
   const projectedDaily = scansPerDay * autoCallsPerScan;
+
+  // Risk exposure (open / In-Trade signals)
+  const openOnly = signals.filter((s) => stageOf(s) === 2);
+  const openRiskPct = openOnly.length * RISK_PER_TRADE_PCT;
+  const correlationWarnings: string[] = [];
+  for (const [a, b] of CORRELATIONS) {
+    const sameDirOpen = openOnly.filter((s) => (s.pair === a || s.pair === b));
+    const longs = sameDirOpen.filter((s) => s.direction === "Long");
+    const shorts = sameDirOpen.filter((s) => s.direction === "Short");
+    if (longs.length >= 2) correlationWarnings.push(`${a} + ${b} both LONG — correlated exposure`);
+    if (shorts.length >= 2) correlationWarnings.push(`${a} + ${b} both SHORT — correlated exposure`);
+  }
+  const lastCron = scanRuns.find((r) => r.source === "cron" && r.finished_at) ?? scanRuns.find((r) => r.source === "cron");
+  const nextCronAt = lastCron
+    ? new Date(new Date(lastCron.started_at).getTime() + CRON_INTERVAL_MIN * 60_000)
+    : null;
 
   return (
     <div className="min-h-screen scanline">
