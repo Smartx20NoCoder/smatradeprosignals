@@ -151,47 +151,67 @@ function ScalpEdge() {
   const [now, setNow] = useState(Date.now());
 
   // Settings
-  const [autoScan, setAutoScan] = useState(false);
-  const [autoInterval, setAutoInterval] = useState<15 | 30>(30);
+  const [autoScan, setAutoScan] = useState(true); // server-side cron — display only
   const [soundOn, setSoundOn] = useState(true);
+  const [scanRuns, setScanRuns] = useState<ScanRun[]>([]);
+  const [cacheRows, setCacheRows] = useState<CacheRow[]>([]);
 
-  // (auto-resolve removed — statuses are manual)
-  const autoTimerRef = useRef<number | null>(null);
   const lastSignalCountRef = useRef(0);
+  const lastSeenSignalIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
 
-  // Persist settings
+  // Persist settings (sound only — auto-scan is server-side)
   useEffect(() => {
     const raw = localStorage.getItem("scalpedge-settings");
     if (raw) {
       try {
         const s = JSON.parse(raw);
-        if (typeof s.autoScan === "boolean") setAutoScan(s.autoScan);
-        if (s.autoInterval === 15 || s.autoInterval === 30) setAutoInterval(s.autoInterval);
         if (typeof s.soundOn === "boolean") setSoundOn(s.soundOn);
       } catch { /* ignore */ }
     }
   }, []);
   useEffect(() => {
-    localStorage.setItem("scalpedge-settings", JSON.stringify({ autoScan, autoInterval, soundOn }));
-  }, [autoScan, autoInterval, soundOn]);
+    localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
+  }, [soundOn]);
 
   async function loadSignals() {
     const { data } = await supabase
       .from("signals").select("*")
       .order("created_at", { ascending: false }).limit(200);
-    setSignals((data as Signal[]) ?? []);
+    const next = (data as Signal[]) ?? [];
+    // Detect new signal IDs from server-side cron and beep
+    const incoming = next.map((s) => s.id);
+    const prev = lastSeenSignalIdsRef.current;
+    if (prev.size > 0 && soundOn) {
+      const fresh = incoming.filter((id) => !prev.has(id));
+      if (fresh.length > 0) playBeep();
+    }
+    lastSeenSignalIdsRef.current = new Set(incoming);
+    setSignals(next);
     const today = new Date().toISOString().slice(0, 10);
     const { data: u } = await supabase.from("api_usage").select("calls").eq("day", today).maybeSingle();
     setBudgetToday((u?.calls as number) ?? 0);
   }
 
+  async function loadHealth() {
+    const { data: runs } = await supabase.from("scan_runs")
+      .select("*").order("started_at", { ascending: false }).limit(20);
+    setScanRuns((runs as ScanRun[]) ?? []);
+    const { data: cache } = await supabase.from("candle_cache")
+      .select("pair, timeframe, fetched_at");
+    setCacheRows((cache as CacheRow[]) ?? []);
+  }
+
   useEffect(() => {
     loadSignals();
+    loadHealth();
+    // Poll the database every 30s for cron-created signals and health stats
+    const t = setInterval(() => { loadSignals(); loadHealth(); }, 30000);
+    return () => clearInterval(t);
   }, []);
 
   async function runScan(mode: "full" | "latest" = "full") {
