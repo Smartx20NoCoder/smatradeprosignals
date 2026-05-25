@@ -576,6 +576,7 @@ function ScalpEdge() {
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "history" && <HistoryPanel signals={signals} />}
         {tab === "health" && (
           <HealthPanel
             scanRuns={scanRuns}
