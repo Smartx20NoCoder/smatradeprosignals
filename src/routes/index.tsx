@@ -62,13 +62,31 @@ type ScanRun = {
   ok: boolean;
 };
 type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type SessionWindow = { enabled: boolean; start: number; end: number };
+type SessionConfig = {
+  scan_active_sessions_only: boolean;
+  sessions: { london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow };
+  custom_overrides: Record<string, { start: number; end: number } | null>;
+};
 type AppSettings = {
   paused: boolean;
   trading_hours_start_utc: number;
   trading_hours_end_utc: number;
   active_td_key: number;
+  session_config: SessionConfig;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
+
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  scan_active_sessions_only: false,
+  sessions: {
+    london: { enabled: true, start: 7, end: 16 },
+    ny:     { enabled: true, start: 12, end: 21 },
+    tokyo:  { enabled: true, start: 0, end: 9 },
+    sydney: { enabled: true, start: 22, end: 7 },
+  },
+  custom_overrides: {},
+};
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
