@@ -32,6 +32,33 @@ export type Database = {
         }
         Relationships: []
       }
+      app_settings: {
+        Row: {
+          active_td_key: number
+          id: string
+          paused: boolean
+          trading_hours_end_utc: number
+          trading_hours_start_utc: number
+          updated_at: string
+        }
+        Insert: {
+          active_td_key?: number
+          id?: string
+          paused?: boolean
+          trading_hours_end_utc?: number
+          trading_hours_start_utc?: number
+          updated_at?: string
+        }
+        Update: {
+          active_td_key?: number
+          id?: string
+          paused?: boolean
+          trading_hours_end_utc?: number
+          trading_hours_start_utc?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       candle_cache: {
         Row: {
           candles: Json
@@ -53,6 +80,36 @@ export type Database = {
           id?: string
           pair?: string
           timeframe?: string
+        }
+        Relationships: []
+      }
+      economic_events: {
+        Row: {
+          currency: string
+          event_time: string
+          fetched_at: string
+          id: string
+          impact: string
+          source: string | null
+          title: string
+        }
+        Insert: {
+          currency: string
+          event_time: string
+          fetched_at?: string
+          id?: string
+          impact: string
+          source?: string | null
+          title: string
+        }
+        Update: {
+          currency?: string
+          event_time?: string
+          fetched_at?: string
+          id?: string
+          impact?: string
+          source?: string | null
+          title?: string
         }
         Relationships: []
       }
