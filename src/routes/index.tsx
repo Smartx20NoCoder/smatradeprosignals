@@ -378,8 +378,10 @@ function ScalpEdge() {
                       {st === "done" ? "✓" : st === "cached" ? "↺" : st === "error" ? "!" : active ? "◌" : "·"}
                     </span>
                     <span className={st === "pending" ? "text-muted-foreground/60 truncate" : "truncate"}>{p} {tf}</span>
-                    {st === "cached" && <span className="text-[9px] text-bull uppercase">cache</span>}
+                    {st === "cached" && <span className="text-[9px] text-bull uppercase">cached</span>}
+                    {st === "fetching" && <span className="text-[9px] text-primary uppercase">fetching</span>}
                     {st === "waiting" && <span className="text-[9px] text-primary uppercase">queued</span>}
+                    {st === "done" && <span className="text-[9px] text-bull uppercase">fresh</span>}
                     {st === "rate_limited" && <span className="text-[9px] text-chart-4 uppercase">429 retry</span>}
                   </div>
                 );
