@@ -638,7 +638,7 @@ async function runScanJob(
   emit?: ProgressEmitter,
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
-    const tfsToFetch = mode === "latest" ? TFS.slice(0, 2) : TFS;
+    const tfsToFetch = TFS;
     const activeKeyRef: { idx: 1 | 2 } = { idx: settings.active_td_key };
 
     const nowDate = new Date();
