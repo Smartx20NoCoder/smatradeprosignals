@@ -596,6 +596,7 @@ function ScalpEdge() {
             ["signals", `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
             ["edge", "EDGE"],
             ["history", "HISTORY"],
+            ["news", "NEWS"],
             ["health", "HEALTH"],
             ["settings", "SETTINGS"],
           ] as const).map(([k, label]) => (
