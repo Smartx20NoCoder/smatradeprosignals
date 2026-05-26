@@ -622,6 +622,15 @@ function ScalpEdge() {
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
         {tab === "history" && <HistoryPanel signals={signals} />}
+        {tab === "news" && (
+          <NewsPanel
+            events={newsEvents}
+            date={newsDate}
+            setDate={setNewsDate}
+            pairs={PAIRS}
+            onRefresh={refreshNewsCalendar}
+          />
+        )}
         {tab === "health" && (
           <HealthPanel
             scanRuns={scanRuns}
