@@ -69,7 +69,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ ok: true, inserted: rows.length, sample: rows.slice(0, 5) }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: (e as Error).message }),
+    console.error("fetch-news-calendar error", e);
+    return new Response(JSON.stringify({ ok: false, error: "Failed to fetch calendar" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
