@@ -175,6 +175,9 @@ function ScalpEdge() {
   const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
   const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsRefreshing, setNewsRefreshing] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   // Settings
