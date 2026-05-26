@@ -1463,7 +1463,8 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
     const map = new Map<string, MonthGroup>();
     for (const s of filtered) {
       const d = new Date(s.created_at);
-      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, "0")}`;
+      // Use 1-indexed month so the key matches strategyTrends ("YYYY-MM").
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
       const label = d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
       if (!map.has(key)) map.set(key, { key, label, items: [] });
       map.get(key)!.items.push(s);
