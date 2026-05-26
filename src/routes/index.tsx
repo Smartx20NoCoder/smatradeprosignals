@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -425,10 +426,26 @@ function ScalpEdge() {
 
   // Manual status setter — user can click any tile at any time to correct outcome.
   async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
-    await supabase.functions.invoke("update-signal", {
-      body: { id: s.id, status },
-      headers: { "x-fn-secret": import.meta.env.VITE_INTERNAL_FN_SECRET ?? "" },
-    });
+    const risk = Math.abs(s.entry - s.stop_loss);
+    let outcome_r: number | null = null;
+    if (risk > 0) {
+      if (status === "tp1") outcome_r = Math.abs(s.tp1 - s.entry) / risk;
+      else if (status === "tp2") outcome_r = Math.abs(s.tp2 - s.entry) / risk;
+      else if (status === "loss") outcome_r = -1;
+      else if (status === "be" || status === "expired") outcome_r = 0;
+    }
+    const update: TablesUpdate<"signals"> = { status };
+    if (status === "pending") {
+      update.outcome_r = null; update.closed_at = null; update.executed_at = null; update.partial_close = false;
+    } else if (status === "executed") {
+      update.outcome_r = null; update.closed_at = null;
+      update.executed_at = new Date().toISOString();
+    } else {
+      update.outcome_r = outcome_r;
+      update.closed_at = new Date().toISOString();
+    }
+    const { error } = await supabase.from("signals").update(update).eq("id", s.id);
+    if (error) { console.error("setStatus failed", error); alert(`Failed to update status: ${error.message}`); return; }
     await loadSignals();
   }
   async function markPartialTp1Be(s: Signal) {

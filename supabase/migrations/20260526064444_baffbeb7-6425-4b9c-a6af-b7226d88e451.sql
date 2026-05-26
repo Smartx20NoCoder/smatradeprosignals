@@ -1,0 +1,1 @@
+CREATE POLICY "public update signals" ON public.signals FOR UPDATE USING (true) WITH CHECK (true);
