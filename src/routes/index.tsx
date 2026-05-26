@@ -374,7 +374,10 @@ function ScalpEdge() {
 
   // Manual status setter — user can click any tile at any time to correct outcome.
   async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
-    await supabase.functions.invoke("update-signal", { body: { id: s.id, status } });
+    await supabase.functions.invoke("update-signal", {
+      body: { id: s.id, status },
+      headers: { "x-fn-secret": import.meta.env.VITE_INTERNAL_FN_SECRET ?? "" },
+    });
     await loadSignals();
   }
   async function markPartialTp1Be(s: Signal) {
