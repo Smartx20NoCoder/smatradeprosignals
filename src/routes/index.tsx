@@ -1714,18 +1714,32 @@ function NewsPanel({
         </button>
         <button
           onClick={() => { void onRefresh(); }}
-          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted"
+          disabled={refreshing}
+          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Refresh Calendar
+          {refreshing ? "Refreshing…" : "Refresh Calendar"}
         </button>
         <span className="text-[10px] text-muted-foreground">
           {events.length} event{events.length === 1 ? "" : "s"}
         </span>
       </div>
 
-      {currencies.length === 0 ? (
+      {error && (
+        <div className="border border-bear bg-bear/10 rounded p-3 text-xs text-bear">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
         <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40">
-          No economic events for {date}.
+          Loading events…
+        </div>
+      ) : currencies.length === 0 ? (
+        <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40 space-y-2">
+          <div>No high-impact economic events for {date}.</div>
+          <div className="text-[10px] text-muted-foreground/70">
+            Try refreshing the calendar, or pick another date — bank holidays and weekends often have no scheduled releases.
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
