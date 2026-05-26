@@ -7,6 +7,12 @@ const corsHeaders = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const expected = Deno.env.get("INTERNAL_FN_SECRET");
+  if (!expected || req.headers.get("x-fn-secret") !== expected) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
   try {
     const { id, status } = await req.json();
     if (!id || !status) throw new Error("id and status required");
