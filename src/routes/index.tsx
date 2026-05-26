@@ -1598,3 +1598,136 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   );
 }
 
+// Currencies affected by a given pair (mirrors newsRiskCheck logic)
+function pairCurrencies(pair: string): string[] {
+  if (pair === "XAU/USD") return ["USD", "XAU"];
+  if (pair === "BTC/USD") return ["USD"];
+  return [pair.slice(0, 3), pair.slice(4, 7)];
+}
+
+function NewsPanel({
+  events, date, setDate, pairs, onRefresh,
+}: {
+  events: EconomicEvent[];
+  date: string;
+  setDate: (d: string) => void;
+  pairs: string[];
+  onRefresh: () => Promise<void>;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+
+  // Blackout: any high-impact event within -30..+30 min of now (active),
+  // or +0..+30 min upcoming. Map back to affected pairs.
+  const blackouts = events
+    .filter((e) => (e.impact ?? "").toLowerCase() === "high")
+    .map((e) => {
+      const diff = Math.round((new Date(e.event_time).getTime() - now) / 60000);
+      const affected = pairs.filter((p) => pairCurrencies(p).includes(e.currency));
+      return { e, diff, affected };
+    })
+    .filter((x) => x.diff >= -30 && x.diff <= 30 && x.affected.length > 0);
+
+  const grouped = events.reduce<Record<string, EconomicEvent[]>>((acc, e) => {
+    (acc[e.currency] = acc[e.currency] ?? []).push(e);
+    return acc;
+  }, {});
+  const currencies = Object.keys(grouped).sort();
+
+  return (
+    <div className="mt-6 space-y-4 animate-fade-in">
+      {blackouts.length > 0 && (
+        <div className="border-2 border-bear bg-bear/10 rounded p-3">
+          <div className="text-[10px] uppercase tracking-wider text-bear font-bold mb-2">
+            ⚠ News Blackout {blackouts.some((b) => b.diff <= 0 && b.diff >= -30) ? "Active" : "Imminent"}
+          </div>
+          <ul className="space-y-1 text-xs">
+            {blackouts.map((b, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bear text-bear-foreground">HIGH</span>
+                <span className="font-semibold">{b.e.currency}</span>
+                <span>{b.e.title}</span>
+                <span className="text-muted-foreground">
+                  {b.diff >= 0 ? `in ${b.diff}m` : `${-b.diff}m ago`}
+                </span>
+                <span className="ml-auto text-muted-foreground text-[10px]">
+                  affects: {b.affected.join(", ")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 border border-border rounded p-3 bg-card/60">
+        <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Date (UTC)</label>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="bg-background border border-border rounded px-2 py-1 text-xs"
+        />
+        <button
+          onClick={() => setDate(today)}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 border border-border rounded hover:bg-muted"
+        >
+          Today
+        </button>
+        <button
+          onClick={() => { void onRefresh(); }}
+          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted"
+        >
+          Refresh Calendar
+        </button>
+        <span className="text-[10px] text-muted-foreground">
+          {events.length} event{events.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {currencies.length === 0 ? (
+        <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40">
+          No economic events for {date}.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {currencies.map((ccy) => (
+            <div key={ccy} className="border border-border rounded bg-card/60">
+              <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+                <span className="font-mono text-sm font-bold">{ccy}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  {grouped[ccy].length} event{grouped[ccy].length === 1 ? "" : "s"} ·
+                  affects {pairs.filter((p) => pairCurrencies(p).includes(ccy)).join(", ") || "—"}
+                </span>
+              </div>
+              <ul className="divide-y divide-border">
+                {grouped[ccy].map((e) => {
+                  const d = new Date(e.event_time);
+                  const hh = String(d.getUTCHours()).padStart(2, "0");
+                  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+                  const impact = (e.impact ?? "").toLowerCase();
+                  const isHigh = impact === "high";
+                  const badgeCls = isHigh
+                    ? "bg-bear text-bear-foreground"
+                    : impact === "medium"
+                      ? "bg-amber-500/80 text-background"
+                      : "bg-muted text-muted-foreground";
+                  return (
+                    <li key={e.id} className="px-3 py-2 flex items-center gap-3 text-xs">
+                      <span className="font-mono text-muted-foreground w-14">{hh}:{mm}</span>
+                      <span className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded ${badgeCls}`}>
+                        {e.impact ?? "—"}
+                      </span>
+                      <span className="flex-1">{e.title}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
