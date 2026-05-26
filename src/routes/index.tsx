@@ -256,16 +256,33 @@ function ScalpEdge() {
   async function saveAppSettings(patch: Partial<AppSettings>) {
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    await (supabase as any).from("app_settings")
-      .update({ ...patch, updated_at: new Date().toISOString() }).eq("id", "singleton");
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
+    await fetch(`${projectUrl}/functions/v1/update-settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-fn-secret": fnSecret,
+      },
+      body: JSON.stringify(patch),
+    });
   }
 
   async function refreshNewsCalendar() {
     const projectUrl = import.meta.env.VITE_SUPABASE_URL;
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-fn-secret": fnSecret,
+      },
       body: JSON.stringify({ source: "manual" }),
     });
     await loadHealth();
@@ -290,9 +307,15 @@ function ScalpEdge() {
     try {
       const projectUrl = import.meta.env.VITE_SUPABASE_URL;
       const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
       const res = await fetch(`${projectUrl}/functions/v1/scan-signals`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "x-fn-secret": fnSecret,
+        },
         body: JSON.stringify({ mode, stream: true }),
       });
       if (!res.ok) throw new Error(`Scan failed (${res.status})`);
@@ -351,7 +374,10 @@ function ScalpEdge() {
 
   // Manual status setter — user can click any tile at any time to correct outcome.
   async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
-    await supabase.functions.invoke("update-signal", { body: { id: s.id, status } });
+    await supabase.functions.invoke("update-signal", {
+      body: { id: s.id, status },
+      headers: { "x-fn-secret": import.meta.env.VITE_INTERNAL_FN_SECRET ?? "" },
+    });
     await loadSignals();
   }
   async function markPartialTp1Be(s: Signal) {

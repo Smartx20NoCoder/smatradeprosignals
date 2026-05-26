@@ -7,7 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fn-secret",
 };
 
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
@@ -232,11 +232,12 @@ async function fetchCandles(
     usedApi += second.calls;
   }
 
-  if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
+  if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
+    console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
-    throw new Error(`TwelveData ${pair} ${tf.label}: ${JSON.stringify(j).slice(0, 180)}`);
+    throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
@@ -794,6 +795,12 @@ async function runScanJob(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const expected = Deno.env.get("INTERNAL_FN_SECRET");
+  if (!expected || req.headers.get("x-fn-secret") !== expected) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
@@ -872,8 +879,9 @@ Deno.serve(async (req) => {
     await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
+    console.error("scan-signals error", e);
     await finalize(null, false, (e as Error).message);
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
+    return new Response(JSON.stringify({ error: "Internal scan error" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
