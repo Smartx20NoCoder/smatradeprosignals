@@ -350,7 +350,9 @@ function ScalpEdge() {
 
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
-    const activeTfs = mode === "latest" ? ["5m", "15m"] : [...TFS];
+    // Server always fetches all 3 timeframes now (1h cache is TTL-protected),
+    // so progress UI must match — otherwise 1h progress events become orphans.
+    const activeTfs = [...TFS];
     setScanTimeframes(activeTfs);
     const init: Record<string, ProgressItem> = {};
     PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = { status: "pending" })));
