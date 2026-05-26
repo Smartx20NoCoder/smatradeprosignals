@@ -1,0 +1,67 @@
+// Privileged updater for app_settings (singleton row).
+// Required because the table's public INSERT/UPDATE policies were removed
+// for security. Browser callers must send x-fn-secret.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fn-secret",
+};
+
+const ALLOWED_KEYS = new Set([
+  "paused",
+  "trading_hours_start_utc",
+  "trading_hours_end_utc",
+  "active_td_key",
+  "session_config",
+]);
+
+function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (!ALLOWED_KEYS.has(k)) continue;
+    if (k === "paused" && typeof v !== "boolean") continue;
+    if ((k === "trading_hours_start_utc" || k === "trading_hours_end_utc") &&
+        (typeof v !== "number" || v < 0 || v > 23 || !Number.isInteger(v))) continue;
+    if (k === "active_td_key" && (typeof v !== "number" || ![1, 2].includes(v))) continue;
+    if (k === "session_config" && (typeof v !== "object" || v === null)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const expected = Deno.env.get("INTERNAL_FN_SECRET");
+  if (!expected || req.headers.get("x-fn-secret") !== expected) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  try {
+    const raw = await req.json().catch(() => ({}));
+    const patch = sanitize(raw ?? {});
+    if (Object.keys(patch).length === 0) {
+      return new Response(JSON.stringify({ error: "No valid fields" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { error } = await supabase
+      .from("app_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", "singleton");
+    if (error) throw error;
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error("update-settings error", e);
+    return new Response(JSON.stringify({ error: "Failed to update settings" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
