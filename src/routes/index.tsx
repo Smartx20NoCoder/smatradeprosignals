@@ -1642,13 +1642,16 @@ function pairCurrencies(pair: string): string[] {
 }
 
 function NewsPanel({
-  events, date, setDate, pairs, onRefresh,
+  events, date, setDate, pairs, onRefresh, loading, refreshing, error,
 }: {
   events: EconomicEvent[];
   date: string;
   setDate: (d: string) => void;
   pairs: string[];
   onRefresh: () => Promise<void>;
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const now = Date.now();
