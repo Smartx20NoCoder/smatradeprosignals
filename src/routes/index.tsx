@@ -1644,7 +1644,7 @@ function NewsPanel({
           <ul className="space-y-1 text-xs">
             {blackouts.map((b, i) => (
               <li key={i} className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bear text-bear-foreground">HIGH</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bear text-background">HIGH</span>
                 <span className="font-semibold">{b.e.currency}</span>
                 <span>{b.e.title}</span>
                 <span className="text-muted-foreground">
@@ -1707,7 +1707,7 @@ function NewsPanel({
                   const impact = (e.impact ?? "").toLowerCase();
                   const isHigh = impact === "high";
                   const badgeCls = isHigh
-                    ? "bg-bear text-bear-foreground"
+                    ? "bg-bear text-background"
                     : impact === "medium"
                       ? "bg-amber-500/80 text-background"
                       : "bg-muted text-muted-foreground";
