@@ -434,7 +434,7 @@ function ScalpEdge() {
       else if (status === "loss") outcome_r = -1;
       else if (status === "be" || status === "expired") outcome_r = 0;
     }
-    const update: Record<string, string | number | boolean | null> = { status };
+    const update: TablesUpdate<"signals"> = { status };
     if (status === "pending") {
       update.outcome_r = null; update.closed_at = null; update.executed_at = null; update.partial_close = false;
     } else if (status === "executed") {
