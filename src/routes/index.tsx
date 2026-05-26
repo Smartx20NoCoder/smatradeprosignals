@@ -298,6 +298,22 @@ function ScalpEdge() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const dayStart = new Date(`${newsDate}T00:00:00Z`);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+      const { data } = await (supabase as any).from("economic_events")
+        .select("*")
+        .gte("event_time", dayStart.toISOString())
+        .lt("event_time", dayEnd.toISOString())
+        .order("event_time", { ascending: true });
+      if (!cancelled) setNewsEvents((data as EconomicEvent[]) ?? []);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [newsDate, now]);
+
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
     const activeTfs = mode === "latest" ? ["5m", "15m"] : [...TFS];
