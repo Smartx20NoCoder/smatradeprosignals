@@ -662,6 +662,9 @@ function ScalpEdge() {
             setDate={setNewsDate}
             pairs={PAIRS}
             onRefresh={refreshNewsCalendar}
+            loading={newsLoading}
+            refreshing={newsRefreshing}
+            error={newsError}
           />
         )}
         {tab === "health" && (
