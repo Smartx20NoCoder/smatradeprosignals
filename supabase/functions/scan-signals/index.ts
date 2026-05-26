@@ -879,8 +879,9 @@ Deno.serve(async (req) => {
     await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
+    console.error("scan-signals error", e);
     await finalize(null, false, (e as Error).message);
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
+    return new Response(JSON.stringify({ error: "Internal scan error" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
