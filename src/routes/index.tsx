@@ -307,9 +307,15 @@ function ScalpEdge() {
     try {
       const projectUrl = import.meta.env.VITE_SUPABASE_URL;
       const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
       const res = await fetch(`${projectUrl}/functions/v1/scan-signals`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "x-fn-secret": fnSecret,
+        },
         body: JSON.stringify({ mode, stream: true }),
       });
       if (!res.ok) throw new Error(`Scan failed (${res.status})`);
