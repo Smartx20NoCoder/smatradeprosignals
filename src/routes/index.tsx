@@ -175,6 +175,9 @@ function ScalpEdge() {
   const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
   const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsRefreshing, setNewsRefreshing] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   // Settings
@@ -277,17 +280,53 @@ function ScalpEdge() {
     const projectUrl = import.meta.env.VITE_SUPABASE_URL;
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
-    await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        "x-fn-secret": fnSecret,
-      },
-      body: JSON.stringify({ source: "manual" }),
-    });
-    await loadHealth();
+    setNewsRefreshing(true);
+    setNewsError(null);
+    try {
+      const res = await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "x-fn-secret": fnSecret,
+        },
+        body: JSON.stringify({ source: "manual", date: newsDate }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Calendar refresh failed (${res.status})${text ? `: ${text.slice(0, 120)}` : ""}`);
+      }
+      // Re-load events for current date after refresh
+      await loadNewsEvents(newsDate);
+      await loadHealth();
+    } catch (err) {
+      console.error("refreshNewsCalendar error", err);
+      setNewsError(err instanceof Error ? err.message : "Failed to refresh calendar");
+    } finally {
+      setNewsRefreshing(false);
+    }
+  }
+
+  async function loadNewsEvents(day: string) {
+    setNewsLoading(true);
+    try {
+      const dayStart = new Date(`${day}T00:00:00Z`);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+      const { data, error } = await (supabase as any).from("economic_events")
+        .select("*")
+        .gte("event_time", dayStart.toISOString())
+        .lt("event_time", dayEnd.toISOString())
+        .order("event_time", { ascending: true });
+      if (error) throw error;
+      setNewsEvents((data as EconomicEvent[]) ?? []);
+    } catch (err) {
+      console.error("loadNewsEvents error", err);
+      setNewsEvents([]);
+      setNewsError(err instanceof Error ? err.message : "Failed to load events");
+    } finally {
+      setNewsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -300,19 +339,13 @@ function ScalpEdge() {
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      const dayStart = new Date(`${newsDate}T00:00:00Z`);
-      const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
-      const { data } = await (supabase as any).from("economic_events")
-        .select("*")
-        .gte("event_time", dayStart.toISOString())
-        .lt("event_time", dayEnd.toISOString())
-        .order("event_time", { ascending: true });
-      if (!cancelled) setNewsEvents((data as EconomicEvent[]) ?? []);
-    }
-    load();
+    (async () => {
+      await loadNewsEvents(newsDate);
+      if (cancelled) return;
+    })();
     return () => { cancelled = true; };
-  }, [newsDate, now]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newsDate]);
 
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
@@ -629,6 +662,9 @@ function ScalpEdge() {
             setDate={setNewsDate}
             pairs={PAIRS}
             onRefresh={refreshNewsCalendar}
+            loading={newsLoading}
+            refreshing={newsRefreshing}
+            error={newsError}
           />
         )}
         {tab === "health" && (
@@ -1606,13 +1642,16 @@ function pairCurrencies(pair: string): string[] {
 }
 
 function NewsPanel({
-  events, date, setDate, pairs, onRefresh,
+  events, date, setDate, pairs, onRefresh, loading, refreshing, error,
 }: {
   events: EconomicEvent[];
   date: string;
   setDate: (d: string) => void;
   pairs: string[];
   onRefresh: () => Promise<void>;
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const now = Date.now();
@@ -1675,18 +1714,32 @@ function NewsPanel({
         </button>
         <button
           onClick={() => { void onRefresh(); }}
-          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted"
+          disabled={refreshing}
+          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Refresh Calendar
+          {refreshing ? "Refreshing…" : "Refresh Calendar"}
         </button>
         <span className="text-[10px] text-muted-foreground">
           {events.length} event{events.length === 1 ? "" : "s"}
         </span>
       </div>
 
-      {currencies.length === 0 ? (
+      {error && (
+        <div className="border border-bear bg-bear/10 rounded p-3 text-xs text-bear">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
         <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40">
-          No economic events for {date}.
+          Loading events…
+        </div>
+      ) : currencies.length === 0 ? (
+        <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40 space-y-2">
+          <div>No high-impact economic events for {date}.</div>
+          <div className="text-[10px] text-muted-foreground/70">
+            Try refreshing the calendar, or pick another date — bank holidays and weekends often have no scheduled releases.
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
