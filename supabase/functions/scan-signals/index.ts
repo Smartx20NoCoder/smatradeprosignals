@@ -232,11 +232,12 @@ async function fetchCandles(
     usedApi += second.calls;
   }
 
-  if (!r) throw new Error(`TwelveData ${pair} ${tf.label}: no response`);
+  if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
+    console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
-    throw new Error(`TwelveData ${pair} ${tf.label}: ${JSON.stringify(j).slice(0, 180)}`);
+    throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
