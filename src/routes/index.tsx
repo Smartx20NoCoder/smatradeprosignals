@@ -256,16 +256,33 @@ function ScalpEdge() {
   async function saveAppSettings(patch: Partial<AppSettings>) {
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    await (supabase as any).from("app_settings")
-      .update({ ...patch, updated_at: new Date().toISOString() }).eq("id", "singleton");
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
+    await fetch(`${projectUrl}/functions/v1/update-settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-fn-secret": fnSecret,
+      },
+      body: JSON.stringify(patch),
+    });
   }
 
   async function refreshNewsCalendar() {
     const projectUrl = import.meta.env.VITE_SUPABASE_URL;
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-fn-secret": fnSecret,
+      },
       body: JSON.stringify({ source: "manual" }),
     });
     await loadHealth();
