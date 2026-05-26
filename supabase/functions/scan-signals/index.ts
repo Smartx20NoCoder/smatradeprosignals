@@ -680,12 +680,8 @@ async function runScanJob(
           fetches.push(f);
           apiCalls += f.usedApi;
         }
-        let c1h: Candle[] = [];
-        if (tfsToFetch.length < 3) {
-          const { data } = await supabase.from("candle_cache").select("candles")
-            .eq("pair", pair).eq("timeframe", "1h").maybeSingle();
-          c1h = (data?.candles as Candle[]) ?? [];
-        } else c1h = fetches[2].candles;
+        // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
+        const c1h = fetches[2].candles;
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {

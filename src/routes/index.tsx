@@ -350,7 +350,9 @@ function ScalpEdge() {
 
   async function runScan(mode: "full" | "latest" = "full") {
     setScanning(true);
-    const activeTfs = mode === "latest" ? ["5m", "15m"] : [...TFS];
+    // Server always fetches all 3 timeframes now (1h cache is TTL-protected),
+    // so progress UI must match — otherwise 1h progress events become orphans.
+    const activeTfs = [...TFS];
     setScanTimeframes(activeTfs);
     const init: Record<string, ProgressItem> = {};
     PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = { status: "pending" })));
@@ -511,7 +513,7 @@ function ScalpEdge() {
       .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
     const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
     return { summary, curve, totalR: cum, totalN: closed.length, winRate: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [signals, now]);
+  }, [signals]);
 
   const pendingSignals = signals.filter((s) => stageOf(s) === 1);
   const openSignals = signals.filter((s) => stageOf(s) === 2);
@@ -1463,7 +1465,8 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
     const map = new Map<string, MonthGroup>();
     for (const s of filtered) {
       const d = new Date(s.created_at);
-      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, "0")}`;
+      // Use 1-indexed month so the key matches strategyTrends ("YYYY-MM").
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
       const label = d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
       if (!map.has(key)) map.set(key, { key, label, items: [] });
       map.get(key)!.items.push(s);
