@@ -513,7 +513,7 @@ function ScalpEdge() {
       .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
     const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
     return { summary, curve, totalR: cum, totalN: closed.length, winRate: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [signals, now]);
+  }, [signals]);
 
   const pendingSignals = signals.filter((s) => stageOf(s) === 1);
   const openSignals = signals.filter((s) => stageOf(s) === 2);
