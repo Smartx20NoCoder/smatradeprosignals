@@ -723,9 +723,15 @@ async function runScanJob(
     // Persist whichever key we ended on (in case a failover happened).
     if (activeKeyRef.idx !== settings.active_td_key) {
       try {
-        await supabase.from("app_settings").update({
+        const update: Record<string, unknown> = {
           active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
-        }).eq("id", "singleton");
+        };
+        // If we failed over away from Key 1, mark Key 1 as exhausted for today
+        // so the next scan starts directly on Key 2 (cleared at next UTC day).
+        if (settings.active_td_key === 1 && activeKeyRef.idx === 2) {
+          update.key1_exhausted_at = new Date().toISOString();
+        }
+        await supabase.from("app_settings").update(update).eq("id", "singleton");
       } catch (_) { /* ignore */ }
     }
 
