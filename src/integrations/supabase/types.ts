@@ -36,6 +36,7 @@ export type Database = {
         Row: {
           active_td_key: number
           id: string
+          key1_exhausted_at: string | null
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number
@@ -45,6 +46,7 @@ export type Database = {
         Insert: {
           active_td_key?: number
           id?: string
+          key1_exhausted_at?: string | null
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -54,6 +56,7 @@ export type Database = {
         Update: {
           active_td_key?: number
           id?: string
+          key1_exhausted_at?: string | null
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number

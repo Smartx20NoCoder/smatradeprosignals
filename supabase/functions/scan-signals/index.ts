@@ -569,6 +569,7 @@ type ActiveSettings = {
   trading_hours_end_utc: number;
   active_td_key: 1 | 2;
   session_config: SessionConfig;
+  key1_exhausted_at: string | null;
 };
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
@@ -582,14 +583,42 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
   custom_overrides: {},
 };
 
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return a.getUTCFullYear() === b.getUTCFullYear()
+    && a.getUTCMonth() === b.getUTCMonth()
+    && a.getUTCDate() === b.getUTCDate();
+}
+
 async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
   const { data } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+  const persistedKey: 1 | 2 = ((data?.active_td_key ?? 1) === 2 ? 2 : 1);
+  const exhaustedRaw = (data?.key1_exhausted_at as string | null) ?? null;
+  let key1ExhaustedAt: string | null = exhaustedRaw;
+  let effectiveKey: 1 | 2 = persistedKey;
+
+  if (exhaustedRaw) {
+    const exhaustedDate = new Date(exhaustedRaw);
+    if (isSameUtcDay(exhaustedDate, new Date())) {
+      // Key 1 was rate-limited today — start directly on Key 2.
+      effectiveKey = 2;
+    } else {
+      // Prior UTC day — clear the flag so Key 1 is tried again today.
+      key1ExhaustedAt = null;
+      try {
+        await supabase.from("app_settings").update({
+          key1_exhausted_at: null, updated_at: new Date().toISOString(),
+        }).eq("id", "singleton");
+      } catch (_) { /* ignore */ }
+    }
+  }
+
   return {
     paused: !!data?.paused,
     trading_hours_start_utc: Number(data?.trading_hours_start_utc ?? 1),
     trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
-    active_td_key: ((data?.active_td_key ?? 1) === 2 ? 2 : 1),
+    active_td_key: effectiveKey,
     session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
+    key1_exhausted_at: key1ExhaustedAt,
   };
 }
 
@@ -694,9 +723,15 @@ async function runScanJob(
     // Persist whichever key we ended on (in case a failover happened).
     if (activeKeyRef.idx !== settings.active_td_key) {
       try {
-        await supabase.from("app_settings").update({
+        const update: Record<string, unknown> = {
           active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
-        }).eq("id", "singleton");
+        };
+        // If we failed over away from Key 1, mark Key 1 as exhausted for today
+        // so the next scan starts directly on Key 2 (cleared at next UTC day).
+        if (settings.active_td_key === 1 && activeKeyRef.idx === 2) {
+          update.key1_exhausted_at = new Date().toISOString();
+        }
+        await supabase.from("app_settings").update(update).eq("id", "singleton");
       } catch (_) { /* ignore */ }
     }
 

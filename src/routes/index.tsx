@@ -260,21 +260,19 @@ function ScalpEdge() {
   }
 
   async function saveAppSettings(patch: Partial<AppSettings>) {
+    const prev = appSettings;
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
-    await fetch(`${projectUrl}/functions/v1/update-settings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        "x-fn-secret": fnSecret,
-      },
-      body: JSON.stringify(patch),
-    });
+    // Write directly to the singleton row; RLS allows updates to app_settings.
+    const { error } = await supabase
+      .from("app_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", "singleton");
+    if (error) {
+      console.error("saveAppSettings failed", error);
+      setAppSettings(prev);
+      alert(`Failed to save settings: ${error.message}`);
+    }
   }
 
   async function refreshNewsCalendar() {
