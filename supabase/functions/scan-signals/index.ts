@@ -796,6 +796,28 @@ async function runScanJob(
     const merged = Array.from(byKey.values());
     signals.push(...merged);
 
+    // Diagnostic: tally outcomes across all setups so we can confirm from logs
+    // whether "no signals" is due to filters vs no qualifying setups.
+    let cQualified = 0, cNone = 0, cNewsBlackout = 0, cFilteredOther = 0;
+    for (const pr of report) {
+      for (const chk of pr.checks) {
+        if (chk.status === "qualified") cQualified++;
+        else if (chk.status === "none") cNone++;
+        else if (chk.status === "filtered" && chk.reason?.startsWith("News blackout")) cNewsBlackout++;
+        else if (chk.status === "filtered") cFilteredOther++;
+      }
+    }
+    console.log(JSON.stringify({
+      scan_summary: {
+        mode,
+        pairs_scanned: allowedPairs.length,
+        pairs_skipped_market_closed: skippedPairs.length,
+        news_events_loaded: events.length,
+        setup_checks: { qualified: cQualified, no_pattern: cNone, news_blackout: cNewsBlackout, filtered_other: cFilteredOther },
+        candidates_after_merge: merged.length,
+      },
+    }));
+
     // Dedupe vs last 60min same pair+direction (any setup)
     const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data: recent } = await supabase.from("signals")
@@ -804,6 +826,7 @@ async function runScanJob(
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
     const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
+    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - toInsert.length, to_insert: toInsert.length } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
       const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
@@ -817,13 +840,21 @@ async function runScanJob(
       const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
       if (autoTrade) {
         const fnSecret = Deno.env.get("INTERNAL_FN_SECRET") ?? "";
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
         const baseUrl = Deno.env.get("SUPABASE_URL")!;
         for (const row of insertedRows) {
           if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
-          // Fire-and-forget — don't block the scan
+          // Fire-and-forget — don't block the scan.
+          // Send both auth headers so checkInternalAuth passes regardless of which
+          // it validates against (x-fn-secret OR Bearer service-role).
           fetch(`${baseUrl}/functions/v1/metaapi-execute`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-fn-secret": fnSecret },
+            headers: {
+              "Content-Type": "application/json",
+              "x-fn-secret": fnSecret,
+              "Authorization": `Bearer ${serviceKey}`,
+              "apikey": serviceKey,
+            },
             body: JSON.stringify({ signal_id: row.id }),
           }).catch((e) => console.error("metaapi-execute trigger failed", row.id, e));
         }
