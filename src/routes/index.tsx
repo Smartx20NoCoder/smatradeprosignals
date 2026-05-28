@@ -259,14 +259,17 @@ function ScalpEdge() {
     const { data: cache } = await supabase.from("candle_cache")
       .select("pair, timeframe, fetched_at");
     setCacheRows((cache as CacheRow[]) ?? []);
-    const { data: cfg } = await (supabase as any).from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+    // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
+    const { data: cfgRows } = await (supabase as any).rpc("get_app_settings_public");
+    const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
     if (cfg) setAppSettings({
       paused: !!cfg.paused,
       trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
       trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
       active_td_key: Number(cfg.active_td_key ?? 1),
       session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
-      metaapi_account_id: (cfg.metaapi_account_id as string | null) ?? null,
+      // metaapi_account_id is never sent to the browser; show only "configured" boolean via panel
+      metaapi_account_id: cfg.metaapi_configured ? "(configured)" : null,
       metaapi_region: (cfg.metaapi_region as string) ?? "new-york",
       metaapi_auto_trade: !!cfg.metaapi_auto_trade,
       metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
@@ -286,15 +289,27 @@ function ScalpEdge() {
     const prev = appSettings;
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    // Write directly to the singleton row; RLS allows updates to app_settings.
-    const { error } = await (supabase as any)
-      .from("app_settings")
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq("id", "singleton");
-    if (error) {
-      console.error("saveAppSettings failed", error);
+    // Direct table writes are now blocked by RLS. Route through the privileged
+    // update-settings edge function which validates the payload server-side.
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
+    try {
+      const res = await fetch(`${projectUrl}/functions/v1/update-settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "x-fn-secret": fnSecret,
+        },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`Failed to save settings (${res.status})`);
+    } catch (err) {
+      console.error("saveAppSettings failed", err);
       setAppSettings(prev);
-      alert(`Failed to save settings: ${error.message}`);
+      alert(err instanceof Error ? err.message : "Failed to save settings");
     }
   }
 
