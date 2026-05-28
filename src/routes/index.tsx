@@ -215,6 +215,7 @@ function ScalpEdge() {
     session_config: DEFAULT_SESSION_CONFIG,
     metaapi_account_id: null, metaapi_region: "new-york", metaapi_auto_trade: false,
     metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
+    metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
