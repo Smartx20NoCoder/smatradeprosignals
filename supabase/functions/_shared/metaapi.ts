@@ -132,7 +132,7 @@ export async function getSymbolPrice(opts: {
   token: string;
   symbol: string;
 }): Promise<{ ok: boolean; bid?: number; ask?: number; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     const text = await res.text();
@@ -159,7 +159,7 @@ export async function placeOrder(opts: {
   comment?: string;
   clientId?: string;
 }): Promise<{ ok: boolean; data?: MetaApiTradeResponse; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   const payload: Record<string, unknown> = {
     actionType: opts.actionType,
     symbol: opts.symbol,
@@ -214,7 +214,7 @@ export async function closePartialPosition(opts: {
   region: string; accountId: string; token: string;
   positionId: string; volume: number;
 }): Promise<{ ok: boolean; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -241,7 +241,7 @@ export async function modifyPosition(opts: {
   region: string; accountId: string; token: string;
   positionId: string; stopLoss?: number; takeProfit?: number;
 }): Promise<{ ok: boolean; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   const payload: Record<string, unknown> = {
     actionType: "POSITION_MODIFY",
     positionId: opts.positionId,
@@ -267,7 +267,7 @@ export async function modifyPosition(opts: {
 }
 
 export async function getAccountInfo(opts: { region: string; accountId: string; token: string }) {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/account-information`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/account-information`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -283,7 +283,7 @@ export async function getAccountInfo(opts: { region: string; accountId: string; 
 }
 
 export async function getOpenPositions(opts: { region: string; accountId: string; token: string }) {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/positions`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/positions`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -302,7 +302,7 @@ export async function getHistoryDealsBySymbol(opts: {
   region: string; accountId: string; token: string; startTime: string;
 }) {
   const endTime = new Date(Date.now() + 60_000).toISOString();
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/history-deals/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/history-deals/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -324,7 +324,7 @@ export async function getHistoryOrderById(opts: {
   region: string; accountId: string; token: string; orderId: string; startTime: string;
 }): Promise<{ ok: boolean; data?: any; error?: string }> {
   const endTime = new Date(Date.now() + 60_000).toISOString();
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/history-orders/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/history-orders/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
