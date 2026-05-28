@@ -4,6 +4,7 @@
 // with an ~8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
