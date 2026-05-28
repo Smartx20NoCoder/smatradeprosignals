@@ -95,6 +95,7 @@ type AppSettings = {
   metaapi_fixed_lot: number;
   metaapi_symbol_suffix: string;
   metaapi_connected_at: string | null;
+  metaapi_token_configured: boolean;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
