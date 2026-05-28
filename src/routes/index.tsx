@@ -1185,6 +1185,22 @@ function MetaApiPanel({
         </label>
       </div>
 
+      <label className="text-xs block">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Broker Symbol Suffix</div>
+        <input
+          value={appSettings.metaapi_symbol_suffix}
+          onChange={(e) => {
+            const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
+            saveAppSettings({ metaapi_symbol_suffix: cleaned });
+          }}
+          placeholder="e.g. 'm' for Exness (leave blank for none)"
+          className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+        />
+        <div className="text-[10px] text-muted-foreground mt-1">
+          Appended to every symbol sent to MetaApi (e.g. <code>EURUSD</code> → <code>EURUSD{appSettings.metaapi_symbol_suffix || "m"}</code>). Required for brokers that suffix symbols.
+        </div>
+      </label>
+
       <div className="text-[11px] text-muted-foreground">
         Token stored as <code className="text-foreground">METAAPI_TOKEN</code> secret. Configure once via project settings.
       </div>
