@@ -34,6 +34,12 @@ type Signal = {
   mfi_score: number | null;
   mfi_divergence: boolean;
   notes: string | null;
+  metaapi_position_id?: string | null;
+  metaapi_order_id?: string | null;
+  metaapi_execution_status?: string | null;
+  metaapi_execution_error?: string | null;
+  metaapi_filled_price?: number | null;
+  metaapi_pnl?: number | null;
 };
 
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
