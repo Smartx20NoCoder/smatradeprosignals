@@ -283,6 +283,7 @@ function ScalpEdge() {
       metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
       metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
       metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
+      metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
