@@ -298,63 +298,29 @@ export type Database = {
       }
     }
     Views: {
-      app_settings_public: {
-        Row: {
-          active_td_key: number | null
-          id: string | null
-          key1_exhausted_at: string | null
-          metaapi_auto_trade: boolean | null
-          metaapi_configured: boolean | null
-          metaapi_connected_at: string | null
-          metaapi_fixed_lot: number | null
-          metaapi_min_confidence: number | null
-          metaapi_min_rr: number | null
-          metaapi_region: string | null
-          paused: boolean | null
-          session_config: Json | null
-          trading_hours_end_utc: number | null
-          trading_hours_start_utc: number | null
-          updated_at: string | null
-        }
-        Insert: {
-          active_td_key?: number | null
-          id?: string | null
-          key1_exhausted_at?: string | null
-          metaapi_auto_trade?: boolean | null
-          metaapi_configured?: never
-          metaapi_connected_at?: string | null
-          metaapi_fixed_lot?: number | null
-          metaapi_min_confidence?: number | null
-          metaapi_min_rr?: number | null
-          metaapi_region?: string | null
-          paused?: boolean | null
-          session_config?: Json | null
-          trading_hours_end_utc?: number | null
-          trading_hours_start_utc?: number | null
-          updated_at?: string | null
-        }
-        Update: {
-          active_td_key?: number | null
-          id?: string | null
-          key1_exhausted_at?: string | null
-          metaapi_auto_trade?: boolean | null
-          metaapi_configured?: never
-          metaapi_connected_at?: string | null
-          metaapi_fixed_lot?: number | null
-          metaapi_min_confidence?: number | null
-          metaapi_min_rr?: number | null
-          metaapi_region?: string | null
-          paused?: boolean | null
-          session_config?: Json | null
-          trading_hours_end_utc?: number | null
-          trading_hours_start_utc?: number | null
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_app_settings_public: {
+        Args: never
+        Returns: {
+          active_td_key: number
+          id: string
+          key1_exhausted_at: string
+          metaapi_auto_trade: boolean
+          metaapi_configured: boolean
+          metaapi_connected_at: string
+          metaapi_fixed_lot: number
+          metaapi_min_confidence: number
+          metaapi_min_rr: number
+          metaapi_region: string
+          paused: boolean
+          session_config: Json
+          trading_hours_end_utc: number
+          trading_hours_start_utc: number
+          updated_at: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
