@@ -1019,6 +1019,41 @@ function SettingsPanel({
       <TradingHoursPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
       <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">TwelveData API Key</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              Active: Key #{appSettings.active_td_key}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Manually switch which TwelveData API key the scanner uses for all data fetches.
+            </div>
+          </div>
+          <div className="flex gap-1 border border-border rounded overflow-hidden">
+            {[1, 2].map((k) => {
+              const active = appSettings.active_td_key === k;
+              return (
+                <button
+                  key={k}
+                  onClick={() => {
+                    try { localStorage.setItem("active_td_key", String(k)); } catch { /* ignore */ }
+                    saveAppSettings({ active_td_key: k });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-transparent text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Key {k}{active ? " ●" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
         <div className="flex items-center justify-between">
           <span className="text-sm">Sound on new signal (browser)</span>
