@@ -1115,6 +1115,145 @@ function SettingsPanel({
   );
 }
 
+function MetaApiPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const [accountId, setAccountId] = useState(appSettings.metaapi_account_id ?? "");
+  const [region, setRegion] = useState(appSettings.metaapi_region);
+  const [status, setStatus] = useState<{ ok: boolean; reason?: string; account?: any } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
+  useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
+
+  const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+  const fnSecret = "chelseafc";
+
+  async function ping() {
+    setTesting(true);
+    try {
+      const res = await fetch(`${projectUrl}/functions/v1/metaapi-ping`, {
+        method: "GET",
+        headers: { "x-fn-secret": fnSecret, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+      });
+      const j = await res.json().catch(() => ({ ok: false, reason: "bad response" }));
+      setStatus(j);
+    } catch (e) {
+      setStatus({ ok: false, reason: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  // Poll connection status every 30s
+  useEffect(() => {
+    if (!appSettings.metaapi_account_id) return;
+    ping();
+    const t = setInterval(ping, 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSettings.metaapi_account_id, appSettings.metaapi_region]);
+
+  const connected = !!status?.ok;
+  const acct = status?.account;
+  const isDemo = acct?.type ? /demo/i.test(String(acct.type)) : true;
+
+  return (
+    <div className="border border-border rounded bg-card p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Auto-Trading</div>
+        <div className="flex items-center gap-2">
+          {isDemo && connected && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4 font-bold">DEMO</span>
+          )}
+          <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded font-bold ${
+            connected ? "bg-bull/20 text-bull" : "bg-bear/20 text-bear"
+          }`}>
+            {connected ? "● CONNECTED" : "○ DISCONNECTED"}
+          </span>
+        </div>
+      </div>
+
+      {!connected && status?.reason && (
+        <div className="text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">{status.reason}</div>
+      )}
+      {connected && acct && (
+        <div className="text-[11px] text-muted-foreground grid grid-cols-3 gap-2">
+          <div>Broker: <span className="text-foreground">{acct.broker ?? "—"}</span></div>
+          <div>Balance: <span className="text-foreground">{Number(acct.balance ?? 0).toFixed(2)} {acct.currency ?? ""}</span></div>
+          <div>Equity: <span className="text-foreground">{Number(acct.equity ?? 0).toFixed(2)}</span></div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Account ID</div>
+          <input value={accountId} onChange={(e) => setAccountId(e.target.value)}
+            onBlur={() => { if (accountId !== (appSettings.metaapi_account_id ?? "")) saveAppSettings({ metaapi_account_id: accountId || null }); }}
+            placeholder="e.g. 12abc34d-5678-..." className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Region</div>
+          <select value={region} onChange={(e) => { setRegion(e.target.value); saveAppSettings({ metaapi_region: e.target.value }); }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
+            <option value="new-york">new-york</option>
+            <option value="london">london</option>
+            <option value="singapore">singapore</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="text-[11px] text-muted-foreground">
+        Token stored as <code className="text-foreground">METAAPI_TOKEN</code> secret. Configure once via project settings.
+      </div>
+
+      <div className="flex items-center justify-between border-t border-border pt-3">
+        <div>
+          <div className="text-sm font-semibold">Auto-execute new signals</div>
+          <div className="text-xs text-muted-foreground">Only signals meeting the thresholds below will be fired automatically.</div>
+        </div>
+        <Toggle on={appSettings.metaapi_auto_trade} onChange={(v) => saveAppSettings({ metaapi_auto_trade: v })} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Confidence (%)</div>
+          <input type="number" min={50} max={99} step={1} value={appSettings.metaapi_min_confidence}
+            onChange={(e) => saveAppSettings({ metaapi_min_confidence: Math.max(50, Math.min(99, Number(e.target.value) || 75)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min R:R</div>
+          <input type="number" min={1} max={10} step={0.1} value={appSettings.metaapi_min_rr}
+            onChange={(e) => saveAppSettings({ metaapi_min_rr: Math.max(1, Math.min(10, Number(e.target.value) || 2)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fixed Lot</div>
+          <input type="number" min={0.01} max={100} step={0.01} value={appSettings.metaapi_fixed_lot}
+            onChange={(e) => saveAppSettings({ metaapi_fixed_lot: Math.max(0.01, Math.min(100, Number(e.target.value) || 0.01)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button onClick={ping} disabled={testing || !accountId}
+          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
+          {testing ? "Testing…" : "Test Connection"}
+        </button>
+        {appSettings.metaapi_connected_at && (
+          <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
 function RiskExposureWidget({
   openSignals, openRiskPct, correlationWarnings,
 }: {
