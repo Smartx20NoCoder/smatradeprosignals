@@ -1145,7 +1145,7 @@ function MetaApiPanel({
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
 
   const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-  const fnSecret = "chelseafc";
+  const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
 
   async function ping() {
     setTesting(true);
