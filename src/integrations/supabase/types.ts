@@ -195,6 +195,7 @@ export type Database = {
           htf_bias: string | null
           id: string
           metaapi_breakeven_moved: boolean
+          metaapi_executed_lot: number | null
           metaapi_execution_error: string | null
           metaapi_execution_status: string
           metaapi_filled_price: number | null
@@ -233,6 +234,7 @@ export type Database = {
           htf_bias?: string | null
           id?: string
           metaapi_breakeven_moved?: boolean
+          metaapi_executed_lot?: number | null
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
@@ -271,6 +273,7 @@ export type Database = {
           htf_bias?: string | null
           id?: string
           metaapi_breakeven_moved?: boolean
+          metaapi_executed_lot?: number | null
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null

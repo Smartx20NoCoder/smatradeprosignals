@@ -1,0 +1,1 @@
+ALTER TABLE public.signals ADD COLUMN IF NOT EXISTS metaapi_executed_lot numeric;
