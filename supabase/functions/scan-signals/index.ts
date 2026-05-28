@@ -846,7 +846,7 @@ async function runScanJob(
     };
 }
 
-import { checkInternalAuth } from "../_shared/auth.ts";
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
