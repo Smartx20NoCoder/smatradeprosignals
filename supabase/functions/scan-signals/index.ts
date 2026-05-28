@@ -892,6 +892,17 @@ Deno.serve(async (req) => {
   const mode = body.mode === "full" ? "full" : "latest";
   const source = body.source ?? req.headers.get("x-scan-source") ?? "manual";
 
+  // Sweep any prior stalled rows (started >5min ago with no finished_at) so the
+  // Health tab does not display STALLED indefinitely after an edge-function timeout.
+  try {
+    const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    await supabase.from("scan_runs").update({
+      finished_at: new Date().toISOString(),
+      ok: false,
+      errors: ["stalled — function timed out before finalize"],
+    }).is("finished_at", null).lt("started_at", cutoff);
+  } catch (_) { /* ignore */ }
+
   // Open a scan_runs row immediately so the health panel always reflects the latest attempt.
   let runId: string | null = null;
   try {
