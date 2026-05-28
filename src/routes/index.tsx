@@ -883,6 +883,18 @@ function SignalRow({
           {s.partial_close && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4">partial</span>
           )}
+          {s.metaapi_position_id && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary font-bold"
+              title={`Position ${s.metaapi_position_id}${s.metaapi_filled_price ? ` @ ${s.metaapi_filled_price}` : ""}`}>
+              ⚡ MT {s.metaapi_pnl != null ? `${s.metaapi_pnl >= 0 ? "+" : ""}${s.metaapi_pnl.toFixed(2)}` : "live"}
+            </span>
+          )}
+          {s.metaapi_execution_status === "failed" && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold"
+              title={s.metaapi_execution_error ?? "execution failed"}>
+              MT FAILED
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-xs">
           {s.mfi_score != null && (<><span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
