@@ -13,6 +13,7 @@ const ALLOWED_KEYS = new Set([
   "active_td_key", "session_config",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
+  "metaapi_symbol_suffix",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
