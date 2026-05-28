@@ -10,8 +10,44 @@ export function metaapiBase(region: string): string {
   return `https://mt-client-api-v1.${region}.agiliumtrade.ai`;
 }
 
-export function metaapiProvisioningBase(region: string): string {
-  return `https://mt-provisioning-api-v1.${region}.agiliumtrade.ai`;
+// Provisioning API is always hit at the global `new-york` host regardless of
+// where the account itself is hosted — it's where account metadata lives.
+export function metaapiProvisioningBase(_region?: string): string {
+  return `https://mt-provisioning-api-v1.new-york.agiliumtrade.ai`;
+}
+
+// Resolve the correct client API base URL for a given accountId by asking the
+// provisioning API. Cached per-invocation in this module-level Map so we only
+// look it up once per cold start / function call.
+const _clientBaseCache = new Map<string, string>();
+export async function resolveClientBase(opts: {
+  accountId: string; token: string; fallbackRegion: string;
+}): Promise<string> {
+  const cached = _clientBaseCache.get(opts.accountId);
+  if (cached) return cached;
+  try {
+    const url = `${metaapiProvisioningBase()}/users/current/accounts/${opts.accountId}`;
+    const res = await fetch(url, { headers: { "auth-token": opts.token } });
+    if (res.ok) {
+      const data = await res.json().catch(() => null) as any;
+      // MetaApi returns `region` (e.g. "new-york") on the account record.
+      // For accounts hosted on cloud-g2 the provisioning record exposes the
+      // proper region to address its client API.
+      const region = (data?.region as string | undefined) ?? opts.fallbackRegion;
+      const base = metaapiBase(region);
+      _clientBaseCache.set(opts.accountId, base);
+      return base;
+    }
+    console.error("resolveClientBase: provisioning lookup failed", res.status);
+  } catch (e) {
+    console.error("resolveClientBase exception", e);
+  }
+  // Fall back to the user-configured region.
+  return metaapiBase(opts.fallbackRegion);
+}
+
+async function clientBase(opts: { region: string; accountId: string; token: string }): Promise<string> {
+  return resolveClientBase({ accountId: opts.accountId, token: opts.token, fallbackRegion: opts.region });
 }
 
 // Provisioning API: returns full account record including reliable `state`.
