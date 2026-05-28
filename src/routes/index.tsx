@@ -281,7 +281,7 @@ function ScalpEdge() {
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
     // Write directly to the singleton row; RLS allows updates to app_settings.
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("app_settings")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", "singleton");
