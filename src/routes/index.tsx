@@ -93,6 +93,7 @@ type AppSettings = {
   metaapi_min_confidence: number;
   metaapi_min_rr: number;
   metaapi_fixed_lot: number;
+  metaapi_symbol_suffix: string;
   metaapi_connected_at: string | null;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
