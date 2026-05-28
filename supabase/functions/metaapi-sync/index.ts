@@ -8,6 +8,7 @@ import {
   closePartialPosition,
   corsHeaders,
   getHistoryDealsBySymbol,
+  getHistoryOrderById,
   getOpenPositions,
   modifyPosition,
   safeError,
