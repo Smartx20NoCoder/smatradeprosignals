@@ -5,6 +5,7 @@
 // stored — the previous strict regex (NFP/CPI/FOMC/GDP only) was filtering out
 // most events and leaving the table empty.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
