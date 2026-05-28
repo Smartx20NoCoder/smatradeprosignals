@@ -1104,7 +1104,67 @@ function SettingsPanel({
   );
 }
 
-function MetaApiPanel({
+function TokenField({ configured, onSave }: { configured: boolean; onSave: (value: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(!configured);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (!configured) setEditing(true); }, [configured]);
+
+  async function save() {
+    if (value.trim().length < 20) {
+      alert("Token looks too short — paste the full MetaApi token.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(value.trim());
+      setValue("");
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded bg-background/40 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Token</div>
+        {configured && !editing && (
+          <div className="flex items-center gap-2">
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-bull/20 text-bull font-bold">Configured ✓</span>
+            <button onClick={() => setEditing(true)}
+              className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border rounded hover:bg-muted/50">
+              Change
+            </button>
+          </div>
+        )}
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-2">
+          <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)}
+            placeholder="Paste MetaApi token (JWT)"
+            className="flex-1 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+          <button onClick={save} disabled={saving}
+            className="text-[10px] uppercase tracking-wider px-3 py-1.5 border border-border rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            {saving ? "Saving..." : "Save"}
+          </button>
+          {configured && (
+            <button onClick={() => { setEditing(false); setValue(""); }}
+              className="text-[10px] uppercase tracking-wider px-2 py-1.5 border border-border rounded hover:bg-muted/50">
+              Cancel
+            </button>
+          )}
+        </div>
+      ) : null}
+      <div className="text-[10px] text-muted-foreground mt-1">
+        Stored privately in app settings. Falls back to the <code className="text-foreground">METAAPI_TOKEN</code> env secret if unset.
+      </div>
+    </div>
+  );
+}
+
+
   appSettings, saveAppSettings,
 }: {
   appSettings: AppSettings;
