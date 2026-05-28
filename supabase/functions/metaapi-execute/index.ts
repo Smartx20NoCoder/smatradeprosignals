@@ -101,22 +101,30 @@ Deno.serve(async (req) => {
       metaapi_execution_error: null,
     }).eq("id", signal_id);
 
-    // Pre-flight: ensure the MetaApi account is deployed before placing an order.
-    const acctRes = await getAccountInfo({ region, accountId, token });
+    // Pre-flight: ensure the MetaApi account is DEPLOYED via the provisioning API.
+    // The client trading API can report "unknown" for MT5 demo accounts — provisioning is authoritative.
+    const deployLog: string[] = [];
+    const acctRes = await getProvisioningAccountInfo({ region, accountId, token });
     if (!acctRes.ok) {
-      const msg = acctRes.error ?? "broker unreachable";
+      const msg = `provisioning lookup failed: ${acctRes.error ?? "unknown"}`;
       await markFailed(supabase, signal_id, msg);
       return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const acctState = String((acctRes.data as any)?.state ?? "unknown");
-    if (acctState !== "DEPLOYED" && acctState.toLowerCase() !== "deployed") {
-      const msg = `MetaApi account not deployed (state: ${acctState})`;
-      await markFailed(supabase, signal_id, msg);
-      return new Response(JSON.stringify({ ok: false, reason: msg }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let acctState = String((acctRes.data as any)?.state ?? "unknown");
+    deployLog.push(`initial state=${acctState}`);
+    if (acctState.toUpperCase() !== "DEPLOYED") {
+      const dep = await deployAccount({ region, accountId, token });
+      deployLog.push(...dep.log);
+      if (!dep.ok) {
+        const msg = `MetaApi account not deployed after retries. Log: ${deployLog.join(" | ")}`.slice(0, 500);
+        await markFailed(supabase, signal_id, msg);
+        return new Response(JSON.stringify({ ok: false, reason: msg }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      acctState = dep.state ?? "DEPLOYED";
     }
 
     const symbol = pairToSymbol(s.pair, symbolSuffix);
