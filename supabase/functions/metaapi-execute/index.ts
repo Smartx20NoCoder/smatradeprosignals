@@ -1,13 +1,44 @@
-// Executes a MetaApi market order for a given signal id.
-// Idempotent — refuses to re-execute a signal that already has a position id.
+// Executes a MetaApi order for a given signal id.
+// - Auto-selects market / limit / stop based on entry vs current price
+// - Idempotent: refuses to re-execute a signal that already has a position/order id.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { checkSecret, corsHeaders, pairToSymbol, placeMarketOrder } from "../_shared/metaapi.ts";
+import {
+  checkSecret,
+  corsHeaders,
+  getSymbolPrice,
+  pairToSymbol,
+  placeOrder,
+  safeError,
+  type MarketOrderAction,
+  type PendingOrderAction,
+} from "../_shared/metaapi.ts";
 
 async function markFailed(supabase: any, signalId: string, error: string) {
   await supabase.from("signals").update({
     metaapi_execution_status: "failed",
     metaapi_execution_error: error.slice(0, 500),
   }).eq("id", signalId);
+}
+
+function pickAction(
+  direction: "Long" | "Short",
+  entry: number,
+  bid: number,
+  ask: number,
+): { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" } {
+  // Tolerance ~0.03% of mid — accounts for normal spread; tighter than that is "market".
+  const mid = (bid + ask) / 2 || entry;
+  const tol = Math.max(mid * 0.0003, 0.0001);
+
+  if (direction === "Long") {
+    if (entry > ask + tol) return { action: "ORDER_TYPE_BUY_STOP", openPrice: entry, kind: "stop" };
+    if (entry < bid - tol) return { action: "ORDER_TYPE_BUY_LIMIT", openPrice: entry, kind: "limit" };
+    return { action: "ORDER_TYPE_BUY", kind: "market" };
+  } else {
+    if (entry < bid - tol) return { action: "ORDER_TYPE_SELL_STOP", openPrice: entry, kind: "stop" };
+    if (entry > ask + tol) return { action: "ORDER_TYPE_SELL_LIMIT", openPrice: entry, kind: "limit" };
+    return { action: "ORDER_TYPE_SELL", kind: "market" };
+  }
 }
 
 Deno.serve(async (req) => {
@@ -18,9 +49,7 @@ Deno.serve(async (req) => {
   try {
     const { signal_id } = await req.json().catch(() => ({}));
     if (!signal_id || typeof signal_id !== "string") {
-      return new Response(JSON.stringify({ error: "signal_id required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return safeError("signal_id required", 400);
     }
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -31,12 +60,8 @@ Deno.serve(async (req) => {
       supabase.from("signals").select("*").eq("id", signal_id).maybeSingle(),
       supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle(),
     ]);
-    if (!signal) {
-      return new Response(JSON.stringify({ ok: false, reason: "signal not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if ((signal as any).metaapi_position_id) {
+    if (!signal) return safeError("signal not found", 404);
+    if ((signal as any).metaapi_position_id || (signal as any).metaapi_order_id) {
       return new Response(JSON.stringify({ ok: true, skipped: "already executed" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -73,11 +98,24 @@ Deno.serve(async (req) => {
       metaapi_execution_error: null,
     }).eq("id", signal_id);
 
-    const result = await placeMarketOrder({
+    const symbol = pairToSymbol(s.pair);
+    const priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+    if (!priceRes.ok || !priceRes.bid || !priceRes.ask) {
+      await markFailed(supabase, signal_id, priceRes.error ?? "price unavailable");
+      return new Response(JSON.stringify({ ok: false, reason: priceRes.error ?? "price unavailable" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const entry = Number(s.entry);
+    const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
+
+    const result = await placeOrder({
       region, accountId, token,
-      symbol: pairToSymbol(s.pair),
-      side: s.direction === "Long" ? "BUY" : "SELL",
+      actionType: picked.action,
+      symbol,
       volume: lot,
+      openPrice: picked.openPrice,
       stopLoss: Number(s.stop_loss),
       takeProfit: Number(s.tp2),
       comment: `sig ${String(signal_id).slice(0, 8)}`,
@@ -92,21 +130,22 @@ Deno.serve(async (req) => {
     }
 
     const data = result.data ?? {};
+    const filled = !!data.positionId;
     await supabase.from("signals").update({
       metaapi_position_id: data.positionId ?? null,
       metaapi_order_id: data.orderId ?? null,
-      metaapi_execution_status: data.positionId ? "filled" : "pending",
+      metaapi_order_type: picked.kind,
+      metaapi_execution_status: filled ? "filled" : "pending",
       metaapi_execution_error: null,
-      executed_at: new Date().toISOString(),
-      status: "executed",
+      executed_at: filled ? new Date().toISOString() : null,
+      status: filled ? "executed" : "pending",
     }).eq("id", signal_id);
 
-    return new Response(JSON.stringify({ ok: true, positionId: data.positionId, orderId: data.orderId }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({
+      ok: true, kind: picked.kind, positionId: data.positionId, orderId: data.orderId,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("metaapi-execute error", e);
+    return safeError("internal error executing order", 500);
   }
 });

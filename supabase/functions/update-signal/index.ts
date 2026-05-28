@@ -54,7 +54,8 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
+    console.error("update-signal error", e);
+    return new Response(JSON.stringify({ error: "invalid request" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

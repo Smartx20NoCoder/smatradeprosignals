@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
+import {
+  pingMetaApiFn,
+  refreshNewsCalendarFn,
+  updateAppSettingsFn,
+} from "@/lib/api.functions";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -289,23 +295,8 @@ function ScalpEdge() {
     const prev = appSettings;
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    // Direct table writes are now blocked by RLS. Route through the privileged
-    // update-settings edge function which validates the payload server-side.
-    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/update-settings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "x-fn-secret": fnSecret,
-        },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error(`Failed to save settings (${res.status})`);
+      await updateAppSettingsFn({ data: patch as Record<string, unknown> });
     } catch (err) {
       console.error("saveAppSettings failed", err);
       setAppSettings(prev);
@@ -314,26 +305,10 @@ function ScalpEdge() {
   }
 
   async function refreshNewsCalendar() {
-    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     setNewsRefreshing(true);
     setNewsError(null);
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "x-fn-secret": fnSecret,
-        },
-        body: JSON.stringify({ source: "manual", date: newsDate }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`Calendar refresh failed (${res.status})${text ? `: ${text.slice(0, 120)}` : ""}`);
-      }
+      await refreshNewsCalendarFn({ data: { source: "manual", date: newsDate } });
       // Re-load events for current date after refresh
       await loadNewsEvents(newsDate);
       await loadHealth();
@@ -395,17 +370,10 @@ function ScalpEdge() {
     setScanProgress(init);
     setCurrentFetch(null);
     try {
-      const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
-      const res = await fetch(`${projectUrl}/functions/v1/scan-signals`, {
+      // Proxied through TanStack server route — INTERNAL_FN_SECRET stays server-side.
+      const res = await fetch(`/api/internal/scan`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "x-fn-secret": fnSecret,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, stream: true }),
       });
       if (!res.ok) throw new Error(`Scan failed (${res.status})`);
@@ -1144,18 +1112,11 @@ function MetaApiPanel({
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
 
-  const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-  const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
-
   async function ping() {
     setTesting(true);
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/metaapi-ping`, {
-        method: "GET",
-        headers: { "x-fn-secret": fnSecret, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
-      });
-      const j = await res.json().catch(() => ({ ok: false, reason: "bad response" }));
-      setStatus(j);
+      const j = await pingMetaApiFn({});
+      setStatus(j as any);
     } catch (e) {
       setStatus({ ok: false, reason: (e as Error).message });
     } finally {

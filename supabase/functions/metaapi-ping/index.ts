@@ -18,12 +18,12 @@ Deno.serve(async (req) => {
     const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
     const token = Deno.env.get("METAAPI_TOKEN");
     if (!token) {
-      return new Response(JSON.stringify({ ok: false, reason: "METAAPI_TOKEN secret not configured" }), {
+      return new Response(JSON.stringify({ ok: false, reason: "broker token not configured" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     if (!accountId) {
-      return new Response(JSON.stringify({ ok: false, reason: "MetaApi account ID not configured" }), {
+      return new Response(JSON.stringify({ ok: false, reason: "broker account not configured" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -41,8 +41,9 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, reason: (e as Error).message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    console.error("metaapi-ping error", e);
+    return new Response(JSON.stringify({ ok: false, reason: "broker check failed" }), {
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
