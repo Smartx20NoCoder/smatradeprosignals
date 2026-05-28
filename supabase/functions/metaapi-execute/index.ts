@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
     const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 75);
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
     const lot = Number((cfg as any)?.metaapi_fixed_lot ?? 0.01);
+    const symbolSuffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
     const token = Deno.env.get("METAAPI_TOKEN");
 
     if (!autoTrade) {
