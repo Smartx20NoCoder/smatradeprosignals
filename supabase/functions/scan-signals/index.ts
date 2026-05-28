@@ -796,6 +796,28 @@ async function runScanJob(
     const merged = Array.from(byKey.values());
     signals.push(...merged);
 
+    // Diagnostic: tally outcomes across all setups so we can confirm from logs
+    // whether "no signals" is due to filters vs no qualifying setups.
+    let cQualified = 0, cNone = 0, cNewsBlackout = 0, cFilteredOther = 0;
+    for (const pr of report) {
+      for (const chk of pr.checks) {
+        if (chk.status === "qualified") cQualified++;
+        else if (chk.status === "none") cNone++;
+        else if (chk.status === "filtered" && chk.reason?.startsWith("News blackout")) cNewsBlackout++;
+        else if (chk.status === "filtered") cFilteredOther++;
+      }
+    }
+    console.log(JSON.stringify({
+      scan_summary: {
+        mode,
+        pairs_scanned: allowedPairs.length,
+        pairs_skipped_market_closed: skippedPairs.length,
+        news_events_loaded: events.length,
+        setup_checks: { qualified: cQualified, no_pattern: cNone, news_blackout: cNewsBlackout, filtered_other: cFilteredOther },
+        candidates_after_merge: merged.length,
+      },
+    }));
+
     // Dedupe vs last 60min same pair+direction (any setup)
     const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data: recent } = await supabase.from("signals")
