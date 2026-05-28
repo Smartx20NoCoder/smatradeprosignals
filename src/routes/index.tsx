@@ -295,23 +295,8 @@ function ScalpEdge() {
     const prev = appSettings;
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
-    // Direct table writes are now blocked by RLS. Route through the privileged
-    // update-settings edge function which validates the payload server-side.
-    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/update-settings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "x-fn-secret": fnSecret,
-        },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error(`Failed to save settings (${res.status})`);
+      await updateAppSettingsFn({ data: patch as Record<string, unknown> });
     } catch (err) {
       console.error("saveAppSettings failed", err);
       setAppSettings(prev);
@@ -320,26 +305,10 @@ function ScalpEdge() {
   }
 
   async function refreshNewsCalendar() {
-    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
     setNewsRefreshing(true);
     setNewsError(null);
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/fetch-news-calendar`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "x-fn-secret": fnSecret,
-        },
-        body: JSON.stringify({ source: "manual", date: newsDate }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`Calendar refresh failed (${res.status})${text ? `: ${text.slice(0, 120)}` : ""}`);
-      }
+      await refreshNewsCalendarFn({ data: { source: "manual", date: newsDate } });
       // Re-load events for current date after refresh
       await loadNewsEvents(newsDate);
       await loadHealth();
