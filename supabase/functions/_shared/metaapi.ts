@@ -10,8 +10,44 @@ export function metaapiBase(region: string): string {
   return `https://mt-client-api-v1.${region}.agiliumtrade.ai`;
 }
 
-export function metaapiProvisioningBase(region: string): string {
-  return `https://mt-provisioning-api-v1.${region}.agiliumtrade.ai`;
+// Provisioning API is always hit at the global `new-york` host regardless of
+// where the account itself is hosted — it's where account metadata lives.
+export function metaapiProvisioningBase(_region?: string): string {
+  return `https://mt-provisioning-api-v1.new-york.agiliumtrade.ai`;
+}
+
+// Resolve the correct client API base URL for a given accountId by asking the
+// provisioning API. Cached per-invocation in this module-level Map so we only
+// look it up once per cold start / function call.
+const _clientBaseCache = new Map<string, string>();
+export async function resolveClientBase(opts: {
+  accountId: string; token: string; fallbackRegion: string;
+}): Promise<string> {
+  const cached = _clientBaseCache.get(opts.accountId);
+  if (cached) return cached;
+  try {
+    const url = `${metaapiProvisioningBase()}/users/current/accounts/${opts.accountId}`;
+    const res = await fetch(url, { headers: { "auth-token": opts.token } });
+    if (res.ok) {
+      const data = await res.json().catch(() => null) as any;
+      // MetaApi returns `region` (e.g. "new-york") on the account record.
+      // For accounts hosted on cloud-g2 the provisioning record exposes the
+      // proper region to address its client API.
+      const region = (data?.region as string | undefined) ?? opts.fallbackRegion;
+      const base = metaapiBase(region);
+      _clientBaseCache.set(opts.accountId, base);
+      return base;
+    }
+    console.error("resolveClientBase: provisioning lookup failed", res.status);
+  } catch (e) {
+    console.error("resolveClientBase exception", e);
+  }
+  // Fall back to the user-configured region.
+  return metaapiBase(opts.fallbackRegion);
+}
+
+async function clientBase(opts: { region: string; accountId: string; token: string }): Promise<string> {
+  return resolveClientBase({ accountId: opts.accountId, token: opts.token, fallbackRegion: opts.region });
 }
 
 // Provisioning API: returns full account record including reliable `state`.
@@ -96,7 +132,7 @@ export async function getSymbolPrice(opts: {
   token: string;
   symbol: string;
 }): Promise<{ ok: boolean; bid?: number; ask?: number; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     const text = await res.text();
@@ -123,7 +159,7 @@ export async function placeOrder(opts: {
   comment?: string;
   clientId?: string;
 }): Promise<{ ok: boolean; data?: MetaApiTradeResponse; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   const payload: Record<string, unknown> = {
     actionType: opts.actionType,
     symbol: opts.symbol,
@@ -178,7 +214,7 @@ export async function closePartialPosition(opts: {
   region: string; accountId: string; token: string;
   positionId: string; volume: number;
 }): Promise<{ ok: boolean; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -205,7 +241,7 @@ export async function modifyPosition(opts: {
   region: string; accountId: string; token: string;
   positionId: string; stopLoss?: number; takeProfit?: number;
 }): Promise<{ ok: boolean; error?: string }> {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/trade`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   const payload: Record<string, unknown> = {
     actionType: "POSITION_MODIFY",
     positionId: opts.positionId,
@@ -231,7 +267,7 @@ export async function modifyPosition(opts: {
 }
 
 export async function getAccountInfo(opts: { region: string; accountId: string; token: string }) {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/account-information`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/account-information`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -247,7 +283,7 @@ export async function getAccountInfo(opts: { region: string; accountId: string; 
 }
 
 export async function getOpenPositions(opts: { region: string; accountId: string; token: string }) {
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/positions`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/positions`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -266,7 +302,7 @@ export async function getHistoryDealsBySymbol(opts: {
   region: string; accountId: string; token: string; startTime: string;
 }) {
   const endTime = new Date(Date.now() + 60_000).toISOString();
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/history-deals/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/history-deals/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {
@@ -288,7 +324,7 @@ export async function getHistoryOrderById(opts: {
   region: string; accountId: string; token: string; orderId: string; startTime: string;
 }): Promise<{ ok: boolean; data?: any; error?: string }> {
   const endTime = new Date(Date.now() + 60_000).toISOString();
-  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/history-orders/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/history-orders/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     if (!res.ok) {

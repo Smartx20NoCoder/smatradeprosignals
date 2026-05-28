@@ -13,7 +13,7 @@ const ALLOWED_KEYS = new Set([
   "active_td_key", "session_config",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
-  "metaapi_symbol_suffix",
+  "metaapi_symbol_suffix", "metaapi_token",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
@@ -32,6 +32,10 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_min_rr" && (typeof v !== "number" || v < 1 || v > 10)) continue;
     if (k === "metaapi_fixed_lot" && (typeof v !== "number" || v < 0.01 || v > 100)) continue;
     if (k === "metaapi_symbol_suffix" && (typeof v !== "string" || v.length > 16 || !/^[A-Za-z0-9._-]*$/.test(v))) continue;
+    if (k === "metaapi_token") {
+      if (v === null) { out[k] = null; continue; }
+      if (typeof v !== "string" || v.length < 20 || v.length > 4096) continue;
+    }
     out[k] = v;
   }
   return out;

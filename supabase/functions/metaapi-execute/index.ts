@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
     const lot = Number((cfg as any)?.metaapi_fixed_lot ?? 0.01);
     const symbolSuffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
-    const token = Deno.env.get("METAAPI_TOKEN");
+    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
 
     if (!autoTrade) {
       return new Response(JSON.stringify({ ok: false, reason: "auto-trade disabled" }), {
