@@ -220,3 +220,27 @@ export async function getHistoryDealsBySymbol(opts: {
     return { ok: false as const, error: "history fetch failed" };
   }
 }
+
+// Look up an order (pending or already executed) by id from history.
+// Returns the order object if found — when the order has been filled,
+// MetaApi populates `positionId` on the matching history-orders row.
+export async function getHistoryOrderById(opts: {
+  region: string; accountId: string; token: string; orderId: string; startTime: string;
+}): Promise<{ ok: boolean; data?: any; error?: string }> {
+  const endTime = new Date(Date.now() + 60_000).toISOString();
+  const url = `${metaapiBase(opts.region)}/users/current/accounts/${opts.accountId}/history-orders/time/${encodeURIComponent(opts.startTime)}/${encodeURIComponent(endTime)}`;
+  try {
+    const res = await fetch(url, { headers: { "auth-token": opts.token } });
+    if (!res.ok) {
+      console.error("history-orders", res.status);
+      return { ok: false, error: `history-orders fetch failed (${res.status})` };
+    }
+    const data = await res.json();
+    const arr = (data ?? []) as Array<any>;
+    const match = arr.find((o) => String(o.id) === String(opts.orderId));
+    return { ok: true, data: match };
+  } catch (e) {
+    console.error("history-orders exception", e);
+    return { ok: false, error: "history-orders fetch failed" };
+  }
+}
