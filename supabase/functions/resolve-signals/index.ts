@@ -2,6 +2,7 @@
 // Uses candle_cache only (no API spend). For each pending signal, walks candles
 // after the signal creation and marks SL / TP1 / TP2 hits.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,12 +13,8 @@ type Candle = { t: number; o: number; h: number; l: number; c: number };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const expected = Deno.env.get("INTERNAL_FN_SECRET");
-  if (!expected || req.headers.get("x-fn-secret") !== expected) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const unauth = checkInternalAuth(req);
+  if (unauth) return unauth;
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,

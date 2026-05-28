@@ -4,6 +4,7 @@
 // with an ~8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -845,14 +846,12 @@ async function runScanJob(
     };
 }
 
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const expected = Deno.env.get("INTERNAL_FN_SECRET");
-  if (!expected || req.headers.get("x-fn-secret") !== expected) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const unauth = checkInternalAuth(req);
+  if (unauth) return unauth;
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);

@@ -5,6 +5,7 @@
 // stored — the previous strict regex (NFP/CPI/FOMC/GDP only) was filtering out
 // most events and leaving the table empty.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,12 +25,8 @@ function isHighImpact(impact: string): boolean {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const expected = Deno.env.get("INTERNAL_FN_SECRET");
-  if (!expected || req.headers.get("x-fn-secret") !== expected) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const unauth = checkInternalAuth(req);
+  if (unauth) return unauth;
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   try {
     // Optional date param — defaults to today (UTC). Format: YYYY-MM-DD.
