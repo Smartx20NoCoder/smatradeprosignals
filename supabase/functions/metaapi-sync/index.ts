@@ -128,7 +128,8 @@ Deno.serve(async (req) => {
 
         // Fire-once partial close at TP1 (50%)
         if (tp1Hit && !s.metaapi_partial_closed) {
-          const halfVol = Math.max(0.01, +(lot / 2).toFixed(2));
+          const tradeLot = Number(s.metaapi_executed_lot ?? lot);
+          const halfVol = Math.max(0.01, +(tradeLot / 2).toFixed(2));
           const pc = await closePartialPosition({ region, accountId, token, positionId: pid, volume: halfVol });
           if (pc.ok) {
             partials++;
