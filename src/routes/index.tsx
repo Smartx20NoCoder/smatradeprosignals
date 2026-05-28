@@ -1112,18 +1112,11 @@ function MetaApiPanel({
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
 
-  const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-  const fnSecret = import.meta.env.VITE_INTERNAL_FN_SECRET ?? "";
-
   async function ping() {
     setTesting(true);
     try {
-      const res = await fetch(`${projectUrl}/functions/v1/metaapi-ping`, {
-        method: "GET",
-        headers: { "x-fn-secret": fnSecret, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
-      });
-      const j = await res.json().catch(() => ({ ok: false, reason: "bad response" }));
-      setStatus(j);
+      const j = await pingMetaApiFn({});
+      setStatus(j as any);
     } catch (e) {
       setStatus({ ok: false, reason: (e as Error).message });
     } finally {
