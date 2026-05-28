@@ -191,10 +191,13 @@ export type Database = {
           executed_at: string | null
           htf_bias: string | null
           id: string
+          metaapi_breakeven_moved: boolean
           metaapi_execution_error: string | null
           metaapi_execution_status: string
           metaapi_filled_price: number | null
           metaapi_order_id: string | null
+          metaapi_order_type: string | null
+          metaapi_partial_closed: boolean
           metaapi_pnl: number | null
           metaapi_position_id: string | null
           mfi_divergence: boolean
@@ -226,10 +229,13 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_breakeven_moved?: boolean
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_type?: string | null
+          metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
           mfi_divergence?: boolean
@@ -261,10 +267,13 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_breakeven_moved?: boolean
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_type?: string | null
+          metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
           mfi_divergence?: boolean
@@ -292,7 +301,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_app_settings_public: {
+        Args: never
+        Returns: {
+          active_td_key: number
+          id: string
+          key1_exhausted_at: string
+          metaapi_auto_trade: boolean
+          metaapi_configured: boolean
+          metaapi_connected_at: string
+          metaapi_fixed_lot: number
+          metaapi_min_confidence: number
+          metaapi_min_rr: number
+          metaapi_region: string
+          paused: boolean
+          session_config: Json
+          trading_hours_end_utc: number
+          trading_hours_start_utc: number
+          updated_at: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

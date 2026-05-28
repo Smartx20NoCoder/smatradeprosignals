@@ -9,11 +9,10 @@ const corsHeaders = {
 };
 
 const ALLOWED_KEYS = new Set([
-  "paused",
-  "trading_hours_start_utc",
-  "trading_hours_end_utc",
-  "active_td_key",
-  "session_config",
+  "paused", "trading_hours_start_utc", "trading_hours_end_utc",
+  "active_td_key", "session_config",
+  "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
+  "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
@@ -25,6 +24,12 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
         (typeof v !== "number" || v < 0 || v > 23 || !Number.isInteger(v))) continue;
     if (k === "active_td_key" && (typeof v !== "number" || ![1, 2].includes(v))) continue;
     if (k === "session_config" && (typeof v !== "object" || v === null)) continue;
+    if (k === "metaapi_account_id" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
+    if (k === "metaapi_region" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
+    if (k === "metaapi_auto_trade" && typeof v !== "boolean") continue;
+    if (k === "metaapi_min_confidence" && (typeof v !== "number" || v < 50 || v > 99)) continue;
+    if (k === "metaapi_min_rr" && (typeof v !== "number" || v < 1 || v > 10)) continue;
+    if (k === "metaapi_fixed_lot" && (typeof v !== "number" || v < 0.01 || v > 100)) continue;
     out[k] = v;
   }
   return out;
