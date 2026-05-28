@@ -817,13 +817,21 @@ async function runScanJob(
       const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
       if (autoTrade) {
         const fnSecret = Deno.env.get("INTERNAL_FN_SECRET") ?? "";
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
         const baseUrl = Deno.env.get("SUPABASE_URL")!;
         for (const row of insertedRows) {
           if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
-          // Fire-and-forget — don't block the scan
+          // Fire-and-forget — don't block the scan.
+          // Send both auth headers so checkInternalAuth passes regardless of which
+          // it validates against (x-fn-secret OR Bearer service-role).
           fetch(`${baseUrl}/functions/v1/metaapi-execute`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-fn-secret": fnSecret },
+            headers: {
+              "Content-Type": "application/json",
+              "x-fn-secret": fnSecret,
+              "Authorization": `Bearer ${serviceKey}`,
+              "apikey": serviceKey,
+            },
             body: JSON.stringify({ signal_id: row.id }),
           }).catch((e) => console.error("metaapi-execute trigger failed", row.id, e));
         }
