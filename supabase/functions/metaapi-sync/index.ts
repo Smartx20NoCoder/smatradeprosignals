@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
     const accountId = (cfg as any)?.metaapi_account_id as string | null;
     const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
     const lot = Number((cfg as any)?.metaapi_fixed_lot ?? 0.01);
-    const token = Deno.env.get("METAAPI_TOKEN");
+    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
     if (!token || !accountId) {
       return new Response(JSON.stringify({ ok: false, reason: "not configured" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
