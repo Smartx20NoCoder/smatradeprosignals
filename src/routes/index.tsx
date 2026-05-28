@@ -1164,7 +1164,7 @@ function TokenField({ configured, onSave }: { configured: boolean; onSave: (valu
   );
 }
 
-
+function MetaApiPanel({
   appSettings, saveAppSettings,
 }: {
   appSettings: AppSettings;
