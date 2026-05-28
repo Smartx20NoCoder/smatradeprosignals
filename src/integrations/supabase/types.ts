@@ -191,10 +191,13 @@ export type Database = {
           executed_at: string | null
           htf_bias: string | null
           id: string
+          metaapi_breakeven_moved: boolean
           metaapi_execution_error: string | null
           metaapi_execution_status: string
           metaapi_filled_price: number | null
           metaapi_order_id: string | null
+          metaapi_order_type: string | null
+          metaapi_partial_closed: boolean
           metaapi_pnl: number | null
           metaapi_position_id: string | null
           mfi_divergence: boolean
@@ -226,10 +229,13 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_breakeven_moved?: boolean
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_type?: string | null
+          metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
           mfi_divergence?: boolean
@@ -261,10 +267,13 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_breakeven_moved?: boolean
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_type?: string | null
+          metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
           mfi_divergence?: boolean
@@ -289,7 +298,60 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      app_settings_public: {
+        Row: {
+          active_td_key: number | null
+          id: string | null
+          key1_exhausted_at: string | null
+          metaapi_auto_trade: boolean | null
+          metaapi_configured: boolean | null
+          metaapi_connected_at: string | null
+          metaapi_fixed_lot: number | null
+          metaapi_min_confidence: number | null
+          metaapi_min_rr: number | null
+          metaapi_region: string | null
+          paused: boolean | null
+          session_config: Json | null
+          trading_hours_end_utc: number | null
+          trading_hours_start_utc: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          active_td_key?: number | null
+          id?: string | null
+          key1_exhausted_at?: string | null
+          metaapi_auto_trade?: boolean | null
+          metaapi_configured?: never
+          metaapi_connected_at?: string | null
+          metaapi_fixed_lot?: number | null
+          metaapi_min_confidence?: number | null
+          metaapi_min_rr?: number | null
+          metaapi_region?: string | null
+          paused?: boolean | null
+          session_config?: Json | null
+          trading_hours_end_utc?: number | null
+          trading_hours_start_utc?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          active_td_key?: number | null
+          id?: string | null
+          key1_exhausted_at?: string | null
+          metaapi_auto_trade?: boolean | null
+          metaapi_configured?: never
+          metaapi_connected_at?: string | null
+          metaapi_fixed_lot?: number | null
+          metaapi_min_confidence?: number | null
+          metaapi_min_rr?: number | null
+          metaapi_region?: string | null
+          paused?: boolean | null
+          session_config?: Json | null
+          trading_hours_end_utc?: number | null
+          trading_hours_start_utc?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
