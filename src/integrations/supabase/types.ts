@@ -44,6 +44,7 @@ export type Database = {
           metaapi_min_confidence: number
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_symbol_suffix: string
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number
@@ -61,6 +62,7 @@ export type Database = {
           metaapi_min_confidence?: number
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_symbol_suffix?: string
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -78,6 +80,7 @@ export type Database = {
           metaapi_min_confidence?: number
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_symbol_suffix?: string
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -314,6 +317,7 @@ export type Database = {
           metaapi_min_confidence: number
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_symbol_suffix: string
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number

@@ -10,8 +10,8 @@ export function metaapiBase(region: string): string {
   return `https://mt-client-api-v1.${region}.agiliumtrade.ai`;
 }
 
-export function pairToSymbol(pair: string): string {
-  return pair.replace("/", "").toUpperCase();
+export function pairToSymbol(pair: string, suffix = ""): string {
+  return pair.replace("/", "").toUpperCase() + (suffix ?? "");
 }
 
 export type MetaApiTradeResponse = {
