@@ -218,6 +218,7 @@ function ScalpEdge() {
     metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
     metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
+    metaapi_token_configured: false,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
