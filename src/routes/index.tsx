@@ -1051,11 +1051,6 @@ function SettingsPanel({
             })}
           </div>
         </div>
-        {appSettings.key1_exhausted_at && (
-          <div className="mt-2 text-xs text-bear">
-            Key 1 marked exhausted at {new Date(appSettings.key1_exhausted_at).toUTCString()} — resets at next UTC midnight.
-          </div>
-        )}
       </div>
 
       <div className="border border-border rounded bg-card p-4">
