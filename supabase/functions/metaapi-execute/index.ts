@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   checkSecret,
   corsHeaders,
+  getAccountInfo,
   getSymbolPrice,
   pairToSymbol,
   placeOrder,
@@ -98,6 +99,24 @@ Deno.serve(async (req) => {
       metaapi_execution_status: "pending",
       metaapi_execution_error: null,
     }).eq("id", signal_id);
+
+    // Pre-flight: ensure the MetaApi account is deployed before placing an order.
+    const acctRes = await getAccountInfo({ region, accountId, token });
+    if (!acctRes.ok) {
+      const msg = acctRes.error ?? "broker unreachable";
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const acctState = String((acctRes.data as any)?.state ?? "unknown");
+    if (acctState !== "DEPLOYED" && acctState.toLowerCase() !== "deployed") {
+      const msg = `MetaApi account not deployed (state: ${acctState})`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const symbol = pairToSymbol(s.pair, symbolSuffix);
     const priceRes = await getSymbolPrice({ region, accountId, token, symbol });

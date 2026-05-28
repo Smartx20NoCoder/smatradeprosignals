@@ -88,7 +88,8 @@ export async function placeOrder(opts: {
     try { data = JSON.parse(text); } catch { /* */ }
     if (!res.ok) {
       console.error("MetaApi placeOrder failed", res.status, text.slice(0, 300));
-      return { ok: false, error: `broker rejected order (${res.status})` };
+      const detail = (text || "").trim().slice(0, 300);
+      return { ok: false, error: `broker rejected order (${res.status}): ${detail || "no response body"}` };
     }
     if (data && data.numericCode != null && data.numericCode !== 10009 && data.numericCode !== 10008 && data.numericCode !== 0) {
       console.error("MetaApi numericCode error", data);
