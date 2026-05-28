@@ -1204,9 +1204,15 @@ function MetaApiPanel({
         </div>
       </label>
 
-      <div className="text-[11px] text-muted-foreground">
-        Token stored as <code className="text-foreground">METAAPI_TOKEN</code> secret. Configure once via project settings.
-      </div>
+      <TokenField
+        configured={appSettings.metaapi_token_configured}
+        onSave={async (value) => {
+          await saveAppSettings({ metaapi_token: value } as any);
+          // Refresh status after token change so connected badge updates.
+          setTimeout(() => { ping(); }, 250);
+        }}
+      />
+
 
       <div className="flex items-center justify-between border-t border-border pt-3">
         <div>
