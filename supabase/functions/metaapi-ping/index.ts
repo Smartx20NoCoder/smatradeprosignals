@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
     const accountId = (cfg as any)?.metaapi_account_id as string | null;
     const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
-    const token = Deno.env.get("METAAPI_TOKEN");
+    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
     if (!token) {
       return new Response(JSON.stringify({ ok: false, reason: "broker token not configured" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
