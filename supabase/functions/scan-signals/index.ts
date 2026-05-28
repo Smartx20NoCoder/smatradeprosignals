@@ -826,6 +826,7 @@ async function runScanJob(
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
     const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
+    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - toInsert.length, to_insert: toInsert.length } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
       const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
