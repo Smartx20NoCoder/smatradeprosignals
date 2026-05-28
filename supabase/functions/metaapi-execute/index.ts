@@ -136,11 +136,13 @@ Deno.serve(async (req) => {
 
     const data = result.data ?? {};
     const filled = !!data.positionId;
+    const isPending = !filled && !!data.orderId; // LIMIT/STOP awaiting fill
     await supabase.from("signals").update({
       metaapi_position_id: data.positionId ?? null,
       metaapi_order_id: data.orderId ?? null,
       metaapi_order_type: picked.kind,
-      metaapi_execution_status: filled ? "filled" : "pending",
+      metaapi_executed_lot: lot,
+      metaapi_execution_status: filled ? "filled" : (isPending ? "order_pending" : "pending"),
       metaapi_execution_error: null,
       executed_at: filled ? new Date().toISOString() : null,
       status: filled ? "executed" : "pending",
