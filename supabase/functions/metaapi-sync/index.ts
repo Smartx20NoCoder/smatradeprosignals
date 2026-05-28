@@ -221,7 +221,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(JSON.stringify({
-      ok: true, updated, checked: openSignals.length, partials, breakevens,
+      ok: true, updated, checked: openSignals.length, partials, breakevens, pendingPromoted,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-sync error", e);
