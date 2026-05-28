@@ -2,6 +2,7 @@
 // Uses candle_cache only (no API spend). For each pending signal, walks candles
 // after the signal creation and marks SL / TP1 / TP2 hits.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkInternalAuth } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
