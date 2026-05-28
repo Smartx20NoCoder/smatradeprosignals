@@ -53,8 +53,13 @@ export const updateAppSettingsFn = createServerFn({ method: "POST" })
 export const pingMetaApiFn = createServerFn({ method: "POST" })
   .handler(async () => {
     const { status, data } = await callEdge("metaapi-ping", {});
-    if (status >= 500) return { ok: false, reason: "broker check failed" };
-    return data as { ok: boolean; reason?: string; account?: unknown };
+    if (status >= 500) return { ok: false as boolean, reason: "broker check failed", account: null as any };
+    const d = (data ?? {}) as any;
+    return {
+      ok: !!d.ok,
+      reason: typeof d.reason === "string" ? d.reason : undefined,
+      account: d.account ?? null,
+    };
   });
 
 const NewsSchema = z.object({
@@ -70,5 +75,7 @@ export const refreshNewsCalendarFn = createServerFn({ method: "POST" })
       const msg = (body as any)?.error ?? `Calendar refresh failed (${status})`;
       throw new Error(String(msg).slice(0, 200));
     }
-    return body;
+    const b = (body ?? {}) as any;
+    return { ok: true, inserted: Number(b.inserted ?? 0), date: String(b.date ?? "") };
   });
+
