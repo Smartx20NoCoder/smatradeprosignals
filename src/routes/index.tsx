@@ -260,6 +260,13 @@ function ScalpEdge() {
       trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
       active_td_key: Number(cfg.active_td_key ?? 1),
       session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
+      metaapi_account_id: (cfg.metaapi_account_id as string | null) ?? null,
+      metaapi_region: (cfg.metaapi_region as string) ?? "new-york",
+      metaapi_auto_trade: !!cfg.metaapi_auto_trade,
+      metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
+      metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
+      metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
+      metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
