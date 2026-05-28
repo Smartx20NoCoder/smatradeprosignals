@@ -1088,6 +1088,10 @@ function SettingsPanel({
         </div>
       </div>
 
+      <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+
+
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
         <div className="flex items-center justify-between">
