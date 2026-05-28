@@ -8,6 +8,7 @@ import {
   closePartialPosition,
   corsHeaders,
   getHistoryDealsBySymbol,
+  getHistoryOrderById,
   getOpenPositions,
   modifyPosition,
   safeError,
@@ -35,14 +36,47 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Pass 1: promote pending LIMIT/STOP orders to "filled" once the broker fills them.
+    let pendingPromoted = 0;
+    const { data: pendingOrders } = await supabase
+      .from("signals")
+      .select("id, pair, created_at, metaapi_order_id")
+      .is("metaapi_position_id", null)
+      .not("metaapi_order_id", "is", null)
+      .eq("metaapi_execution_status", "order_pending");
+
+    for (const po of (pendingOrders ?? []) as any[]) {
+      const startTime = new Date(new Date(po.created_at).getTime() - 60_000).toISOString();
+      const ord = await getHistoryOrderById({
+        region, accountId, token, orderId: String(po.metaapi_order_id), startTime,
+      });
+      if (!ord.ok || !ord.data) continue;
+      const positionId = ord.data.positionId ? String(ord.data.positionId) : null;
+      const state = String(ord.data.state ?? "").toUpperCase();
+      if (positionId && (state.includes("FILLED") || state === "ORDER_STATE_FILLED" || state === "")) {
+        await supabase.from("signals").update({
+          metaapi_position_id: positionId,
+          metaapi_execution_status: "filled",
+          executed_at: new Date().toISOString(),
+          status: "executed",
+        }).eq("id", po.id);
+        pendingPromoted++;
+      } else if (state.includes("CANCEL") || state.includes("EXPIRED") || state.includes("REJECT")) {
+        await supabase.from("signals").update({
+          metaapi_execution_status: "canceled",
+          metaapi_execution_error: `order ${state.toLowerCase() || "ended"} by broker`,
+        }).eq("id", po.id);
+      }
+    }
+
     const { data: openSignals } = await supabase
       .from("signals")
-      .select("id, pair, direction, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved")
+      .select("id, pair, direction, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved, metaapi_executed_lot")
       .not("metaapi_position_id", "is", null)
       .in("metaapi_execution_status", ["filled", "pending"]);
 
     if (!openSignals || openSignals.length === 0) {
-      return new Response(JSON.stringify({ ok: true, updated: 0, checked: 0 }), {
+      return new Response(JSON.stringify({ ok: true, updated: 0, checked: 0, pendingPromoted }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -94,7 +128,8 @@ Deno.serve(async (req) => {
 
         // Fire-once partial close at TP1 (50%)
         if (tp1Hit && !s.metaapi_partial_closed) {
-          const halfVol = Math.max(0.01, +(lot / 2).toFixed(2));
+          const tradeLot = Number(s.metaapi_executed_lot ?? lot);
+          const halfVol = Math.max(0.01, +(tradeLot / 2).toFixed(2));
           const pc = await closePartialPosition({ region, accountId, token, positionId: pid, volume: halfVol });
           if (pc.ok) {
             partials++;
@@ -186,7 +221,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(JSON.stringify({
-      ok: true, updated, checked: openSignals.length, partials, breakevens,
+      ok: true, updated, checked: openSignals.length, partials, breakevens, pendingPromoted,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-sync error", e);
