@@ -37,6 +37,13 @@ export type Database = {
           active_td_key: number
           id: string
           key1_exhausted_at: string | null
+          metaapi_account_id: string | null
+          metaapi_auto_trade: boolean
+          metaapi_connected_at: string | null
+          metaapi_fixed_lot: number
+          metaapi_min_confidence: number
+          metaapi_min_rr: number
+          metaapi_region: string
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number
@@ -47,6 +54,13 @@ export type Database = {
           active_td_key?: number
           id?: string
           key1_exhausted_at?: string | null
+          metaapi_account_id?: string | null
+          metaapi_auto_trade?: boolean
+          metaapi_connected_at?: string | null
+          metaapi_fixed_lot?: number
+          metaapi_min_confidence?: number
+          metaapi_min_rr?: number
+          metaapi_region?: string
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -57,6 +71,13 @@ export type Database = {
           active_td_key?: number
           id?: string
           key1_exhausted_at?: string | null
+          metaapi_account_id?: string | null
+          metaapi_auto_trade?: boolean
+          metaapi_connected_at?: string | null
+          metaapi_fixed_lot?: number
+          metaapi_min_confidence?: number
+          metaapi_min_rr?: number
+          metaapi_region?: string
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -170,6 +191,12 @@ export type Database = {
           executed_at: string | null
           htf_bias: string | null
           id: string
+          metaapi_execution_error: string | null
+          metaapi_execution_status: string
+          metaapi_filled_price: number | null
+          metaapi_order_id: string | null
+          metaapi_pnl: number | null
+          metaapi_position_id: string | null
           mfi_divergence: boolean
           mfi_score: number | null
           news_flag: boolean
@@ -199,6 +226,12 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_execution_error?: string | null
+          metaapi_execution_status?: string
+          metaapi_filled_price?: number | null
+          metaapi_order_id?: string | null
+          metaapi_pnl?: number | null
+          metaapi_position_id?: string | null
           mfi_divergence?: boolean
           mfi_score?: number | null
           news_flag?: boolean
@@ -228,6 +261,12 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          metaapi_execution_error?: string | null
+          metaapi_execution_status?: string
+          metaapi_filled_price?: number | null
+          metaapi_order_id?: string | null
+          metaapi_pnl?: number | null
+          metaapi_position_id?: string | null
           mfi_divergence?: boolean
           mfi_score?: number | null
           news_flag?: boolean

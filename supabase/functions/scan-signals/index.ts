@@ -803,9 +803,30 @@ async function runScanJob(
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
     const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
+    let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
-      await supabase.from("signals").insert(toInsert);
+      const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
+      insertedRows = (ins as any) ?? [];
       await sendTelegramAlerts(toInsert);
+
+      // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
+      const { data: cfg } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+      const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
+      const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 75);
+      const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
+      if (autoTrade) {
+        const fnSecret = Deno.env.get("INTERNAL_FN_SECRET") ?? "";
+        const baseUrl = Deno.env.get("SUPABASE_URL")!;
+        for (const row of insertedRows) {
+          if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
+          // Fire-and-forget — don't block the scan
+          fetch(`${baseUrl}/functions/v1/metaapi-execute`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-fn-secret": fnSecret },
+            body: JSON.stringify({ signal_id: row.id }),
+          }).catch((e) => console.error("metaapi-execute trigger failed", row.id, e));
+        }
+      }
     }
 
     const day = new Date().toISOString().slice(0, 10);
