@@ -75,6 +75,13 @@ type AppSettings = {
   trading_hours_end_utc: number;
   active_td_key: number;
   session_config: SessionConfig;
+  metaapi_account_id: string | null;
+  metaapi_region: string;
+  metaapi_auto_trade: boolean;
+  metaapi_min_confidence: number;
+  metaapi_min_rr: number;
+  metaapi_fixed_lot: number;
+  metaapi_connected_at: string | null;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
