@@ -10,6 +10,65 @@ export function metaapiBase(region: string): string {
   return `https://mt-client-api-v1.${region}.agiliumtrade.ai`;
 }
 
+export function metaapiProvisioningBase(region: string): string {
+  return `https://mt-provisioning-api-v1.${region}.agiliumtrade.ai`;
+}
+
+// Provisioning API: returns full account record including reliable `state`.
+export async function getProvisioningAccountInfo(opts: {
+  region: string; accountId: string; token: string;
+}): Promise<{ ok: boolean; data?: any; error?: string; status?: number }> {
+  const url = `${metaapiProvisioningBase(opts.region)}/users/current/accounts/${opts.accountId}`;
+  try {
+    const res = await fetch(url, { headers: { "auth-token": opts.token } });
+    const text = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { /* */ }
+    if (!res.ok) return { ok: false, status: res.status, error: `provisioning ${res.status}: ${text.slice(0, 200)}` };
+    return { ok: true, data };
+  } catch (e) {
+    console.error("getProvisioningAccountInfo exception", e);
+    return { ok: false, error: "provisioning fetch failed" };
+  }
+}
+
+// Trigger a deploy on the provisioning API, then poll for DEPLOYED state.
+// Returns a log of attempts for diagnostics.
+export async function deployAccount(opts: {
+  region: string; accountId: string; token: string;
+  maxPolls?: number; pollDelayMs?: number;
+}): Promise<{ ok: boolean; state?: string; log: string[] }> {
+  const log: string[] = [];
+  const maxPolls = opts.maxPolls ?? 5;
+  const delay = opts.pollDelayMs ?? 3000;
+  const url = `${metaapiProvisioningBase(opts.region)}/users/current/accounts/${opts.accountId}/deploy`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "auth-token": opts.token, "Content-Type": "application/json" },
+    });
+    const t = await res.text().catch(() => "");
+    log.push(`deploy POST -> ${res.status} ${t.slice(0, 120)}`);
+    if (!res.ok && res.status !== 204) {
+      return { ok: false, log };
+    }
+  } catch (e) {
+    log.push(`deploy POST exception: ${String(e).slice(0, 120)}`);
+    return { ok: false, log };
+  }
+
+  for (let i = 1; i <= maxPolls; i++) {
+    await new Promise((r) => setTimeout(r, delay));
+    const info = await getProvisioningAccountInfo(opts);
+    const state = String(info.data?.state ?? "unknown");
+    log.push(`poll ${i}/${maxPolls}: state=${state}${info.ok ? "" : ` err=${info.error}`}`);
+    if (info.ok && state.toUpperCase() === "DEPLOYED") {
+      return { ok: true, state, log };
+    }
+  }
+  return { ok: false, log };
+}
+
 export function pairToSymbol(pair: string, suffix = ""): string {
   return pair.replace("/", "").toUpperCase() + (suffix ?? "");
 }
