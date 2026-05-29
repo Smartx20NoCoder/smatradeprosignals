@@ -137,7 +137,8 @@ Deno.serve(async (req) => {
       detail: `positionId=${positionId} orderId=${order.data.orderId ?? "—"} sl=${sl} tp=${tp}`,
     });
 
-    // 6. Close position via POSITION_CLOSE_ID
+    // 6. Wait 2s, then close position via POSITION_CLOSE_ID
+    await new Promise((r) => setTimeout(r, 2000));
     const closeUrl = `${clientBase}/users/current/accounts/${accountId}/trade`;
     let closeOk = false;
     let closeDetail = `positionId=${positionId}`;
