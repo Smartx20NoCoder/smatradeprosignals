@@ -6,6 +6,7 @@ import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
   pingMetaApiFn,
   refreshNewsCalendarFn,
+  testTradeMetaApiFn,
   updateAppSettingsFn,
 } from "@/lib/api.functions";
 import {
@@ -1174,6 +1175,12 @@ function MetaApiPanel({
   const [region, setRegion] = useState(appSettings.metaapi_region);
   const [status, setStatus] = useState<{ ok: boolean; reason?: string; account?: any } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [testTrading, setTestTrading] = useState(false);
+  const [testTradeResult, setTestTradeResult] = useState<{
+    ok: boolean;
+    steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
+    summary: string;
+  } | null>(null);
 
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
@@ -1303,13 +1310,66 @@ function MetaApiPanel({
         </label>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button onClick={ping} disabled={testing || !accountId}
-          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
-          {testing ? "Testing…" : "Test Connection"}
-        </button>
-        {appSettings.metaapi_connected_at && (
-          <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={ping} disabled={testing || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
+            {testing ? "Testing…" : "Test Connection"}
+          </button>
+          <button
+            onClick={async () => {
+              setTestTrading(true);
+              setTestTradeResult(null);
+              try {
+                const r = await testTradeMetaApiFn({});
+                setTestTradeResult(r as any);
+              } catch (e) {
+                setTestTradeResult({
+                  ok: false, steps: [],
+                  summary: `Test failed: ${(e as Error).message}`,
+                });
+              } finally {
+                setTestTrading(false);
+              }
+            }}
+            disabled={testTrading || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {testTrading && (
+              <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            )}
+            {testTrading ? "Running…" : "Run Test Trade"}
+          </button>
+          {appSettings.metaapi_connected_at && (
+            <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
+          )}
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Places a real 0.01 lot EUR/USD market order on your broker and immediately closes it. Uses live account — confirm demo mode before running.
+        </div>
+
+        {testTradeResult && (
+          <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-1.5">
+            {testTradeResult.steps.map((s, i) => (
+              <div key={i} className="text-xs">
+                <div className="flex items-start gap-2">
+                  <span className={s.ok ? "text-bull" : "text-bear"}>{s.ok ? "✅" : "❌"}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold">{s.label}</div>
+                    {s.detail && (
+                      <div className="font-mono text-[10px] text-muted-foreground break-all">{s.detail}</div>
+                    )}
+                    {s.error && (
+                      <div className="text-[11px] text-bear mt-0.5">{s.error}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className={`pt-2 border-t border-border text-xs font-bold ${testTradeResult.ok ? "text-bull" : "text-bear"}`}>
+              {testTradeResult.summary}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -62,6 +62,21 @@ export const pingMetaApiFn = createServerFn({ method: "POST" })
     };
   });
 
+// MetaApi test trade — places & immediately closes a tiny EUR/USD order.
+export const testTradeMetaApiFn = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { status, data } = await callEdge("metaapi-test-trade", {});
+    const d = (data ?? {}) as any;
+    if (status >= 500 && !Array.isArray(d.steps)) {
+      return { ok: false as boolean, steps: [] as Array<any>, summary: "Test failed: edge function error" };
+    }
+    return {
+      ok: !!d.ok,
+      steps: Array.isArray(d.steps) ? d.steps : [],
+      summary: typeof d.summary === "string" ? d.summary : "",
+    };
+  });
+
 const NewsSchema = z.object({
   source: z.string().min(1).max(32).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
