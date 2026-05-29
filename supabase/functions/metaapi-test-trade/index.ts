@@ -109,10 +109,12 @@ Deno.serve(async (req) => {
       detail: `symbol=${symbol} bid=${price.bid} ask=${price.ask}`,
     });
 
-    // 5. Place BUY order
+    // 5. Place BUY order — SL/TP derived from current spread.
+    const bid = price.bid;
     const ask = price.ask;
-    const sl = +(ask - 0.0050).toFixed(5);
-    const tp = +(ask + 0.0050).toFixed(5);
+    const spread = ask - bid;
+    const sl = +(bid - spread * 20).toFixed(5);
+    const tp = +(ask + spread * 40).toFixed(5);
     const order = await placeOrder({
       region: acctRegion, accountId, token,
       actionType: "ORDER_TYPE_BUY",
@@ -135,7 +137,8 @@ Deno.serve(async (req) => {
       detail: `positionId=${positionId} orderId=${order.data.orderId ?? "—"} sl=${sl} tp=${tp}`,
     });
 
-    // 6. Close position via POSITION_CLOSE_ID
+    // 6. Wait 2s, then close position via POSITION_CLOSE_ID
+    await new Promise((r) => setTimeout(r, 2000));
     const closeUrl = `${clientBase}/users/current/accounts/${accountId}/trade`;
     let closeOk = false;
     let closeDetail = `positionId=${positionId}`;

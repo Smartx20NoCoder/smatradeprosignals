@@ -132,14 +132,16 @@ export async function getSymbolPrice(opts: {
   token: string;
   symbol: string;
 }): Promise<{ ok: boolean; bid?: number; ask?: number; error?: string }> {
-  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price`;
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price?keepSubscription=true`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     const text = await res.text();
     let data: any = null;
     try { data = JSON.parse(text); } catch { /* */ }
     if (!res.ok) return { ok: false, error: `price: ${res.status}` };
-    return { ok: true, bid: Number(data?.bid), ask: Number(data?.ask) };
+    const bid = data?.bid != null ? Number(data.bid) : undefined;
+    const ask = data?.ask != null ? Number(data.ask) : undefined;
+    return { ok: true, bid, ask };
   } catch (e) {
     console.error("getSymbolPrice error", e);
     return { ok: false, error: "price fetch failed" };

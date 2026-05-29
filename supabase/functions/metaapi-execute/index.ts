@@ -143,6 +143,18 @@ Deno.serve(async (req) => {
     const entry = Number(s.entry);
     const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
 
+    // Stale-stop protection: refuse if SL is implausibly close to current price.
+    const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
+    const slDistance = Math.abs(mid - Number(s.stop_loss));
+    const minDistance = mid * 0.0005;
+    if (slDistance < minDistance) {
+      const msg = `SL too close to market (${slDistance.toFixed(5)} < min ${minDistance.toFixed(5)}) — signal stale`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const result = await placeOrder({
       region, accountId, token,
       actionType: picked.action,
