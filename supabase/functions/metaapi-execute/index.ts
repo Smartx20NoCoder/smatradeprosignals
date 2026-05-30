@@ -5,8 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   checkSecret,
   corsHeaders,
-  deployAccount,
-  getProvisioningAccountInfo,
+  getAccountInfo,
   getSymbolPrice,
   pairToSymbol,
   placeOrder,
@@ -101,34 +100,23 @@ Deno.serve(async (req) => {
       metaapi_execution_error: null,
     }).eq("id", signal_id);
 
-    // Pre-flight: ensure the MetaApi account is DEPLOYED via the provisioning API.
-    // The client trading API can report "unknown" for MT5 demo accounts — provisioning is authoritative.
-    const deployLog: string[] = [];
-    const acctRes = await getProvisioningAccountInfo({ region, accountId, token });
-    if (!acctRes.ok) {
-      const msg = `provisioning lookup failed: ${acctRes.error ?? "unknown"}`;
+    // Verify broker is reachable via client API (provisioning API is not used —
+    // it may be unreachable from Supabase's network; client API is always available)
+    const health = await getAccountInfo({ region, accountId, token });
+    if (!health.ok) {
+      const msg = `Broker not reachable: ${health.error ?? "unknown"}`;
       await markFailed(supabase, signal_id, msg);
       return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    let acctState = String((acctRes.data as any)?.state ?? "unknown");
-    deployLog.push(`initial state=${acctState}`);
-    if (acctState.toUpperCase() !== "DEPLOYED") {
-      const dep = await deployAccount({ region, accountId, token });
-      deployLog.push(...dep.log);
-      if (!dep.ok) {
-        const msg = `MetaApi account not deployed after retries. Log: ${deployLog.join(" | ")}`.slice(0, 500);
-        await markFailed(supabase, signal_id, msg);
-        return new Response(JSON.stringify({ ok: false, reason: msg }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      acctState = dep.state ?? "DEPLOYED";
-    }
 
     const symbol = pairToSymbol(s.pair, symbolSuffix);
-    const priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+    let priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+    if (priceRes.ok && (priceRes.bid == null || priceRes.ask == null)) {
+      await new Promise((r) => setTimeout(r, 1500));
+      priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+    }
     if (!priceRes.ok || !priceRes.bid || !priceRes.ask) {
       const raw = priceRes.error ?? "price unavailable";
       const friendly = raw.includes("404")
