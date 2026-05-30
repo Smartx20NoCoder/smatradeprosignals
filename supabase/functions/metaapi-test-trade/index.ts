@@ -51,48 +51,32 @@ Deno.serve(async (req) => {
       detail: `accountId=${accountId.slice(0, 8)}… token=set suffix="${suffix}" fallbackRegion=${fallbackRegion}`,
     });
 
-    // 2. Resolve API URL via provisioning
-    const provBase = metaapiProvisioningBase();
-    const provInfo = await getProvisioningAccountInfo({ region: fallbackRegion, accountId, token });
-    if (!provInfo.ok) {
+    // Step 2 — verify broker connectivity via client API directly
+    const clientBase = `https://mt-client-api-v1.${fallbackRegion}.agiliumtrade.ai`;
+    const health = await getAccountInfo({ region: fallbackRegion, accountId, token });
+    if (!health.ok) {
       push({
-        label: "Resolve API URL", ok: false,
-        detail: `provisioning=${provBase}`,
-        error: provInfo.error ?? "provisioning lookup failed",
+        label: "Broker connection",
+        ok: false,
+        detail: `clientBase=${clientBase}`,
+        error: health.error ?? "broker unreachable",
       });
-      return finish(false, "Test failed: could not resolve account region");
+      return finish(false, "Test failed: broker not reachable via client API");
     }
-    const acctRegion = String((provInfo.data as any)?.region ?? fallbackRegion);
-    const clientBase = await resolveClientBase({ accountId, token, fallbackRegion });
     push({
-      label: "Resolve API URL", ok: true,
-      detail: `region=${acctRegion} clientBase=${clientBase}`,
+      label: "Broker connection",
+      ok: true,
+      detail: `clientBase=${clientBase} balance=${(health.data as any)?.balance ?? "?"} equity=${(health.data as any)?.equity ?? "?"}`,
     });
+    const acctRegion = fallbackRegion;
 
-    // 3. Account state — try auto-deploy if not DEPLOYED
-    const stateRaw = String((provInfo.data as any)?.state ?? "unknown");
-    const state = stateRaw.toUpperCase();
-    if (state !== "DEPLOYED") {
-      const dep = await deployAccount({ region: acctRegion, accountId, token });
-      if (!dep.ok) {
-        push({
-          label: "Account state", ok: false,
-          detail: `initial=${stateRaw} ${dep.log.join(" | ")}`,
-          error: `Account not deployed (last state: ${dep.state ?? "unknown"})`,
-        });
-        return finish(false, "Test failed: MetaApi account is not deployed");
-      }
-      push({
-        label: "Account state", ok: true,
-        detail: `initial=${stateRaw} → DEPLOYED after auto-deploy (${dep.log.length} polls)`,
-      });
-    } else {
-      push({ label: "Account state", ok: true, detail: `state=${stateRaw}` });
-    }
-
-    // 4. Get EUR/USD price
+    // Get EUR/USD price (with streaming warm-up retry)
     const symbol = pairToSymbol("EUR/USD", suffix);
-    const price = await getSymbolPrice({ region: acctRegion, accountId, token, symbol });
+    let price = await getSymbolPrice({ region: acctRegion, accountId, token, symbol });
+    if (price.ok && (price.bid == null || price.ask == null)) {
+      await new Promise((r) => setTimeout(r, 1500));
+      price = await getSymbolPrice({ region: acctRegion, accountId, token, symbol });
+    }
     if (!price.ok || !price.bid || !price.ask) {
       push({
         label: "Get EUR/USD price", ok: false,
