@@ -4,13 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   checkSecret,
   corsHeaders,
-  deployAccount,
-  getProvisioningAccountInfo,
+  getAccountInfo,
   getSymbolPrice,
-  metaapiProvisioningBase,
   pairToSymbol,
   placeOrder,
-  resolveClientBase,
 } from "../_shared/metaapi.ts";
 
 type Step = { label: string; detail: string; ok: boolean; error?: string };
