@@ -1345,7 +1345,7 @@ function MetaApiPanel({
           )}
         </div>
         <div className="text-[10px] text-muted-foreground">
-          Places a real 0.01 lot EUR/USD market order on your broker and immediately closes it. Uses live account — confirm demo mode before running.
+          Places a real 0.01 lot BTC/USD market order on your broker and immediately closes it. Uses live account — confirm demo mode before running.
         </div>
 
         {testTradeResult && (

@@ -70,8 +70,8 @@ Deno.serve(async (req) => {
     });
     const acctRegion = fallbackRegion;
 
-    // Get EUR/USD price (with streaming warm-up retry)
-    const symbol = pairToSymbol("EUR/USD", suffix);
+    // Get BTC/USD price (with streaming warm-up retry)
+    const symbol = pairToSymbol("BTC/USD", suffix);
     let price = await getSymbolPrice({ region: acctRegion, accountId, token, symbol });
     if (price.ok && (price.bid == null || price.ask == null)) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -79,14 +79,14 @@ Deno.serve(async (req) => {
     }
     if (!price.ok || !price.bid || !price.ask) {
       push({
-        label: "Get EUR/USD price", ok: false,
+        label: "Get BTC/USD price", ok: false,
         detail: `symbol=${symbol}`,
         error: price.error ?? "no price returned — check Broker Symbol Suffix in Settings",
       });
       return finish(false, `Test failed: could not fetch price for ${symbol}`);
     }
     push({
-      label: "Get EUR/USD price", ok: true,
+      label: "Get BTC/USD price", ok: true,
       detail: `symbol=${symbol} bid=${price.bid} ask=${price.ask}`,
     });
 
@@ -94,15 +94,15 @@ Deno.serve(async (req) => {
     const bid = price.bid;
     const ask = price.ask;
     const spread = ask - bid;
-    const sl = +(bid - spread * 20).toFixed(5);
-    const tp = +(ask + spread * 40).toFixed(5);
+    const sl = +(bid - spread * 5).toFixed(5);
+    const tp = +(ask + spread * 10).toFixed(5);
     const order = await placeOrder({
       region: acctRegion, accountId, token,
       actionType: "ORDER_TYPE_BUY",
       symbol, volume: 0.01,
       stopLoss: sl, takeProfit: tp,
       comment: "scalpedge-test",
-      clientId: `test-${Date.now()}`,
+      clientId: `test${Date.now()}`,
     });
     if (!order.ok || !order.data?.positionId) {
       push({
