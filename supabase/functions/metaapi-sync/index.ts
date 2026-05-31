@@ -115,55 +115,60 @@ Deno.serve(async (req) => {
       const pid = String(s.metaapi_position_id);
       const live = openMap.get(pid);
       if (live) {
-        // Still open — refresh PnL
-        const currentPrice = Number(live.currentPrice ?? live.currentTickValue ?? 0)
-          || (s.direction === "Long" ? Number(live.currentBid ?? 0) : Number(live.currentAsk ?? 0));
+        // Still open — refresh PnL and run TP1 management.
+        const long = s.direction === "Long";
         const tp1 = Number(s.tp1);
         const entry = Number(s.entry);
-        const long = s.direction === "Long";
-
-        // TP1 reached? Use live.currentPrice if present, otherwise infer from profit sign + bid/ask
-        const refPrice = currentPrice
+        const currentPrice = Number(live.currentPrice ?? 0)
           || (long ? Number(live.currentBid ?? 0) : Number(live.currentAsk ?? 0));
-        const tp1Hit = refPrice > 0 && (long ? refPrice >= tp1 : refPrice <= tp1);
+        const tp1Hit = currentPrice > 0 && (long ? currentPrice >= tp1 : currentPrice <= tp1);
 
-        // Fire-once partial close at TP1 (50%)
+        // TP1 reached and not yet processed → close 0.01 lot, then move SL to BE.
         if (tp1Hit && !s.metaapi_partial_closed) {
-          const tradeLot = Number(s.metaapi_executed_lot ?? lot);
-          const halfVol = Math.max(0.01, +(tradeLot / 2).toFixed(2));
-          const pc = await closePartialPosition({ region, accountId, token, positionId: pid, volume: halfVol });
-          if (pc.ok) {
-            partials++;
-            await supabase.from("signals").update({
-              metaapi_partial_closed: true,
-              partial_close: true,
-            }).eq("id", s.id);
-          } else {
-            console.error("partial close failed for", pid, pc.error);
+          try {
+            const pc = await closePartialPosition({
+              region, accountId, token, positionId: pid, volume: 0.01,
+            });
+            if (pc.ok) {
+              partials++;
+              let beOk = false;
+              try {
+                const mod = await modifyPosition({
+                  region, accountId, token, positionId: pid,
+                  stopLoss: entry,
+                  takeProfit: Number(s.tp2),
+                });
+                if (mod.ok) {
+                  beOk = true;
+                  breakevens++;
+                } else {
+                  console.error("breakeven move failed for", pid, mod.error);
+                }
+              } catch (e) {
+                console.error("breakeven move exception", pid, e);
+              }
+              await supabase.from("signals").update({
+                metaapi_partial_closed: true,
+                metaapi_breakeven_moved: beOk,
+                metaapi_execution_status: "partial",
+                partial_close: true,
+              }).eq("id", s.id);
+            } else {
+              console.error("partial close failed for", pid, pc.error);
+            }
+          } catch (e) {
+            console.error("partial close exception", pid, e);
           }
         }
 
-        // Fire-once SL → breakeven (entry) at TP1
-        if (tp1Hit && !s.metaapi_breakeven_moved) {
-          const mod = await modifyPosition({
-            region, accountId, token, positionId: pid,
-            stopLoss: entry,
-            takeProfit: Number(s.tp2),
-          });
-          if (mod.ok) {
-            breakevens++;
-            await supabase.from("signals").update({
-              metaapi_breakeven_moved: true,
-            }).eq("id", s.id);
-          } else {
-            console.error("breakeven move failed for", pid, mod.error);
-          }
+        try {
+          await supabase.from("signals").update({
+            metaapi_pnl: Number(live.unrealizedProfit ?? 0),
+            metaapi_filled_price: s.metaapi_filled_price ?? Number(live.openPrice ?? 0),
+          }).eq("id", s.id);
+        } catch (e) {
+          console.error("pnl refresh failed", pid, e);
         }
-
-        await supabase.from("signals").update({
-          metaapi_pnl: Number(live.unrealizedProfit ?? 0),
-          metaapi_filled_price: s.metaapi_filled_price ?? Number(live.openPrice ?? 0),
-        }).eq("id", s.id);
         updated++;
         continue;
       }
