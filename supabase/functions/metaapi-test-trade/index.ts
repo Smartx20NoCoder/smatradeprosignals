@@ -102,7 +102,6 @@ Deno.serve(async (req) => {
       symbol, volume: 0.01,
       stopLoss: sl, takeProfit: tp,
       comment: "scalpedge-test",
-      clientId: `test${Date.now()}`,
     });
     if (!order.ok || !order.data?.positionId) {
       push({
