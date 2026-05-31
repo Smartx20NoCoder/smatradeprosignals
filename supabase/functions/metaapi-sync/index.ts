@@ -174,56 +174,69 @@ Deno.serve(async (req) => {
       }
 
       // Position closed — reconcile from history
-      const deals = (dealsByPos.get(pid) ?? []).sort((a, b) =>
-        new Date(a.time).getTime() - new Date(b.time).getTime());
-      const closingDeal = deals.find((d) => d.entryType === "DEAL_ENTRY_OUT") ?? deals[deals.length - 1];
-      if (!closingDeal) continue;
+      try {
+        const deals = (dealsByPos.get(pid) ?? []).sort((a, b) =>
+          new Date(a.time).getTime() - new Date(b.time).getTime());
+        const closingDeal = deals.find((d) => d.entryType === "DEAL_ENTRY_OUT") ?? deals[deals.length - 1];
+        if (!closingDeal) continue;
 
-      const pnl = Number(closingDeal.profit ?? 0);
-      const closePrice = Number(closingDeal.price ?? 0);
-      const reasonStr: string = String(closingDeal.reason ?? "").toUpperCase();
-      const long = s.direction === "Long";
-      const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
-      let status: string = "manual";
-      let outcomeR: number | null = null;
+        // Per-spec: final PnL = sum of profit fields from per-position history.
+        let pnl = Number(closingDeal.profit ?? 0);
+        try {
+          const ph = await getHistoryDealsByPosition({ region, accountId, token, positionId: pid });
+          if (ph.ok && ph.data && ph.data.length > 0) {
+            pnl = ph.data.reduce((sum, d: any) => sum + Number(d.profit ?? 0) + Number(d.swap ?? 0) + Number(d.commission ?? 0), 0);
+          }
+        } catch (e) {
+          console.error("history-deals/position lookup failed for", pid, e);
+        }
 
-      const hitSL = long
-        ? closePrice <= Number(s.stop_loss) * 1.0005
-        : closePrice >= Number(s.stop_loss) * 0.9995;
-      const hitTP2 = long
-        ? closePrice >= Number(s.tp2) * 0.9995
-        : closePrice <= Number(s.tp2) * 1.0005;
-      const hitTP1 = long
-        ? closePrice >= Number(s.tp1) * 0.9995
-        : closePrice <= Number(s.tp1) * 1.0005;
+        const closePrice = Number(closingDeal.price ?? 0);
+        const reasonStr: string = String(closingDeal.reason ?? "").toUpperCase();
+        const long = s.direction === "Long";
+        const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
+        let status: string = "manual";
+        let outcomeR: number | null = null;
 
-      // If SL was moved to entry and price came back, treat as breakeven
-      const nearEntry = Math.abs(closePrice - Number(s.entry)) <= Math.max(Number(s.entry) * 0.0002, 0.0001);
-      if (s.metaapi_breakeven_moved && nearEntry) {
-        status = s.metaapi_partial_closed ? "tp1" : "be";
-        outcomeR = s.metaapi_partial_closed && risk > 0
-          ? +((Math.abs(Number(s.tp1) - Number(s.entry)) / risk) / 2).toFixed(2)
-          : 0;
-      } else if (reasonStr.includes("SL") || hitSL) {
-        status = "loss"; outcomeR = -1;
-      } else if (reasonStr.includes("TP") || hitTP2) {
-        status = "tp2"; outcomeR = risk > 0 ? Math.abs(Number(s.tp2) - Number(s.entry)) / risk : null;
-      } else if (hitTP1) {
-        status = "tp1"; outcomeR = risk > 0 ? Math.abs(Number(s.tp1) - Number(s.entry)) / risk : null;
-      } else {
-        status = pnl >= 0 ? "manual" : "loss";
-        outcomeR = risk > 0 ? pnl / (risk * 10000) : null;
+        const hitSL = long
+          ? closePrice <= Number(s.stop_loss) * 1.0005
+          : closePrice >= Number(s.stop_loss) * 0.9995;
+        const hitTP2 = long
+          ? closePrice >= Number(s.tp2) * 0.9995
+          : closePrice <= Number(s.tp2) * 1.0005;
+        const hitTP1 = long
+          ? closePrice >= Number(s.tp1) * 0.9995
+          : closePrice <= Number(s.tp1) * 1.0005;
+
+        const nearEntry = Math.abs(closePrice - Number(s.entry)) <= Math.max(Number(s.entry) * 0.0002, 0.0001);
+        if (s.metaapi_breakeven_moved && nearEntry) {
+          status = s.metaapi_partial_closed ? "tp1" : "be";
+          outcomeR = s.metaapi_partial_closed && risk > 0
+            ? +((Math.abs(Number(s.tp1) - Number(s.entry)) / risk) / 2).toFixed(2)
+            : 0;
+        } else if (reasonStr.includes("SL") || hitSL) {
+          status = "loss"; outcomeR = -1;
+        } else if (reasonStr.includes("TP") || hitTP2) {
+          status = "tp2"; outcomeR = risk > 0 ? Math.abs(Number(s.tp2) - Number(s.entry)) / risk : null;
+        } else if (hitTP1) {
+          status = "tp1"; outcomeR = risk > 0 ? Math.abs(Number(s.tp1) - Number(s.entry)) / risk : null;
+        } else {
+          status = pnl >= 0 ? "manual" : "loss";
+          outcomeR = risk > 0 ? pnl / (risk * 10000) : null;
+        }
+
+        await supabase.from("signals").update({
+          status,
+          outcome_r: outcomeR,
+          closed_at: new Date(closingDeal.time ?? Date.now()).toISOString(),
+          metaapi_execution_status: "closed",
+          metaapi_pnl: pnl,
+          notes: `[MetaApi auto-close ${reasonStr || "?"} @ ${closePrice}]`,
+        }).eq("id", s.id);
+        updated++;
+      } catch (e) {
+        console.error("close reconcile failed for", pid, e);
       }
-
-      await supabase.from("signals").update({
-        status,
-        outcome_r: outcomeR,
-        closed_at: new Date(closingDeal.time ?? Date.now()).toISOString(),
-        metaapi_execution_status: "closed",
-        metaapi_pnl: pnl,
-        notes: `[MetaApi auto-close ${reasonStr || "?"} @ ${closePrice}]`,
-      }).eq("id", s.id);
-      updated++;
     }
 
     return new Response(JSON.stringify({
