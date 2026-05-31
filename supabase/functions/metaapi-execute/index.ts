@@ -152,7 +152,6 @@ Deno.serve(async (req) => {
       stopLoss: Number(s.stop_loss),
       takeProfit: Number(s.tp2),
       comment: `sig ${String(signal_id).slice(0, 8)}`,
-      clientId: String(signal_id).replace(/-/g, "").slice(0, 32),
     });
 
     if (!result.ok) {
