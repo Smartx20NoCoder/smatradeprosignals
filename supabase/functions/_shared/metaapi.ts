@@ -222,7 +222,7 @@ export async function closePartialPosition(opts: {
       method: "POST",
       headers: { "Content-Type": "application/json", "auth-token": opts.token },
       body: JSON.stringify({
-        actionType: "POSITION_PARTIAL",
+        actionType: "POSITION_CLOSE_PARTIAL",
         positionId: opts.positionId,
         volume: opts.volume,
       }),
