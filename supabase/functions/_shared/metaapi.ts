@@ -160,6 +160,7 @@ export async function placeOrder(opts: {
   takeProfit: number;
   comment?: string;
   clientId?: string;
+  expiration?: { type: string; time: string };
 }): Promise<{ ok: boolean; data?: MetaApiTradeResponse; error?: string }> {
   const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/trade`;
   const payload: Record<string, unknown> = {
@@ -174,6 +175,10 @@ export async function placeOrder(opts: {
   if (opts.openPrice != null && opts.actionType !== "ORDER_TYPE_BUY" && opts.actionType !== "ORDER_TYPE_SELL") {
     payload.openPrice = opts.openPrice;
   }
+  if (opts.expiration) {
+    payload.expiration = opts.expiration;
+  }
+
   try {
     const res = await fetch(url, {
       method: "POST",

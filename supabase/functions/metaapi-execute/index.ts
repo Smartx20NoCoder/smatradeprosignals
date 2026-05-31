@@ -152,7 +152,12 @@ Deno.serve(async (req) => {
       stopLoss: Number(s.stop_loss),
       takeProfit: Number(s.tp2),
       comment: `sig ${String(signal_id).slice(0, 8)}`,
+      expiration: picked.kind !== "market" ? {
+        type: "ORDER_TIME_SPECIFIED",
+        time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      } : undefined,
     });
+
 
     if (!result.ok) {
       await markFailed(supabase, signal_id, result.error ?? "unknown error");
