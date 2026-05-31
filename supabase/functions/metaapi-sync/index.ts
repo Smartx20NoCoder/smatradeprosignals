@@ -126,9 +126,11 @@ Deno.serve(async (req) => {
         // TP1 reached and not yet processed → close 0.01 lot, then move SL to BE.
         if (tp1Hit && !s.metaapi_partial_closed) {
           try {
+            const halfLot = Math.round((lot / 2) * 100) / 100;
             const pc = await closePartialPosition({
-              region, accountId, token, positionId: pid, volume: 0.01,
+              region, accountId, token, positionId: pid, volume: halfLot,
             });
+
             if (pc.ok) {
               partials++;
               let beOk = false;
