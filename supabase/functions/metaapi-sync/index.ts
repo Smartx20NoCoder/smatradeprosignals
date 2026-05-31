@@ -7,6 +7,7 @@ import {
   checkSecret,
   closePartialPosition,
   corsHeaders,
+  getHistoryDealsByPosition,
   getHistoryDealsBySymbol,
   getHistoryOrderById,
   getOpenPositions,
