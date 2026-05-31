@@ -222,7 +222,7 @@ export async function closePartialPosition(opts: {
       method: "POST",
       headers: { "Content-Type": "application/json", "auth-token": opts.token },
       body: JSON.stringify({
-        actionType: "POSITION_PARTIAL",
+        actionType: "POSITION_CLOSE_PARTIAL",
         positionId: opts.positionId,
         volume: opts.volume,
       }),
@@ -340,5 +340,25 @@ export async function getHistoryOrderById(opts: {
   } catch (e) {
     console.error("history-orders exception", e);
     return { ok: false, error: "history-orders fetch failed" };
+  }
+}
+
+// Fetch all deals for a closed position to compute final PnL.
+export async function getHistoryDealsByPosition(opts: {
+  region: string; accountId: string; token: string; positionId: string;
+}): Promise<{ ok: boolean; data?: any[]; error?: string }> {
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/history-deals/position/${encodeURIComponent(opts.positionId)}`;
+  try {
+    const res = await fetch(url, { headers: { "auth-token": opts.token } });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      console.error("history-deals/position", res.status, t.slice(0, 200));
+      return { ok: false, error: `history-deals/position failed (${res.status})` };
+    }
+    const data = await res.json();
+    return { ok: true, data: (data ?? []) as any[] };
+  } catch (e) {
+    console.error("history-deals/position exception", e);
+    return { ok: false, error: "history-deals/position fetch failed" };
   }
 }
