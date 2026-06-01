@@ -334,7 +334,10 @@ export type Database = {
           metaapi_auto_trade: boolean
           metaapi_configured: boolean
           metaapi_connected_at: string
+          metaapi_expiry_hours: number
           metaapi_fixed_lot: number
+          metaapi_max_daily_loss_pct: number
+          metaapi_max_trades: number
           metaapi_min_confidence: number
           metaapi_min_rr: number
           metaapi_region: string
