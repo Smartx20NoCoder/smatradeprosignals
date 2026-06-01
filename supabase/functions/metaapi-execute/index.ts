@@ -1,6 +1,7 @@
-// Executes a MetaApi order for a given signal id.
-// - Auto-selects market / limit / stop based on entry vs current price
-// - Idempotent: refuses to re-execute a signal that already has a position/order id.
+// Executes a MetaApi order for a given signal id as TWO half-lot orders:
+//   - Order A: closes at TP1
+//   - Order B: runner to TP2 (sync moves SL to BE once A closes)
+// Adds risk gates: max concurrent trades, daily loss limit, pending-order expiry.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   checkSecret,
@@ -27,10 +28,8 @@ function pickAction(
   bid: number,
   ask: number,
 ): { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" } {
-  // Tolerance ~0.03% of mid — accounts for normal spread; tighter than that is "market".
   const mid = (bid + ask) / 2 || entry;
   const tol = Math.max(mid * 0.0003, 0.0001);
-
   if (direction === "Long") {
     if (entry > ask + tol) return { action: "ORDER_TYPE_BUY_STOP", openPrice: entry, kind: "stop" };
     if (entry < bid - tol) return { action: "ORDER_TYPE_BUY_LIMIT", openPrice: entry, kind: "limit" };
@@ -68,14 +67,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
-    const accountId = (cfg as any)?.metaapi_account_id as string | null;
-    const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
-    const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 75);
-    const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
-    const lot = Number((cfg as any)?.metaapi_fixed_lot ?? 0.01);
-    const symbolSuffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
-    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const c: any = cfg ?? {};
+    const autoTrade = !!c.metaapi_auto_trade;
+    const accountId = c.metaapi_account_id as string | null;
+    const region = (c.metaapi_region as string | null) ?? "new-york";
+    const minConf = Number(c.metaapi_min_confidence ?? 75);
+    const minRR = Number(c.metaapi_min_rr ?? 2);
+    const lot = Number(c.metaapi_fixed_lot ?? 0.01);
+    const maxTrades = Number(c.metaapi_max_trades ?? 3);
+    const expiryHours = Number(c.metaapi_expiry_hours ?? 24);
+    const maxDailyLossPct = Number(c.metaapi_max_daily_loss_pct ?? 5);
+    const symbolSuffix = (c.metaapi_symbol_suffix as string | null) ?? "";
+    const token = (c.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
 
     if (!autoTrade) {
       return new Response(JSON.stringify({ ok: false, reason: "auto-trade disabled" }), {
@@ -95,13 +98,24 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Concurrent trades gate — count active signals (rows in DB, not broker positions).
+    const { count: activeCount } = await supabase
+      .from("signals")
+      .select("id", { count: "exact", head: true })
+      .in("metaapi_execution_status", ["filled", "partial", "order_pending"]);
+    if ((activeCount ?? 0) >= maxTrades) {
+      const msg = `max concurrent trades reached (${activeCount}/${maxTrades})`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     await supabase.from("signals").update({
       metaapi_execution_status: "pending",
       metaapi_execution_error: null,
     }).eq("id", signal_id);
 
-    // Verify broker is reachable via client API (provisioning API is not used —
-    // it may be unreachable from Supabase's network; client API is always available)
     const health = await getAccountInfo({ region, accountId, token });
     if (!health.ok) {
       const msg = `Broker not reachable: ${health.error ?? "unknown"}`;
@@ -109,6 +123,34 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Daily loss gate — sum today's closed pnl; if loss exceeds threshold, pause auto-trade.
+    try {
+      const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+      const { data: closedToday } = await supabase
+        .from("signals")
+        .select("metaapi_pnl, closed_at")
+        .eq("metaapi_execution_status", "closed")
+        .gte("closed_at", dayStart.toISOString());
+      const totalPnl = (closedToday ?? []).reduce(
+        (sum: number, r: any) => sum + Number(r.metaapi_pnl ?? 0),
+        0,
+      );
+      const balance = Number((health.data as any)?.balance ?? 0);
+      const lossLimit = balance > 0 ? balance * (maxDailyLossPct / 100) : 0;
+      if (totalPnl < 0 && lossLimit > 0 && Math.abs(totalPnl) >= lossLimit) {
+        await supabase.from("app_settings")
+          .update({ metaapi_auto_trade: false })
+          .eq("id", "singleton");
+        const msg = `daily loss limit reached (loss ${totalPnl.toFixed(2)} >= ${lossLimit.toFixed(2)}) — auto-trade paused`;
+        await markFailed(supabase, signal_id, msg);
+        return new Response(JSON.stringify({ ok: false, reason: msg }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } catch (e) {
+      console.error("daily loss check failed", e);
     }
 
     const symbol = pairToSymbol(s.pair, symbolSuffix);
@@ -131,7 +173,6 @@ Deno.serve(async (req) => {
     const entry = Number(s.entry);
     const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
 
-    // Stale-stop protection: refuse if SL is implausibly close to current price.
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
     const slDistance = Math.abs(mid - Number(s.stop_loss));
     const minDistance = mid * 0.0005;
@@ -143,45 +184,65 @@ Deno.serve(async (req) => {
       });
     }
 
-    const result = await placeOrder({
+    const halfLot = Math.round((lot / 2) * 100) / 100;
+    const expiration = picked.kind !== "market" ? {
+      type: "ORDER_TIME_SPECIFIED",
+      time: new Date(Date.now() + expiryHours * 3600_000).toISOString(),
+    } : undefined;
+
+    // Order A — closes at TP1
+    const orderA = await placeOrder({
       region, accountId, token,
       actionType: picked.action,
-      symbol,
-      volume: lot,
+      symbol, volume: halfLot,
+      openPrice: picked.openPrice,
+      stopLoss: Number(s.stop_loss),
+      takeProfit: Number(s.tp1),
+      comment: `sig ${String(signal_id).slice(0, 8)} A`,
+      expiration,
+    });
+    if (!orderA.ok) {
+      await markFailed(supabase, signal_id, orderA.error ?? "order A failed");
+      return safeError(orderA.error ?? "order A failed", 500);
+    }
+
+    // Order B — runner to TP2
+    const orderB = await placeOrder({
+      region, accountId, token,
+      actionType: picked.action,
+      symbol, volume: halfLot,
       openPrice: picked.openPrice,
       stopLoss: Number(s.stop_loss),
       takeProfit: Number(s.tp2),
-      comment: `sig ${String(signal_id).slice(0, 8)}`,
-      expiration: picked.kind !== "market" ? {
-        type: "ORDER_TIME_SPECIFIED",
-        time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      } : undefined,
+      comment: `sig ${String(signal_id).slice(0, 8)} B`,
+      expiration,
     });
-
-
-    if (!result.ok) {
-      await markFailed(supabase, signal_id, result.error ?? "unknown error");
-      return new Response(JSON.stringify({ ok: false, reason: result.error }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!orderB.ok) {
+      await markFailed(supabase, signal_id, orderB.error ?? "order B failed");
+      return safeError(orderB.error ?? "order B failed", 500);
     }
 
-    const data = result.data ?? {};
-    const filled = !!data.positionId;
-    const isPending = !filled && !!data.orderId; // LIMIT/STOP awaiting fill
+    const aFilled = !!orderA.data?.positionId;
+    const bFilled = !!orderB.data?.positionId;
+    const bothFilled = aFilled && bFilled;
+
     await supabase.from("signals").update({
-      metaapi_position_id: data.positionId ?? null,
-      metaapi_order_id: data.orderId ?? null,
-      metaapi_order_type: picked.kind,
+      metaapi_order_id: orderA.data?.orderId ?? orderA.data?.positionId ?? null,
+      metaapi_position_id: orderA.data?.positionId ?? null,
+      metaapi_order_id_b: orderB.data?.orderId ?? orderB.data?.positionId ?? null,
+      metaapi_position_id_b: orderB.data?.positionId ?? null,
       metaapi_executed_lot: lot,
-      metaapi_execution_status: filled ? "filled" : (isPending ? "order_pending" : "pending"),
+      metaapi_order_type: picked.kind,
+      metaapi_execution_status: bothFilled ? "filled" : "order_pending",
       metaapi_execution_error: null,
-      executed_at: filled ? new Date().toISOString() : null,
-      status: filled ? "executed" : "pending",
+      executed_at: new Date().toISOString(),
+      status: bothFilled ? "executed" : "pending",
     }).eq("id", signal_id);
 
     return new Response(JSON.stringify({
-      ok: true, kind: picked.kind, positionId: data.positionId, orderId: data.orderId,
+      ok: true, kind: picked.kind,
+      a: { positionId: orderA.data?.positionId, orderId: orderA.data?.orderId },
+      b: { positionId: orderB.data?.positionId, orderId: orderB.data?.orderId },
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-execute error", e);
