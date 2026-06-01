@@ -94,6 +94,9 @@ type AppSettings = {
   metaapi_min_confidence: number;
   metaapi_min_rr: number;
   metaapi_fixed_lot: number;
+  metaapi_max_trades: number;
+  metaapi_expiry_hours: number;
+  metaapi_max_daily_loss_pct: number;
   metaapi_symbol_suffix: string;
   metaapi_connected_at: string | null;
   metaapi_token_configured: boolean;
@@ -217,6 +220,7 @@ function ScalpEdge() {
     session_config: DEFAULT_SESSION_CONFIG,
     metaapi_account_id: null, metaapi_region: "new-york", metaapi_auto_trade: false,
     metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
+    metaapi_max_trades: 3, metaapi_expiry_hours: 24, metaapi_max_daily_loss_pct: 5,
     metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
     metaapi_token_configured: false,
@@ -286,6 +290,9 @@ function ScalpEdge() {
       metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
       metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
       metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
+      metaapi_max_trades: Number(cfg.metaapi_max_trades ?? 3),
+      metaapi_expiry_hours: Number(cfg.metaapi_expiry_hours ?? 24),
+      metaapi_max_daily_loss_pct: Number(cfg.metaapi_max_daily_loss_pct ?? 5),
       metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
@@ -1306,6 +1313,27 @@ function MetaApiPanel({
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fixed Lot</div>
           <input type="number" min={0.01} max={100} step={0.01} value={appSettings.metaapi_fixed_lot}
             onChange={(e) => saveAppSettings({ metaapi_fixed_lot: Math.max(0.01, Math.min(100, Number(e.target.value) || 0.01)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Open Trades</div>
+          <input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
+            onChange={(e) => saveAppSettings({ metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pending Expiry (hours)</div>
+          <input type="number" min={1} max={168} step={1} value={appSettings.metaapi_expiry_hours}
+            onChange={(e) => saveAppSettings({ metaapi_expiry_hours: Math.max(1, Math.min(168, Number(e.target.value) || 24)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Daily Loss (%)</div>
+          <input type="number" min={0.1} max={100} step={0.1} value={appSettings.metaapi_max_daily_loss_pct}
+            onChange={(e) => saveAppSettings({ metaapi_max_daily_loss_pct: Math.max(0.1, Math.min(100, Number(e.target.value) || 5)) })}
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
         </label>
       </div>
