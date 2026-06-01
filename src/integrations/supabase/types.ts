@@ -40,7 +40,10 @@ export type Database = {
           metaapi_account_id: string | null
           metaapi_auto_trade: boolean
           metaapi_connected_at: string | null
+          metaapi_expiry_hours: number | null
           metaapi_fixed_lot: number
+          metaapi_max_daily_loss_pct: number | null
+          metaapi_max_trades: number | null
           metaapi_min_confidence: number
           metaapi_min_rr: number
           metaapi_region: string
@@ -59,7 +62,10 @@ export type Database = {
           metaapi_account_id?: string | null
           metaapi_auto_trade?: boolean
           metaapi_connected_at?: string | null
+          metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
+          metaapi_max_daily_loss_pct?: number | null
+          metaapi_max_trades?: number | null
           metaapi_min_confidence?: number
           metaapi_min_rr?: number
           metaapi_region?: string
@@ -78,7 +84,10 @@ export type Database = {
           metaapi_account_id?: string | null
           metaapi_auto_trade?: boolean
           metaapi_connected_at?: string | null
+          metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
+          metaapi_max_daily_loss_pct?: number | null
+          metaapi_max_trades?: number | null
           metaapi_min_confidence?: number
           metaapi_min_rr?: number
           metaapi_region?: string
@@ -203,10 +212,12 @@ export type Database = {
           metaapi_execution_status: string
           metaapi_filled_price: number | null
           metaapi_order_id: string | null
+          metaapi_order_id_b: string | null
           metaapi_order_type: string | null
           metaapi_partial_closed: boolean
           metaapi_pnl: number | null
           metaapi_position_id: string | null
+          metaapi_position_id_b: string | null
           mfi_divergence: boolean
           mfi_score: number | null
           news_flag: boolean
@@ -242,10 +253,12 @@ export type Database = {
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_id_b?: string | null
           metaapi_order_type?: string | null
           metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
+          metaapi_position_id_b?: string | null
           mfi_divergence?: boolean
           mfi_score?: number | null
           news_flag?: boolean
@@ -281,10 +294,12 @@ export type Database = {
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
           metaapi_order_id?: string | null
+          metaapi_order_id_b?: string | null
           metaapi_order_type?: string | null
           metaapi_partial_closed?: boolean
           metaapi_pnl?: number | null
           metaapi_position_id?: string | null
+          metaapi_position_id_b?: string | null
           mfi_divergence?: boolean
           mfi_score?: number | null
           news_flag?: boolean
