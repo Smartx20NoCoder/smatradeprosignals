@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    for (const s of openSignals as any[]) {
+    for (const s of (openSignals ?? []) as any[]) {
       try {
         const pidA = s.metaapi_position_id ? String(s.metaapi_position_id) : null;
         const pidB = s.metaapi_position_id_b ? String(s.metaapi_position_id_b) : null;
