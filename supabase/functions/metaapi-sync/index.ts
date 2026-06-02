@@ -100,30 +100,25 @@ Deno.serve(async (req) => {
       .select("id, pair, direction, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_position_id_b, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved, metaapi_executed_lot")
       .in("metaapi_execution_status", ["filled", "partial"]);
 
-    if (!openSignals || openSignals.length === 0) {
-      return new Response(JSON.stringify({ ok: true, updated: 0, checked: 0, pendingPromoted }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const positionsRes = await getOpenPositions({ region, accountId, token });
-    if (!positionsRes.ok) {
-      return new Response(JSON.stringify({ ok: false, reason: positionsRes.error }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const openSet = new Set<string>();
-    const openMap = new Map<string, any>();
-    for (const p of positionsRes.data) {
-      const id = String(p.id);
-      openSet.add(id);
-      openMap.set(id, p);
-    }
-
     let updated = 0;
     let partials = 0;
     let breakevens = 0;
     let closes = 0;
+    const openSet = new Set<string>();
+    const openMap = new Map<string, any>();
+
+    if (openSignals && openSignals.length > 0) {
+      const positionsRes = await getOpenPositions({ region, accountId, token });
+      if (!positionsRes.ok) {
+        console.error("getOpenPositions failed", positionsRes.error);
+      } else {
+        for (const p of positionsRes.data) {
+          const id = String(p.id);
+          openSet.add(id);
+          openMap.set(id, p);
+        }
+      }
+    }
 
     for (const s of openSignals as any[]) {
       try {
