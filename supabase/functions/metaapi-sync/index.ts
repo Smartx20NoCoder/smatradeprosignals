@@ -274,7 +274,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(JSON.stringify({
-      ok: true, updated, checked: openSignals.length, partials, breakevens, closes, pendingPromoted,
+      ok: true, updated, checked: openSignals?.length ?? 0, partials, breakevens, closes, pendingPromoted,
       paperUpdated, paperExpired,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
