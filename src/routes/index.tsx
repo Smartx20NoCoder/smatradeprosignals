@@ -849,6 +849,7 @@ function SignalRow({
 
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
+  const [showError, setShowError] = useState(false);
 
   return (
     <div className={`border rounded p-3 transition-colors ${
@@ -889,8 +890,8 @@ function SignalRow({
             </span>
           )}
           {s.metaapi_execution_status === "failed" && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold"
-              title={s.metaapi_execution_error ?? "execution failed"}>
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold cursor-pointer"
+              onClick={() => setShowError((v) => !v)}>
               MT FAILED
             </span>
           )}
@@ -925,6 +926,11 @@ function SignalRow({
           <span className="text-muted-foreground">{timeAgo(s.created_at)}</span>
         </div>
       </div>
+      {s.metaapi_execution_status === "failed" && showError && (
+        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
+          {s.metaapi_execution_error ?? "No error detail recorded"}
+        </div>
+      )}
 
       <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
