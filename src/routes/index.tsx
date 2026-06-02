@@ -47,6 +47,8 @@ type Signal = {
   metaapi_execution_error?: string | null;
   metaapi_filled_price?: number | null;
   metaapi_pnl?: number | null;
+  paper_status?: string | null;
+  paper_hit?: string | null;
 };
 
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
