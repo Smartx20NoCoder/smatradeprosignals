@@ -14,6 +14,7 @@ const ALLOWED_KEYS = new Set([
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
+  "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
@@ -36,6 +37,9 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
       if (v === null) { out[k] = null; continue; }
       if (typeof v !== "string" || v.length < 20 || v.length > 4096) continue;
     }
+    if (k === "metaapi_max_trades" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 50)) continue;
+    if (k === "metaapi_expiry_hours" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 720)) continue;
+    if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     out[k] = v;
   }
   return out;

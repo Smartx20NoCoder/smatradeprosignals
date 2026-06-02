@@ -47,6 +47,8 @@ type Signal = {
   metaapi_execution_error?: string | null;
   metaapi_filled_price?: number | null;
   metaapi_pnl?: number | null;
+  paper_status?: string | null;
+  paper_hit?: string | null;
 };
 
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
@@ -892,6 +894,25 @@ function SignalRow({
               MT FAILED
             </span>
           )}
+          {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
+            const ps = s.paper_status;
+            const cls =
+              ps === "tp1_hit" ? "bg-bull/20 text-bull" :
+              ps === "tp2_hit" ? "bg-bull/30 text-bull" :
+              ps === "sl_hit" ? "bg-destructive/20 text-destructive" :
+              "bg-muted text-muted-foreground";
+            const label =
+              ps === "tp1_hit" ? "TP1 ✓" :
+              ps === "tp2_hit" ? "TP2 ✓" :
+              ps === "sl_hit" ? "SL ✗" :
+              ps === "expired" ? "EXPIRED" : "TRACKING";
+            return (
+              <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${cls}`}
+                title={s.paper_hit ? `Hit at ${new Date(s.paper_hit).toLocaleString()}` : "Paper-tracked"}>
+                {label}
+              </span>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-3 text-xs">
           {s.mfi_score != null && (<><span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
