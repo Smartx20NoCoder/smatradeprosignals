@@ -98,11 +98,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Concurrent trades gate — count active signals (rows in DB, not broker positions).
+    // Concurrent trades gate — count active open positions only (pending orders have no risk yet).
     const { count: activeCount } = await supabase
       .from("signals")
       .select("id", { count: "exact", head: true })
-      .in("metaapi_execution_status", ["filled", "partial", "order_pending"]);
+      .in("metaapi_execution_status", ["filled", "partial"]);
     if ((activeCount ?? 0) >= maxTrades) {
       const msg = `max concurrent trades reached (${activeCount}/${maxTrades})`;
       await markFailed(supabase, signal_id, msg);

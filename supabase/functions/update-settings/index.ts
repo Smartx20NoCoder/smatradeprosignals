@@ -18,6 +18,14 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
+  // Coerce string numbers to actual numbers for numeric fields
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key"];
+  for (const f of numericFields) {
+    if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
+      const n = Number(patch[f]);
+      if (!isNaN(n)) patch[f] = n;
+    }
+  }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
     if (!ALLOWED_KEYS.has(k)) continue;
