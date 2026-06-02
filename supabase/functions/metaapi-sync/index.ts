@@ -9,7 +9,9 @@ import {
   getHistoryDealsByPosition,
   getHistoryOrderById,
   getOpenPositions,
+  getSymbolPrice,
   modifyPosition,
+  pairToSymbol,
   safeError,
 } from "../_shared/metaapi.ts";
 
