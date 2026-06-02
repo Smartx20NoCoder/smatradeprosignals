@@ -225,6 +225,8 @@ export type Database = {
           order_type: string | null
           outcome_r: number | null
           pair: string
+          paper_hit: string | null
+          paper_status: string | null
           partial_close: boolean
           rr: number
           session_score: number
@@ -266,6 +268,8 @@ export type Database = {
           order_type?: string | null
           outcome_r?: number | null
           pair: string
+          paper_hit?: string | null
+          paper_status?: string | null
           partial_close?: boolean
           rr: number
           session_score: number
@@ -307,6 +311,8 @@ export type Database = {
           order_type?: string | null
           outcome_r?: number | null
           pair?: string
+          paper_hit?: string | null
+          paper_status?: string | null
           partial_close?: boolean
           rr?: number
           session_score?: number
