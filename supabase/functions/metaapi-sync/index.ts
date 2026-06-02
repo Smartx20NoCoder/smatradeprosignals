@@ -216,8 +216,71 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Pass 3: paper-tracking for non-executed signals (last 24h, watching).
+    let paperUpdated = 0;
+    let paperExpired = 0;
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const suffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
+
+      // Expire stale watching signals (>24h old).
+      const { data: stale } = await supabase
+        .from("signals")
+        .select("id")
+        .eq("paper_status", "watching")
+        .lt("created_at", since)
+        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
+      if (stale && stale.length > 0) {
+        await supabase.from("signals")
+          .update({ paper_status: "expired" })
+          .in("id", stale.map((r: any) => r.id));
+        paperExpired = stale.length;
+      }
+
+      const { data: watching } = await supabase
+        .from("signals")
+        .select("id, pair, direction, entry, stop_loss, tp1, tp2, paper_status")
+        .eq("paper_status", "watching")
+        .gte("created_at", since)
+        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
+
+      for (const s of (watching ?? []) as any[]) {
+        try {
+          const symbol = pairToSymbol(String(s.pair), suffix);
+          const pr = await getSymbolPrice({ region, accountId, token, symbol });
+          if (!pr.ok) continue;
+          const bid = Number(pr.bid ?? 0);
+          const ask = Number(pr.ask ?? 0);
+          const dir = String(s.direction ?? "").toLowerCase();
+          const isLong = dir === "long" || dir === "buy";
+          let hit: "tp2_hit" | "tp1_hit" | "sl_hit" | null = null;
+          if (isLong) {
+            if (bid >= Number(s.tp2)) hit = "tp2_hit";
+            else if (bid >= Number(s.tp1)) hit = "tp1_hit";
+            else if (bid <= Number(s.stop_loss)) hit = "sl_hit";
+          } else {
+            if (ask <= Number(s.tp2)) hit = "tp2_hit";
+            else if (ask <= Number(s.tp1)) hit = "tp1_hit";
+            else if (ask >= Number(s.stop_loss)) hit = "sl_hit";
+          }
+          if (hit) {
+            await supabase.from("signals").update({
+              paper_status: hit,
+              paper_hit: new Date().toISOString(),
+            }).eq("id", s.id);
+            paperUpdated++;
+          }
+        } catch (e) {
+          console.error("paper-track failed for", s.id, e);
+        }
+      }
+    } catch (e) {
+      console.error("paper-tracking pass failed", e);
+    }
+
     return new Response(JSON.stringify({
       ok: true, updated, checked: openSignals.length, partials, breakevens, closes, pendingPromoted,
+      paperUpdated, paperExpired,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-sync error", e);
