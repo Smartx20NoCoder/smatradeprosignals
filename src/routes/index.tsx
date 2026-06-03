@@ -483,8 +483,8 @@ function ScalpEdge() {
   // Correlation / exposure check
   function exposureCheck(s: Signal): string | null {
     const open = signals.filter(x => stageOf(x) === 2);
-    if (open.length >= MAX_CONCURRENT) {
-      return `Hard cap: ${MAX_CONCURRENT} concurrent open trades already`;
+    if (open.length >= (appSettings.metaapi_max_trades ?? 3)) {
+      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} concurrent open trades already`;
     }
     for (const [a, b] of CORRELATIONS) {
       if (s.pair === a || s.pair === b) {
@@ -1441,8 +1441,8 @@ function RiskExposureWidget({
   openRiskPct: number;
   correlationWarnings: string[];
 }) {
-  const overCap = openSignals.length >= MAX_CONCURRENT;
-  const meterPct = Math.min(100, (openSignals.length / MAX_CONCURRENT) * 100);
+  const overCap = openSignals.length >= (appSettings.metaapi_max_trades ?? 3);
+  const meterPct = Math.min(100, (openSignals.length / (appSettings.metaapi_max_trades ?? 3)) * 100);
   const meterColor = overCap ? "var(--bear)" : openSignals.length >= 2 ? "var(--chart-4)" : "var(--bull)";
   return (
     <div className="mt-4 border border-border rounded bg-card p-3">
@@ -1457,7 +1457,7 @@ function RiskExposureWidget({
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
           <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Open Trades</div>
           <div className="font-semibold text-base" style={{ color: overCap ? "var(--bear)" : "var(--foreground)" }}>
-            {openSignals.length} / {MAX_CONCURRENT}
+            {openSignals.length} / {appSettings.metaapi_max_trades ?? 3}
           </div>
         </div>
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
