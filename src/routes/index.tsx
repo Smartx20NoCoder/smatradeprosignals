@@ -687,6 +687,7 @@ function ScalpEdge() {
               openSignals={openOnly}
               openRiskPct={openRiskPct}
               correlationWarnings={correlationWarnings}
+              maxTrades={appSettings.metaapi_max_trades ?? 3}
             />
             <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
               exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck} />
