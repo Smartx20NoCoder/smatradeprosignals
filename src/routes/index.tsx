@@ -1459,7 +1459,7 @@ function RiskExposureWidget({
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
           <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Open Trades</div>
           <div className="font-semibold text-base" style={{ color: overCap ? "var(--bear)" : "var(--foreground)" }}>
-            {openSignals.length} / {appSettings.metaapi_max_trades ?? 3}
+            {openSignals.length} / {maxTrades}
           </div>
         </div>
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
