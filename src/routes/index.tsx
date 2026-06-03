@@ -889,10 +889,17 @@ function SignalRow({
             </span>
           )}
           {s.metaapi_execution_status === "failed" && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold cursor-pointer"
-              onClick={() => setShowError((v) => !v)}>
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
               MT FAILED
             </span>
+          )}
+          {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
+            <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
+              ↳ {s.metaapi_execution_error}
+            </span>
+          )}
+          {s.paper_status === "triggered" && (!s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">TRIGGERED</span>
           )}
           {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
             const ps = s.paper_status;
