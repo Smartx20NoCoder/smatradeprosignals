@@ -146,6 +146,7 @@ Deno.serve(async (req) => {
             metaapi_breakeven_moved: beOk,
             metaapi_execution_status: "partial",
             partial_close: true,
+            status: "tp1",
           }).eq("id", s.id);
           partials++;
           updated++;
@@ -197,12 +198,25 @@ Deno.serve(async (req) => {
           ? (totalPnl >= 0 ? "tp2" : "be")
           : "sl_hit";
 
+        const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
+        const statusMap: Record<string, string> = {
+          tp2: "tp2",
+          be: "be",
+          sl_hit: "loss",
+        };
+        const outcomeMap: Record<string, number> = {
+          tp2: risk > 0 ? Math.abs(Number(s.tp2) - Number(s.entry)) / risk : 0,
+          be: 0,
+          sl_hit: -1,
+        };
+
         await supabase.from("signals").update({
           metaapi_execution_status: "closed",
           metaapi_pnl: totalPnl,
-          status: "closed",
+          status: statusMap[closedStatus] ?? "closed",
+          outcome_r: outcomeMap[closedStatus] ?? null,
           closed_at: lastTime ?? new Date().toISOString(),
-          notes: `[MetaApi auto-close ${closedStatus} pnl=${totalPnl.toFixed(2)}]`,
+          notes: `MetaApi auto-close ${closedStatus} pnl=${totalPnl.toFixed(2)}`,
         }).eq("id", s.id);
         closes++;
         updated++;
