@@ -1838,17 +1838,22 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const [pairFilter, setPairFilter] = useState<string>("all");
   const [setupFilter, setSetupFilter] = useState<string>("all");
   const [sessionFilter, setSessionFilter] = useState<string>("all");
+  const [minConfidence, setMinConfidence] = useState<string>("");
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
   const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
   const setups = useMemo(() => Array.from(new Set(closed.map((s) => s.setup))).sort(), [closed]);
   const sessions = ["London", "New York", "Asian", "Off"];
 
-  const filtered = useMemo(() => closed.filter((s) =>
-    (pairFilter === "all" || s.pair === pairFilter) &&
-    (setupFilter === "all" || s.setup === setupFilter) &&
-    (sessionFilter === "all" || sessionOf(s) === sessionFilter)
-  ), [closed, pairFilter, setupFilter, sessionFilter]);
+  const filtered = useMemo(() => {
+    const minC = minConfidence.trim() === "" ? null : Number(minConfidence);
+    return closed.filter((s) =>
+      (pairFilter === "all" || s.pair === pairFilter) &&
+      (setupFilter === "all" || s.setup === setupFilter) &&
+      (sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
+      (minC == null || Number.isNaN(minC) || s.confidence >= minC)
+    );
+  }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence]);
 
   // Group by Month-Year (most recent first)
   type MonthGroup = { key: string; label: string; items: Signal[] };
