@@ -1936,6 +1936,15 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
           <option value="all">All sessions</option>
           {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <label className="flex items-center gap-1 text-muted-foreground uppercase tracking-wider">
+          <span>Conf %</span>
+          <input
+            type="number" min={0} max={100} placeholder="—"
+            value={minConfidence}
+            onChange={(e) => setMinConfidence(e.target.value)}
+            className="w-16 bg-secondary border border-border rounded px-2 py-1 text-foreground"
+          />
+        </label>
         <button onClick={exportCSV}
           className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
           ⬇ Export CSV
