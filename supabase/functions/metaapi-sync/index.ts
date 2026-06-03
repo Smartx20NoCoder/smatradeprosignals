@@ -211,18 +211,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Pass 3: paper-tracking for non-executed signals (last 24h, watching).
+    // Pass 3: paper-tracking for non-executed signals (last 24h).
     let paperUpdated = 0;
     let paperExpired = 0;
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const suffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
 
-      // Expire stale watching signals (>24h old).
+      // Expire stale watching/triggered signals (>24h old).
       const { data: stale } = await supabase
         .from("signals")
         .select("id")
-        .eq("paper_status", "watching")
+        .in("paper_status", ["watching", "triggered"])
         .lt("created_at", since)
         .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
       if (stale && stale.length > 0) {
@@ -232,37 +232,62 @@ Deno.serve(async (req) => {
         paperExpired = stale.length;
       }
 
-      const { data: watching } = await supabase
+      const { data: tracked } = await supabase
         .from("signals")
-        .select("id, pair, direction, entry, stop_loss, tp1, tp2, paper_status")
-        .eq("paper_status", "watching")
+        .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, paper_status")
+        .in("paper_status", ["watching", "triggered", "tp1_hit"])
         .gte("created_at", since)
         .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
 
-      for (const s of (watching ?? []) as any[]) {
+      for (const s of (tracked ?? []) as any[]) {
         try {
           const symbol = pairToSymbol(String(s.pair), suffix);
           const pr = await getSymbolPrice({ region, accountId, token, symbol });
           if (!pr.ok) continue;
           const bid = Number(pr.bid ?? 0);
           const ask = Number(pr.ask ?? 0);
+          const ot = String(s.order_type ?? "").toLowerCase();
           const dir = String(s.direction ?? "").toLowerCase();
-          const isLong = dir === "long" || dir === "buy";
-          let hit: "tp2_hit" | "tp1_hit" | "sl_hit" | null = null;
-          if (isLong) {
-            if (bid >= Number(s.tp2)) hit = "tp2_hit";
-            else if (bid >= Number(s.tp1)) hit = "tp1_hit";
-            else if (bid <= Number(s.stop_loss)) hit = "sl_hit";
-          } else {
-            if (ask <= Number(s.tp2)) hit = "tp2_hit";
-            else if (ask <= Number(s.tp1)) hit = "tp1_hit";
-            else if (ask >= Number(s.stop_loss)) hit = "sl_hit";
+          const isLong = dir === "long" || dir === "buy" || ot.includes("buy");
+          const entry = Number(s.entry);
+          const tp1 = Number(s.tp1);
+          const tp2 = Number(s.tp2);
+          const sl = Number(s.stop_loss);
+          const status = String(s.paper_status);
+
+          let next: { paper_status: string; paper_hit?: string } | null = null;
+
+          if (status === "watching") {
+            // Stage 1: entry detection by order_type
+            let triggered = false;
+            if (ot.includes("buy stop")) triggered = ask >= entry;
+            else if (ot.includes("sell stop")) triggered = bid <= entry;
+            else if (ot.includes("buy")) triggered = ask <= entry; // buy limit/market
+            else if (ot.includes("sell")) triggered = bid >= entry; // sell limit/market
+            else triggered = isLong ? ask <= entry : bid >= entry;
+            if (triggered) next = { paper_status: "triggered" };
+          } else if (status === "triggered") {
+            // Stage 2: TP1 / SL
+            if (isLong) {
+              if (bid >= tp1) next = { paper_status: "tp1_hit", paper_hit: new Date().toISOString() };
+              else if (bid <= sl) next = { paper_status: "sl_hit", paper_hit: new Date().toISOString() };
+            } else {
+              if (ask <= tp1) next = { paper_status: "tp1_hit", paper_hit: new Date().toISOString() };
+              else if (ask >= sl) next = { paper_status: "sl_hit", paper_hit: new Date().toISOString() };
+            }
+          } else if (status === "tp1_hit") {
+            // Stage 3: TP2 or BE-stop
+            if (isLong) {
+              if (bid >= tp2) next = { paper_status: "tp2_hit", paper_hit: new Date().toISOString() };
+              else if (bid <= entry) next = { paper_status: "sl_hit", paper_hit: new Date().toISOString() };
+            } else {
+              if (ask <= tp2) next = { paper_status: "tp2_hit", paper_hit: new Date().toISOString() };
+              else if (ask >= entry) next = { paper_status: "sl_hit", paper_hit: new Date().toISOString() };
+            }
           }
-          if (hit) {
-            await supabase.from("signals").update({
-              paper_status: hit,
-              paper_hit: new Date().toISOString(),
-            }).eq("id", s.id);
+
+          if (next) {
+            await supabase.from("signals").update(next).eq("id", s.id);
             paperUpdated++;
           }
         } catch (e) {
