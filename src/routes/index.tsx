@@ -849,7 +849,6 @@ function SignalRow({
 
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
-  const [showError, setShowError] = useState(false);
 
   return (
     <div className={`border rounded p-3 transition-colors ${
@@ -890,10 +889,17 @@ function SignalRow({
             </span>
           )}
           {s.metaapi_execution_status === "failed" && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold cursor-pointer"
-              onClick={() => setShowError((v) => !v)}>
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
               MT FAILED
             </span>
+          )}
+          {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
+            <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
+              ↳ {s.metaapi_execution_error}
+            </span>
+          )}
+          {s.paper_status === "triggered" && (!s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">TRIGGERED</span>
           )}
           {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
             const ps = s.paper_status;
@@ -926,11 +932,6 @@ function SignalRow({
           <span className="text-muted-foreground">{timeAgo(s.created_at)}</span>
         </div>
       </div>
-      {s.metaapi_execution_status === "failed" && showError && (
-        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
-          {s.metaapi_execution_error ?? "No error detail recorded"}
-        </div>
-      )}
 
       <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
@@ -1837,17 +1838,22 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const [pairFilter, setPairFilter] = useState<string>("all");
   const [setupFilter, setSetupFilter] = useState<string>("all");
   const [sessionFilter, setSessionFilter] = useState<string>("all");
+  const [minConfidence, setMinConfidence] = useState<string>("");
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
   const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
   const setups = useMemo(() => Array.from(new Set(closed.map((s) => s.setup))).sort(), [closed]);
   const sessions = ["London", "New York", "Asian", "Off"];
 
-  const filtered = useMemo(() => closed.filter((s) =>
-    (pairFilter === "all" || s.pair === pairFilter) &&
-    (setupFilter === "all" || s.setup === setupFilter) &&
-    (sessionFilter === "all" || sessionOf(s) === sessionFilter)
-  ), [closed, pairFilter, setupFilter, sessionFilter]);
+  const filtered = useMemo(() => {
+    const minC = minConfidence.trim() === "" ? null : Number(minConfidence);
+    return closed.filter((s) =>
+      (pairFilter === "all" || s.pair === pairFilter) &&
+      (setupFilter === "all" || s.setup === setupFilter) &&
+      (sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
+      (minC == null || Number.isNaN(minC) || s.confidence >= minC)
+    );
+  }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence]);
 
   // Group by Month-Year (most recent first)
   type MonthGroup = { key: string; label: string; items: Signal[] };
@@ -1930,6 +1936,15 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
           <option value="all">All sessions</option>
           {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <label className="flex items-center gap-1 text-muted-foreground uppercase tracking-wider">
+          <span>Conf %</span>
+          <input
+            type="number" min={0} max={100} placeholder="—"
+            value={minConfidence}
+            onChange={(e) => setMinConfidence(e.target.value)}
+            className="w-16 bg-secondary border border-border rounded px-2 py-1 text-foreground"
+          />
+        </label>
         <button onClick={exportCSV}
           className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
           ⬇ Export CSV
