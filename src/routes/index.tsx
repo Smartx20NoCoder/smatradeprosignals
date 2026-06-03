@@ -849,7 +849,6 @@ function SignalRow({
 
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
-  const [showError, setShowError] = useState(false);
 
   return (
     <div className={`border rounded p-3 transition-colors ${
