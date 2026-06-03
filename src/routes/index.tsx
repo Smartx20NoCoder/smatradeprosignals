@@ -1436,14 +1436,15 @@ function MetaApiPanel({
 
 
 function RiskExposureWidget({
-  openSignals, openRiskPct, correlationWarnings,
+  openSignals, openRiskPct, correlationWarnings, maxTrades,
 }: {
   openSignals: Signal[];
   openRiskPct: number;
   correlationWarnings: string[];
+  maxTrades: number;
 }) {
-  const overCap = openSignals.length >= (appSettings.metaapi_max_trades ?? 3);
-  const meterPct = Math.min(100, (openSignals.length / (appSettings.metaapi_max_trades ?? 3)) * 100);
+  const overCap = openSignals.length >= maxTrades;
+  const meterPct = Math.min(100, (openSignals.length / maxTrades) * 100);
   const meterColor = overCap ? "var(--bear)" : openSignals.length >= 2 ? "var(--chart-4)" : "var(--bull)";
   return (
     <div className="mt-4 border border-border rounded bg-card p-3">
