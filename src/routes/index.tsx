@@ -119,7 +119,7 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 const DAILY_BUDGET = 800;
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
 const TFS = ["5m", "15m", "1h"] as const;
-const MAX_CONCURRENT = 3;
+
 const EXPIRE_HOURS = 24;
 const CRON_INTERVAL_MIN = 15;
 // Notional account size used by risk meter (1% per trade assumed)
