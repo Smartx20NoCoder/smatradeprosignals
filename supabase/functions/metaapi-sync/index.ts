@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
         .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
       if (stale && stale.length > 0) {
         await supabase.from("signals")
-          .update({ paper_status: "expired" })
+          .update({ paper_status: "expired", status: "expired" })
           .in("id", stale.map((r: any) => r.id));
         paperExpired = stale.length;
       }
@@ -301,7 +301,16 @@ Deno.serve(async (req) => {
           }
 
           if (next) {
-            await supabase.from("signals").update(next).eq("id", s.id);
+            const statusMap: Record<string, string> = {
+              triggered: "executed",
+              tp1_hit: "tp1",
+              tp2_hit: "tp2",
+              sl_hit: "loss",
+            };
+            const mappedStatus = statusMap[next.paper_status];
+            const payload: Record<string, unknown> = { ...next };
+            if (mappedStatus) payload.status = mappedStatus;
+            await supabase.from("signals").update(payload).eq("id", s.id);
             paperUpdated++;
           }
         } catch (e) {
