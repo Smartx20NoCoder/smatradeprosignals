@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
     const region = (c.metaapi_region as string | null) ?? "new-york";
     const minConf = Number(c.metaapi_min_confidence ?? 75);
     const minRR = Number(c.metaapi_min_rr ?? 2);
-    const lot = Number(c.metaapi_fixed_lot ?? 0.01);
+    // Lot is computed below using % risk sizing once we have account balance + symbol.
     const maxTrades = Number(c.metaapi_max_trades ?? 3);
     const expiryHours = Number(c.metaapi_expiry_hours ?? 24);
     const maxDailyLossPct = Number(c.metaapi_max_daily_loss_pct ?? 5);
