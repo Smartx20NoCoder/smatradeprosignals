@@ -96,6 +96,9 @@ type AppSettings = {
   metaapi_min_confidence: number;
   metaapi_min_rr: number;
   metaapi_fixed_lot: number;
+  metaapi_risk_per_trade_pct: number;
+  metaapi_min_lot: number;
+  metaapi_max_lot: number;
   metaapi_max_trades: number;
   metaapi_expiry_hours: number;
   metaapi_max_daily_loss_pct: number;
