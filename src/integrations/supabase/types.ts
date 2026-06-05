@@ -43,10 +43,13 @@ export type Database = {
           metaapi_expiry_hours: number | null
           metaapi_fixed_lot: number
           metaapi_max_daily_loss_pct: number | null
+          metaapi_max_lot: number | null
           metaapi_max_trades: number | null
           metaapi_min_confidence: number
+          metaapi_min_lot: number | null
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_risk_per_trade_pct: number | null
           metaapi_symbol_suffix: string
           metaapi_token: string | null
           paused: boolean
@@ -65,10 +68,13 @@ export type Database = {
           metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
           metaapi_max_daily_loss_pct?: number | null
+          metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
           metaapi_min_confidence?: number
+          metaapi_min_lot?: number | null
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_risk_per_trade_pct?: number | null
           metaapi_symbol_suffix?: string
           metaapi_token?: string | null
           paused?: boolean
@@ -87,10 +93,13 @@ export type Database = {
           metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
           metaapi_max_daily_loss_pct?: number | null
+          metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
           metaapi_min_confidence?: number
+          metaapi_min_lot?: number | null
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_risk_per_trade_pct?: number | null
           metaapi_symbol_suffix?: string
           metaapi_token?: string | null
           paused?: boolean
@@ -343,10 +352,13 @@ export type Database = {
           metaapi_expiry_hours: number
           metaapi_fixed_lot: number
           metaapi_max_daily_loss_pct: number
+          metaapi_max_lot: number
           metaapi_max_trades: number
           metaapi_min_confidence: number
+          metaapi_min_lot: number
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_risk_per_trade_pct: number
           metaapi_symbol_suffix: string
           metaapi_token_configured: boolean
           paused: boolean

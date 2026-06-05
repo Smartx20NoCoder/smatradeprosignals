@@ -96,6 +96,9 @@ type AppSettings = {
   metaapi_min_confidence: number;
   metaapi_min_rr: number;
   metaapi_fixed_lot: number;
+  metaapi_risk_per_trade_pct: number;
+  metaapi_min_lot: number;
+  metaapi_max_lot: number;
   metaapi_max_trades: number;
   metaapi_expiry_hours: number;
   metaapi_max_daily_loss_pct: number;
@@ -222,6 +225,7 @@ function ScalpEdge() {
     session_config: DEFAULT_SESSION_CONFIG,
     metaapi_account_id: null, metaapi_region: "new-york", metaapi_auto_trade: false,
     metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
+    metaapi_risk_per_trade_pct: 2, metaapi_min_lot: 0.01, metaapi_max_lot: 0.10,
     metaapi_max_trades: 3, metaapi_expiry_hours: 24, metaapi_max_daily_loss_pct: 5,
     metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
@@ -292,6 +296,9 @@ function ScalpEdge() {
       metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
       metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
       metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
+      metaapi_risk_per_trade_pct: Number(cfg.metaapi_risk_per_trade_pct ?? 2),
+      metaapi_min_lot: Number(cfg.metaapi_min_lot ?? 0.01),
+      metaapi_max_lot: Number(cfg.metaapi_max_lot ?? 0.10),
       metaapi_max_trades: Number(cfg.metaapi_max_trades ?? 3),
       metaapi_expiry_hours: Number(cfg.metaapi_expiry_hours ?? 24),
       metaapi_max_daily_loss_pct: Number(cfg.metaapi_max_daily_loss_pct ?? 5),
@@ -1339,9 +1346,24 @@ function MetaApiPanel({
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
         </label>
         <label className="text-xs">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fixed Lot</div>
-          <input type="number" min={0.01} max={100} step={0.01} value={appSettings.metaapi_fixed_lot}
-            onChange={(e) => saveAppSettings({ metaapi_fixed_lot: Math.max(0.01, Math.min(100, Number(e.target.value) || 0.01)) })}
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Risk Per Trade (%)</div>
+          <input type="number" min={0.1} max={10} step={0.1} value={appSettings.metaapi_risk_per_trade_pct}
+            onChange={(e) => saveAppSettings({ metaapi_risk_per_trade_pct: Math.max(0.1, Math.min(10, Number(e.target.value) || 2)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Lot</div>
+          <input type="number" min={0.01} max={1} step={0.01} value={appSettings.metaapi_min_lot}
+            onChange={(e) => saveAppSettings({ metaapi_min_lot: Math.max(0.01, Math.min(1, Number(e.target.value) || 0.01)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Lot</div>
+          <input type="number" min={0.01} max={10} step={0.01} value={appSettings.metaapi_max_lot}
+            onChange={(e) => saveAppSettings({ metaapi_max_lot: Math.max(0.01, Math.min(10, Number(e.target.value) || 0.10)) })}
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
         </label>
       </div>

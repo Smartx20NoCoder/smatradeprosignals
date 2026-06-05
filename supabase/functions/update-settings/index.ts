@@ -15,11 +15,12 @@ const ALLOWED_KEYS = new Set([
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
   "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct",
+  "metaapi_risk_per_trade_pct", "metaapi_min_lot", "metaapi_max_lot",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
@@ -48,6 +49,9 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_max_trades" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 50)) continue;
     if (k === "metaapi_expiry_hours" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 720)) continue;
     if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
+    if (k === "metaapi_risk_per_trade_pct" && (typeof v !== "number" || v < 0.1 || v > 10)) continue;
+    if (k === "metaapi_min_lot" && (typeof v !== "number" || v < 0.01 || v > 1)) continue;
+    if (k === "metaapi_max_lot" && (typeof v !== "number" || v < 0.01 || v > 10)) continue;
     out[k] = v;
   }
   return out;
