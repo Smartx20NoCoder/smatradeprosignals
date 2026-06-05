@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
         .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none");
       if (stale && stale.length > 0) {
         await supabase.from("signals")
-          .update({ paper_status: "expired" })
+          .update({ paper_status: "expired", status: "expired" })
           .in("id", stale.map((r: any) => r.id));
         paperExpired = stale.length;
       }
