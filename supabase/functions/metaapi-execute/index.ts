@@ -196,7 +196,43 @@ Deno.serve(async (req) => {
       });
     }
 
-    const halfLot = Math.round((lot / 2) * 100) / 100;
+    // % risk-based lot sizing
+    const accountBalance = (health.data as any)?.balance ?? 100;
+    const riskPct = Number(c?.metaapi_risk_per_trade_pct ?? 2) / 100;
+    const minLot = Number(c?.metaapi_min_lot ?? 0.01);
+    const maxLot = Number(c?.metaapi_max_lot ?? 0.10);
+    const fallbackLot = Number(c?.metaapi_fixed_lot ?? 0.02);
+
+    // Point value per 0.01 lot: XAU/USD = $1/point, BTC/USD = $0.01/point, FX = ~$0.10/point
+    const sym = symbol.toUpperCase();
+    const pointValuePer001Lot = sym.includes("XAU") ? 1.0
+      : sym.includes("BTC") ? 0.01
+      : 0.10; // default for FX pairs
+
+    const slPoints = Math.abs(Number(s.entry) - Number(s.stop_loss));
+    const targetRiskDollars = accountBalance * riskPct; // total risk across both half-lots
+    const halfRiskDollars = targetRiskDollars / 2; // per order
+
+    let rawLot = slPoints > 0
+      ? halfRiskDollars / (slPoints * pointValuePer001Lot * 100)
+      : fallbackLot / 2;
+
+    // Round to 2 decimal places, clamp between min and max
+    let halfLot = Math.round(rawLot * 100) / 100;
+    halfLot = Math.max(minLot, Math.min(maxLot / 2, halfLot));
+
+    const lot = halfLot * 2; // total for reference only — orders use halfLot each
+
+    // Safety gate: if even minimum lot risks more than 2× target, block the trade
+    const minLotRisk = (slPoints * pointValuePer001Lot * 100) * minLot * 2;
+    const maxAllowedRisk = targetRiskDollars * 2; // allow 2× tolerance before blocking
+    if (minLotRisk > maxAllowedRisk) {
+      const msg = `Min lot risk $${minLotRisk.toFixed(2)} exceeds max allowed $${maxAllowedRisk.toFixed(2)} for this SL width — trade skipped`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const expiration = picked.kind !== "market" ? {
       type: "ORDER_TIME_SPECIFIED",
       time: new Date(Date.now() + expiryHours * 3600_000).toISOString(),
