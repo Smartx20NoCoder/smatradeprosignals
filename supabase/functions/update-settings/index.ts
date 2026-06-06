@@ -16,6 +16,7 @@ const ALLOWED_KEYS = new Set([
   "metaapi_symbol_suffix", "metaapi_token",
   "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct",
   "metaapi_risk_per_trade_pct", "metaapi_min_lot", "metaapi_max_lot",
+  "metaapi_is_cent_account",
 ]);
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
