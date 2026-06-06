@@ -307,6 +307,7 @@ function ScalpEdge() {
       metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
+      metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
