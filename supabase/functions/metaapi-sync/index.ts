@@ -178,36 +178,60 @@ Deno.serve(async (req) => {
         // Both closed → reconcile.
         let totalPnl = 0;
         let lastTime: string | null = null;
+        let orderAClosePrice: number | null = null;
         for (const pid of [pidA, pidB]) {
           if (!pid) continue;
           try {
             const ph = await getHistoryDealsByPosition({ region, accountId, token, positionId: pid });
             if (ph.ok && ph.data) {
-              for (const d of ph.data as any[]) {
+              let pidLastTime: string | null = null;
+              let pidLastPrice: number | null = null;
+              for (const d of (ph.data as any[])) {
                 totalPnl += Number(d.profit ?? 0) + Number(d.swap ?? 0) + Number(d.commission ?? 0);
                 const t = d.time as string | undefined;
                 if (t && (!lastTime || new Date(t).getTime() > new Date(lastTime).getTime())) lastTime = t;
+                // Track the last (closing) deal price for this position
+                if (t && (!pidLastTime || new Date(t).getTime() >= new Date(pidLastTime).getTime())) {
+                  pidLastTime = t;
+                  const px = Number(d.price ?? d.closePrice ?? 0);
+                  if (Number.isFinite(px) && px > 0) pidLastPrice = px;
+                }
               }
+              if (pid === pidA && pidLastPrice != null) orderAClosePrice = pidLastPrice;
             }
           } catch (e) {
             console.error("history-deals/position failed for", pid, e);
           }
         }
 
-        const closedStatus = s.metaapi_partial_closed
+        let closedStatus = s.metaapi_partial_closed
           ? (totalPnl >= 0 ? "tp2" : "be")
           : "sl_hit";
+
+        // Order A may have hit TP1 inside the sync window before B closed on the original SL.
+        // If we never tagged the partial state but A's close price reached TP1, classify accordingly.
+        const isLong = String(s.direction ?? "").toLowerCase().includes("long")
+          || String(s.order_type ?? "").toLowerCase().includes("buy");
+        const tp1Level = Number(s.tp1);
+        const orderAHitTP1 = orderAClosePrice != null && Number.isFinite(tp1Level) && tp1Level > 0
+          ? (isLong ? orderAClosePrice >= tp1Level * 0.999 : orderAClosePrice <= tp1Level * 1.001)
+          : false;
+        if (orderAHitTP1 && !s.metaapi_partial_closed) {
+          closedStatus = totalPnl >= 0 ? "tp1_partial" : "be";
+        }
 
         const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
         const statusMap: Record<string, string> = {
           tp2: "tp2",
           be: "be",
           sl_hit: "loss",
+          tp1_partial: "tp1",
         };
         const outcomeMap: Record<string, number> = {
           tp2: risk > 0 ? Math.abs(Number(s.tp2) - Number(s.entry)) / risk : 0,
           be: 0,
           sl_hit: -1,
+          tp1_partial: 0.5,
         };
 
         await supabase.from("signals").update({
