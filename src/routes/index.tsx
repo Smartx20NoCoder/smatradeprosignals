@@ -231,6 +231,7 @@ function ScalpEdge() {
     metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
     metaapi_token_configured: false,
+    metaapi_is_cent_account: false,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
