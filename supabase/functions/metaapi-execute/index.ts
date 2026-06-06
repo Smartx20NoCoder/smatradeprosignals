@@ -262,7 +262,7 @@ Deno.serve(async (req) => {
       actionType: picked.action,
       symbol, volume: halfLot,
       openPrice: picked.openPrice,
-      stopLoss: Number(s.stop_loss),
+      stopLoss: orderBStopLoss,
       takeProfit: Number(s.tp2),
       comment: `sig ${String(signal_id).slice(0, 8)} B`,
       expiration,
