@@ -203,10 +203,13 @@ Deno.serve(async (req) => {
     const fallbackLot = Number(c?.metaapi_fixed_lot ?? 0.02);
 
     // Point value per 0.01 lot: XAU/USD = $1/point, BTC/USD = $0.01/point, FX = ~$0.10/point
+    // Cent accounts (e.g. Exness Standard Cent / USC) settle in cents, so the pip value
+    // expressed in account currency is 100× the standard value.
     const sym = symbol.toUpperCase();
-    const pointValuePer001Lot = sym.includes("XAU") ? 1.0
+    const centMultiplier = Boolean(c?.metaapi_is_cent_account) ? 100 : 1;
+    const pointValuePer001Lot = (sym.includes("XAU") ? 1.0
       : sym.includes("BTC") ? 0.01
-      : 0.10; // default for FX pairs
+      : 0.10) * centMultiplier;
 
     const slPoints = Math.abs(Number(s.entry) - Number(s.stop_loss));
     const targetRiskDollars = accountBalance * riskPct; // total risk across both half-lots
