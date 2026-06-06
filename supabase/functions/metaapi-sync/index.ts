@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
     // Pass 2: reconcile signals with active executions.
     const { data: openSignals } = await supabase
       .from("signals")
-      .select("id, pair, direction, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_position_id_b, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved, metaapi_executed_lot")
+      .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_position_id_b, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved, metaapi_executed_lot")
       .in("metaapi_execution_status", ["filled", "partial"]);
 
     let updated = 0;
