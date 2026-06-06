@@ -19,6 +19,7 @@ async function markFailed(supabase: any, signalId: string, error: string) {
   await supabase.from("signals").update({
     metaapi_execution_status: "failed",
     metaapi_execution_error: error.slice(0, 500),
+    paper_status: "watching",
   }).eq("id", signalId);
 }
 
