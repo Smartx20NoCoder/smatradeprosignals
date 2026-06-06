@@ -19,6 +19,7 @@ async function markFailed(supabase: any, signalId: string, error: string) {
   await supabase.from("signals").update({
     metaapi_execution_status: "failed",
     metaapi_execution_error: error.slice(0, 500),
+    paper_status: "watching",
   }).eq("id", signalId);
 }
 
@@ -98,17 +99,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Block Session Range Break — SL too wide for small account sizes
-    const setupLower = String(s.setup ?? "").toLowerCase();
-    if (setupLower.includes("session range break")) {
-      await supabase.from("signals").update({
-        metaapi_execution_status: "skipped",
-        metaapi_execution_error: "Session Range Break excluded from auto-execution — SL too wide for current account size. Signal is paper-tracked only.",
-      }).eq("id", signal_id);
-      return new Response(JSON.stringify({ ok: false, reason: "session_range_break_skipped" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
 
     // Concurrent trades gate — count active open positions only (pending orders have no risk yet).
     const { count: activeCount } = await supabase
