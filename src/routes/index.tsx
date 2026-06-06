@@ -99,6 +99,7 @@ type AppSettings = {
   metaapi_risk_per_trade_pct: number;
   metaapi_min_lot: number;
   metaapi_max_lot: number;
+  metaapi_is_cent_account: boolean;
   metaapi_max_trades: number;
   metaapi_expiry_hours: number;
   metaapi_max_daily_loss_pct: number;
@@ -230,6 +231,7 @@ function ScalpEdge() {
     metaapi_symbol_suffix: "",
     metaapi_connected_at: null,
     metaapi_token_configured: false,
+    metaapi_is_cent_account: false,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
@@ -305,6 +307,7 @@ function ScalpEdge() {
       metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
+      metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
@@ -1389,7 +1392,23 @@ function MetaApiPanel({
         </label>
       </div>
 
+      <label className="flex items-start gap-2 text-xs cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!appSettings.metaapi_is_cent_account}
+          onChange={(e) => saveAppSettings({ metaapi_is_cent_account: e.target.checked })}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account</span>
+          <span className="block text-muted-foreground mt-0.5">
+            Enable for Exness Standard Cent (USC) accounts. Adjusts pip values for correct lot sizing.
+          </span>
+        </span>
+      </label>
+
       <div className="space-y-2">
+
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={ping} disabled={testing || !accountId}
             className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">

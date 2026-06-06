@@ -176,6 +176,14 @@ Deno.serve(async (req) => {
     const entry = Number(s.entry);
     const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
 
+    const spreadBuffer = Math.abs(Number(priceRes.ask) - Number(priceRes.bid)) * 2;
+    const isMarket = picked.kind === "market";
+    const orderBStopLoss = isMarket
+      ? (picked.action === "ORDER_TYPE_SELL"
+          ? Number(s.entry) + spreadBuffer
+          : Number(s.entry) - spreadBuffer)
+      : Number(s.stop_loss);
+
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
     const slDistance = Math.abs(mid - Number(s.stop_loss));
     const minDistance = mid * 0.0005;
@@ -195,10 +203,13 @@ Deno.serve(async (req) => {
     const fallbackLot = Number(c?.metaapi_fixed_lot ?? 0.02);
 
     // Point value per 0.01 lot: XAU/USD = $1/point, BTC/USD = $0.01/point, FX = ~$0.10/point
+    // Cent accounts (e.g. Exness Standard Cent / USC) settle in cents, so the pip value
+    // expressed in account currency is 100× the standard value.
     const sym = symbol.toUpperCase();
-    const pointValuePer001Lot = sym.includes("XAU") ? 1.0
+    const centMultiplier = Boolean(c?.metaapi_is_cent_account) ? 100 : 1;
+    const pointValuePer001Lot = (sym.includes("XAU") ? 1.0
       : sym.includes("BTC") ? 0.01
-      : 0.10; // default for FX pairs
+      : 0.10) * centMultiplier;
 
     const slPoints = Math.abs(Number(s.entry) - Number(s.stop_loss));
     const targetRiskDollars = accountBalance * riskPct; // total risk across both half-lots
@@ -251,7 +262,7 @@ Deno.serve(async (req) => {
       actionType: picked.action,
       symbol, volume: halfLot,
       openPrice: picked.openPrice,
-      stopLoss: Number(s.stop_loss),
+      stopLoss: orderBStopLoss,
       takeProfit: Number(s.tp2),
       comment: `sig ${String(signal_id).slice(0, 8)} B`,
       expiration,
