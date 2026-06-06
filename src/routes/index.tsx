@@ -1392,7 +1392,23 @@ function MetaApiPanel({
         </label>
       </div>
 
+      <label className="flex items-start gap-2 text-xs cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!appSettings.metaapi_is_cent_account}
+          onChange={(e) => saveAppSettings({ metaapi_is_cent_account: e.target.checked })}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account</span>
+          <span className="block text-muted-foreground mt-0.5">
+            Enable for Exness Standard Cent (USC) accounts. Adjusts pip values for correct lot sizing.
+          </span>
+        </span>
+      </label>
+
       <div className="space-y-2">
+
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={ping} disabled={testing || !accountId}
             className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
