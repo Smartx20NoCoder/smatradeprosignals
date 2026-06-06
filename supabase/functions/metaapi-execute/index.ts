@@ -176,6 +176,14 @@ Deno.serve(async (req) => {
     const entry = Number(s.entry);
     const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
 
+    const spreadBuffer = Math.abs(Number(priceRes.ask) - Number(priceRes.bid)) * 2;
+    const isMarket = picked.kind === "market";
+    const orderBStopLoss = isMarket
+      ? (picked.action === "ORDER_TYPE_SELL"
+          ? Number(s.entry) + spreadBuffer
+          : Number(s.entry) - spreadBuffer)
+      : Number(s.stop_loss);
+
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
     const slDistance = Math.abs(mid - Number(s.stop_loss));
     const minDistance = mid * 0.0005;
