@@ -1278,7 +1278,6 @@ function MetaApiPanel({
 
   const connected = !!status?.ok;
   const acct = status?.account;
-  void appSettings;
 
   return (
     <div className="border border-border rounded bg-card p-4 space-y-3">
