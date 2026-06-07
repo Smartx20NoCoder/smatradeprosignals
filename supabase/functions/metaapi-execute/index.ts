@@ -103,8 +103,8 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!token || !accountId) {
-      await markFailed(supabase, signal_id, "MetaApi not configured (token or account ID missing)");
+    if (!effectiveToken || !effectiveAccountId) {
+      await markFailed(supabase, signal_id, `MetaApi not configured for ${mode.toUpperCase()} mode (token or account ID missing)`);
       return new Response(JSON.stringify({ ok: false, reason: "missing config" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -112,6 +112,22 @@ Deno.serve(async (req) => {
     const s: any = signal;
     if (Number(s.confidence) < minConf || Number(s.rr) < minRR) {
       return new Response(JSON.stringify({ ok: false, reason: "below threshold" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Per-pair auto-execute filter — disabled pairs still paper-track.
+    const pairConfig = (c?.pair_auto_execute ?? {}) as Record<string, boolean>;
+    const pairNorm = String(s.pair ?? "");
+    // default true if pair not in config (future new pairs auto-enabled)
+    const pairEnabled = pairConfig[pairNorm] !== false;
+    if (!pairEnabled) {
+      await supabase.from("signals").update({
+        metaapi_execution_status: "skipped",
+        metaapi_execution_error: `${pairNorm} auto-execution is disabled in Settings. Paper-tracked only.`,
+        paper_status: "watching",
+      }).eq("id", signal_id);
+      return new Response(JSON.stringify({ ok: false, reason: "pair_disabled" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
