@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
     let paperExpired = 0;
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const suffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
+      const suffix = effectiveSuffix;
 
       // Expire stale watching/triggered signals (>24h old).
       const { data: stale } = await supabase
