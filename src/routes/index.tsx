@@ -106,6 +106,12 @@ type AppSettings = {
   metaapi_symbol_suffix: string;
   metaapi_connected_at: string | null;
   metaapi_token_configured: boolean;
+  pair_auto_execute: Record<string, boolean>;
+  metaapi_active_mode: "demo" | "live";
+  metaapi_region_live: string;
+  metaapi_symbol_suffix_live: string;
+  metaapi_live_configured: boolean;
+  metaapi_live_token_configured: boolean;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
