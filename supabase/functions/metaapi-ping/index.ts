@@ -14,9 +14,21 @@ Deno.serve(async (req) => {
     );
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-    const accountId = (cfg as any)?.metaapi_account_id as string | null;
-    const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
-    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const c: any = cfg ?? {};
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+    const baseAccountId = c?.metaapi_account_id as string | null;
+    const baseRegion = (c?.metaapi_region as string | null) ?? "new-york";
+    const baseToken = (c?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const accountId = isLive
+      ? ((c?.metaapi_account_id_live as string | null) ?? baseAccountId)
+      : baseAccountId;
+    const region = isLive
+      ? ((c?.metaapi_region_live as string | null) ?? baseRegion)
+      : baseRegion;
+    const token = isLive
+      ? ((c?.metaapi_token_live as string | null) || baseToken)
+      : baseToken;
     if (!token) {
       return new Response(JSON.stringify({ ok: false, reason: "broker token not configured" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
