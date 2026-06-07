@@ -114,10 +114,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    await supabase.from("signals").update({
-      metaapi_execution_status: "pending",
-      metaapi_execution_error: null,
-    }).eq("id", signal_id);
 
     const health = await getAccountInfo({ region, accountId, token });
     if (!health.ok) {
@@ -240,6 +236,11 @@ Deno.serve(async (req) => {
       time: new Date(Date.now() + expiryHours * 3600_000).toISOString(),
     } : undefined;
 
+    await supabase.from("signals").update({
+      metaapi_execution_status: "pending",
+      metaapi_execution_error: null,
+    }).eq("id", signal_id);
+
     // Order A — closes at TP1
     const orderA = await placeOrder({
       region, accountId, token,
@@ -268,6 +269,17 @@ Deno.serve(async (req) => {
       expiration,
     });
     if (!orderB.ok) {
+      try {
+        const tradeUrl = `https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${accountId}/trade`;
+        const headers = { "Content-Type": "application/json", "auth-token": token! };
+        if (orderA.data?.positionId) {
+          await fetch(tradeUrl, { method: "POST", headers,
+            body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: orderA.data.positionId }) });
+        } else if (orderA.data?.orderId) {
+          await fetch(tradeUrl, { method: "POST", headers,
+            body: JSON.stringify({ actionType: "ORDER_CANCEL", orderId: orderA.data.orderId }) });
+        }
+      } catch (e) { console.error("Order A cleanup failed", e); }
       await markFailed(supabase, signal_id, orderB.error ?? "order B failed");
       return safeError(orderB.error ?? "order B failed", 500);
     }

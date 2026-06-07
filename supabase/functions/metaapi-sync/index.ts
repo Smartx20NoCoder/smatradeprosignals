@@ -262,7 +262,7 @@ Deno.serve(async (req) => {
         .select("id")
         .in("paper_status", ["watching", "triggered"])
         .lt("created_at", since)
-        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped");
+        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped,metaapi_execution_status.eq.canceled");
       if (stale && stale.length > 0) {
         await supabase.from("signals")
           .update({ paper_status: "expired", status: "expired" })
@@ -275,7 +275,7 @@ Deno.serve(async (req) => {
         .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, paper_status")
         .in("paper_status", ["watching", "triggered", "tp1_hit"])
         .gte("created_at", since)
-        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped");
+        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped,metaapi_execution_status.eq.canceled");
 
       for (const s of (tracked ?? []) as any[]) {
         try {
