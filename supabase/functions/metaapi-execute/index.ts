@@ -114,10 +114,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    await supabase.from("signals").update({
-      metaapi_execution_status: "pending",
-      metaapi_execution_error: null,
-    }).eq("id", signal_id);
 
     const health = await getAccountInfo({ region, accountId, token });
     if (!health.ok) {
