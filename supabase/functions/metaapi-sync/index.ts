@@ -27,9 +27,26 @@ Deno.serve(async (req) => {
     );
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-    const accountId = (cfg as any)?.metaapi_account_id as string | null;
-    const region = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
-    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const c: any = cfg ?? {};
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+    const baseAccountId = c?.metaapi_account_id as string | null;
+    const baseRegion = (c?.metaapi_region as string | null) ?? "new-york";
+    const baseToken = (c?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const baseSuffix = (c?.metaapi_symbol_suffix as string | null) ?? "";
+
+    const accountId = isLive
+      ? ((c?.metaapi_account_id_live as string | null) ?? baseAccountId)
+      : baseAccountId;
+    const region = isLive
+      ? ((c?.metaapi_region_live as string | null) ?? baseRegion)
+      : baseRegion;
+    const token = isLive
+      ? ((c?.metaapi_token_live as string | null) || baseToken)
+      : baseToken;
+    const effectiveSuffix = isLive
+      ? ((c?.metaapi_symbol_suffix_live as string | null) ?? baseSuffix)
+      : baseSuffix;
     if (!token || !accountId) {
       return new Response(JSON.stringify({ ok: false, reason: "not configured" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
