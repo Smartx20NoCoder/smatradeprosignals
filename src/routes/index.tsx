@@ -238,6 +238,15 @@ function ScalpEdge() {
     metaapi_connected_at: null,
     metaapi_token_configured: false,
     metaapi_is_cent_account: false,
+    pair_auto_execute: {
+      "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
+      "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+    },
+    metaapi_active_mode: "demo",
+    metaapi_region_live: "london",
+    metaapi_symbol_suffix_live: "",
+    metaapi_live_configured: false,
+    metaapi_live_token_configured: false,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
