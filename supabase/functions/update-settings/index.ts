@@ -58,6 +58,27 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_min_lot" && (typeof v !== "number" || v < 0.01 || v > 1)) continue;
     if (k === "metaapi_max_lot" && (typeof v !== "number" || v < 0.01 || v > 10)) continue;
     if (k === "metaapi_is_cent_account" && typeof v !== "boolean") continue;
+    if (k === "pair_auto_execute") {
+      if (typeof v !== "object" || v === null || Array.isArray(v)) continue;
+      const clean: Record<string, boolean> = {};
+      let bad = false;
+      for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
+        if (typeof pk !== "string" || pk.length > 16 || !/^[A-Z]{3}\/[A-Z]{3}$/.test(pk)) { bad = true; break; }
+        if (typeof pv !== "boolean") { bad = true; break; }
+        clean[pk] = pv;
+      }
+      if (bad) continue;
+      out[k] = clean;
+      continue;
+    }
+    if (k === "metaapi_active_mode" && (typeof v !== "string" || !["demo", "live"].includes(v))) continue;
+    if (k === "metaapi_account_id_live" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
+    if (k === "metaapi_token_live") {
+      if (v === null) { out[k] = null; continue; }
+      if (typeof v !== "string" || v.length < 20 || v.length > 4096) continue;
+    }
+    if (k === "metaapi_region_live" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
+    if (k === "metaapi_symbol_suffix_live" && (typeof v !== "string" || v.length > 16 || !/^[A-Za-z0-9._-]*$/.test(v))) continue;
     out[k] = v;
   }
   return out;
