@@ -1380,6 +1380,78 @@ function MetaApiPanel({
         }}
       />
 
+      {appSettings.metaapi_active_mode === "live" && (
+        <div className="border border-chart-4/40 rounded bg-chart-4/5 p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-chart-4 font-bold">Live Account</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Account ID</div>
+              <input
+                defaultValue={appSettings.metaapi_live_configured ? "(configured)" : ""}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== "(configured)") saveAppSettings({ metaapi_account_id_live: v } as any);
+                }}
+                placeholder="e.g. 12abc34d-5678-..."
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+              />
+            </label>
+            <label className="text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Region</div>
+              <select
+                value={appSettings.metaapi_region_live}
+                onChange={(e) => saveAppSettings({ metaapi_region_live: e.target.value } as any)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
+                <option value="new-york">new-york</option>
+                <option value="london">london</option>
+                <option value="singapore">singapore</option>
+              </select>
+            </label>
+          </div>
+          <label className="text-xs block">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Symbol Suffix</div>
+            <input
+              value={appSettings.metaapi_symbol_suffix_live}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
+                saveAppSettings({ metaapi_symbol_suffix_live: cleaned } as any);
+              }}
+              placeholder="e.g. 'm' for Exness (leave blank for none)"
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            />
+          </label>
+          <TokenField
+            configured={appSettings.metaapi_live_token_configured}
+            onSave={async (value) => {
+              await saveAppSettings({ metaapi_token_live: value } as any);
+              setTimeout(() => { ping(); }, 250);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Pair auto-execute toggles */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Pair Auto-Execute</div>
+          <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {["XAU/USD","BTC/USD","GBP/USD","GBP/JPY","EUR/USD","EUR/JPY","USD/JPY"].map((p) => {
+            const cfg = appSettings.pair_auto_execute ?? {};
+            const on = cfg[p] !== false;
+            return (
+              <label key={p} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
+                <span className="font-mono">{p}</span>
+                <Toggle on={on} onChange={(v) => saveAppSettings({ pair_auto_execute: { ...cfg, [p]: v } } as any)} />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+
+
 
       <div className="flex items-center justify-between border-t border-border pt-3">
         <div>
