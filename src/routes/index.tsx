@@ -1285,14 +1285,45 @@ function MetaApiPanel({
       <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Auto-Trading</div>
         <div className="flex items-center gap-2">
-          {isDemo && connected && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4 font-bold">DEMO</span>
-          )}
+          {(() => {
+            const live = appSettings.metaapi_active_mode === "live";
+            return (
+              <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${
+                live ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull"
+              }`}>
+                {live ? "LIVE" : "DEMO"}
+              </span>
+            );
+          })()}
           <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded font-bold ${
             connected ? "bg-bull/20 text-bull" : "bg-bear/20 text-bear"
           }`}>
             {connected ? "● CONNECTED" : "○ DISCONNECTED"}
           </span>
+        </div>
+      </div>
+
+      {/* Trading mode switcher */}
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div>
+          <div className="text-sm font-semibold">Trading Mode</div>
+          <div className="text-xs text-muted-foreground">Switch the broker connection between demo and live accounts.</div>
+        </div>
+        <div className="inline-flex rounded border border-border overflow-hidden">
+          {(["demo", "live"] as const).map((m) => {
+            const active = appSettings.metaapi_active_mode === m;
+            return (
+              <button key={m}
+                onClick={() => saveAppSettings({ metaapi_active_mode: m } as any)}
+                className={`px-3 py-1.5 text-xs uppercase tracking-wider font-bold ${
+                  active
+                    ? (m === "live" ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull")
+                    : "text-muted-foreground hover:bg-muted/40"
+                }`}>
+                {m}
+              </button>
+            );
+          })}
         </div>
       </div>
 
