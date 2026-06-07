@@ -70,6 +70,9 @@ Deno.serve(async (req) => {
 
     const c: any = cfg ?? {};
     const autoTrade = !!c.metaapi_auto_trade;
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+
     const accountId = c.metaapi_account_id as string | null;
     const region = (c.metaapi_region as string | null) ?? "new-york";
     const minConf = Number(c.metaapi_min_confidence ?? 75);
@@ -80,6 +83,20 @@ Deno.serve(async (req) => {
     const maxDailyLossPct = Number(c.metaapi_max_daily_loss_pct ?? 5);
     const symbolSuffix = (c.metaapi_symbol_suffix as string | null) ?? "";
     const token = (c.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+
+    // Mode-aware connection params: live overrides demo when active mode is live.
+    const effectiveAccountId = isLive
+      ? ((c?.metaapi_account_id_live as string | null) ?? accountId)
+      : accountId;
+    const effectiveToken = isLive
+      ? ((c?.metaapi_token_live as string | null) || token)
+      : token;
+    const effectiveRegion = isLive
+      ? ((c?.metaapi_region_live as string | null) ?? region)
+      : region;
+    const effectiveSuffix = isLive
+      ? ((c?.metaapi_symbol_suffix_live as string | null) ?? symbolSuffix)
+      : symbolSuffix;
 
     if (!autoTrade) {
       return new Response(JSON.stringify({ ok: false, reason: "auto-trade disabled" }), {
