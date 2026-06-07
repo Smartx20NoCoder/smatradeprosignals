@@ -323,6 +323,15 @@ function ScalpEdge() {
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
       metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
+      pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
+        "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
+        "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+      },
+      metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live" : "demo"),
+      metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
+      metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
+      metaapi_live_configured: !!cfg.metaapi_live_configured,
+      metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
