@@ -38,6 +38,8 @@ export type Database = {
           id: string
           key1_exhausted_at: string | null
           metaapi_account_id: string | null
+          metaapi_account_id_live: string | null
+          metaapi_active_mode: string | null
           metaapi_auto_trade: boolean
           metaapi_connected_at: string | null
           metaapi_expiry_hours: number | null
@@ -50,9 +52,13 @@ export type Database = {
           metaapi_min_lot: number | null
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_region_live: string | null
           metaapi_risk_per_trade_pct: number | null
           metaapi_symbol_suffix: string
+          metaapi_symbol_suffix_live: string | null
           metaapi_token: string | null
+          metaapi_token_live: string | null
+          pair_auto_execute: Json
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number
@@ -64,6 +70,8 @@ export type Database = {
           id?: string
           key1_exhausted_at?: string | null
           metaapi_account_id?: string | null
+          metaapi_account_id_live?: string | null
+          metaapi_active_mode?: string | null
           metaapi_auto_trade?: boolean
           metaapi_connected_at?: string | null
           metaapi_expiry_hours?: number | null
@@ -76,9 +84,13 @@ export type Database = {
           metaapi_min_lot?: number | null
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_region_live?: string | null
           metaapi_risk_per_trade_pct?: number | null
           metaapi_symbol_suffix?: string
+          metaapi_symbol_suffix_live?: string | null
           metaapi_token?: string | null
+          metaapi_token_live?: string | null
+          pair_auto_execute?: Json
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -90,6 +102,8 @@ export type Database = {
           id?: string
           key1_exhausted_at?: string | null
           metaapi_account_id?: string | null
+          metaapi_account_id_live?: string | null
+          metaapi_active_mode?: string | null
           metaapi_auto_trade?: boolean
           metaapi_connected_at?: string | null
           metaapi_expiry_hours?: number | null
@@ -102,9 +116,13 @@ export type Database = {
           metaapi_min_lot?: number | null
           metaapi_min_rr?: number
           metaapi_region?: string
+          metaapi_region_live?: string | null
           metaapi_risk_per_trade_pct?: number | null
           metaapi_symbol_suffix?: string
+          metaapi_symbol_suffix_live?: string | null
           metaapi_token?: string | null
+          metaapi_token_live?: string | null
+          pair_auto_execute?: Json
           paused?: boolean
           session_config?: Json
           trading_hours_end_utc?: number
@@ -349,12 +367,15 @@ export type Database = {
           active_td_key: number
           id: string
           key1_exhausted_at: string
+          metaapi_active_mode: string
           metaapi_auto_trade: boolean
           metaapi_configured: boolean
           metaapi_connected_at: string
           metaapi_expiry_hours: number
           metaapi_fixed_lot: number
           metaapi_is_cent_account: boolean
+          metaapi_live_configured: boolean
+          metaapi_live_token_configured: boolean
           metaapi_max_daily_loss_pct: number
           metaapi_max_lot: number
           metaapi_max_trades: number
@@ -362,9 +383,12 @@ export type Database = {
           metaapi_min_lot: number
           metaapi_min_rr: number
           metaapi_region: string
+          metaapi_region_live: string
           metaapi_risk_per_trade_pct: number
           metaapi_symbol_suffix: string
+          metaapi_symbol_suffix_live: string
           metaapi_token_configured: boolean
+          pair_auto_execute: Json
           paused: boolean
           session_config: Json
           trading_hours_end_utc: number

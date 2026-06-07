@@ -70,6 +70,9 @@ Deno.serve(async (req) => {
 
     const c: any = cfg ?? {};
     const autoTrade = !!c.metaapi_auto_trade;
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+
     const accountId = c.metaapi_account_id as string | null;
     const region = (c.metaapi_region as string | null) ?? "new-york";
     const minConf = Number(c.metaapi_min_confidence ?? 75);
@@ -81,13 +84,27 @@ Deno.serve(async (req) => {
     const symbolSuffix = (c.metaapi_symbol_suffix as string | null) ?? "";
     const token = (c.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
 
+    // Mode-aware connection params: live overrides demo when active mode is live.
+    const effectiveAccountId = isLive
+      ? ((c?.metaapi_account_id_live as string | null) ?? accountId)
+      : accountId;
+    const effectiveToken = isLive
+      ? ((c?.metaapi_token_live as string | null) || token)
+      : token;
+    const effectiveRegion = isLive
+      ? ((c?.metaapi_region_live as string | null) ?? region)
+      : region;
+    const effectiveSuffix = isLive
+      ? ((c?.metaapi_symbol_suffix_live as string | null) ?? symbolSuffix)
+      : symbolSuffix;
+
     if (!autoTrade) {
       return new Response(JSON.stringify({ ok: false, reason: "auto-trade disabled" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!token || !accountId) {
-      await markFailed(supabase, signal_id, "MetaApi not configured (token or account ID missing)");
+    if (!effectiveToken || !effectiveAccountId) {
+      await markFailed(supabase, signal_id, `MetaApi not configured for ${mode.toUpperCase()} mode (token or account ID missing)`);
       return new Response(JSON.stringify({ ok: false, reason: "missing config" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -95,6 +112,22 @@ Deno.serve(async (req) => {
     const s: any = signal;
     if (Number(s.confidence) < minConf || Number(s.rr) < minRR) {
       return new Response(JSON.stringify({ ok: false, reason: "below threshold" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Per-pair auto-execute filter — disabled pairs still paper-track.
+    const pairConfig = (c?.pair_auto_execute ?? {}) as Record<string, boolean>;
+    const pairNorm = String(s.pair ?? "");
+    // default true if pair not in config (future new pairs auto-enabled)
+    const pairEnabled = pairConfig[pairNorm] !== false;
+    if (!pairEnabled) {
+      await supabase.from("signals").update({
+        metaapi_execution_status: "skipped",
+        metaapi_execution_error: `${pairNorm} auto-execution is disabled in Settings. Paper-tracked only.`,
+        paper_status: "watching",
+      }).eq("id", signal_id);
+      return new Response(JSON.stringify({ ok: false, reason: "pair_disabled" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -115,7 +148,7 @@ Deno.serve(async (req) => {
     }
 
 
-    const health = await getAccountInfo({ region, accountId, token });
+    const health = await getAccountInfo({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken });
     if (!health.ok) {
       const msg = `Broker not reachable: ${health.error ?? "unknown"}`;
       await markFailed(supabase, signal_id, msg);
@@ -152,11 +185,11 @@ Deno.serve(async (req) => {
       console.error("daily loss check failed", e);
     }
 
-    const symbol = pairToSymbol(s.pair, symbolSuffix);
-    let priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+    const symbol = pairToSymbol(s.pair, effectiveSuffix);
+    let priceRes = await getSymbolPrice({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken, symbol });
     if (priceRes.ok && (priceRes.bid == null || priceRes.ask == null)) {
       await new Promise((r) => setTimeout(r, 1500));
-      priceRes = await getSymbolPrice({ region, accountId, token, symbol });
+      priceRes = await getSymbolPrice({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken, symbol });
     }
     if (!priceRes.ok || !priceRes.bid || !priceRes.ask) {
       const raw = priceRes.error ?? "price unavailable";
@@ -243,7 +276,7 @@ Deno.serve(async (req) => {
 
     // Order A — closes at TP1
     const orderA = await placeOrder({
-      region, accountId, token,
+      region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken,
       actionType: picked.action,
       symbol, volume: halfLot,
       openPrice: picked.openPrice,
@@ -259,7 +292,7 @@ Deno.serve(async (req) => {
 
     // Order B — runner to TP2
     const orderB = await placeOrder({
-      region, accountId, token,
+      region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken,
       actionType: picked.action,
       symbol, volume: halfLot,
       openPrice: picked.openPrice,
@@ -270,8 +303,8 @@ Deno.serve(async (req) => {
     });
     if (!orderB.ok) {
       try {
-        const tradeUrl = `https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${accountId}/trade`;
-        const headers = { "Content-Type": "application/json", "auth-token": token! };
+        const tradeUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/trade`;
+        const headers = { "Content-Type": "application/json", "auth-token": effectiveToken! };
         if (orderA.data?.positionId) {
           await fetch(tradeUrl, { method: "POST", headers,
             body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: orderA.data.positionId }) });

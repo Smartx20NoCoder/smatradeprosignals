@@ -106,6 +106,12 @@ type AppSettings = {
   metaapi_symbol_suffix: string;
   metaapi_connected_at: string | null;
   metaapi_token_configured: boolean;
+  pair_auto_execute: Record<string, boolean>;
+  metaapi_active_mode: "demo" | "live";
+  metaapi_region_live: string;
+  metaapi_symbol_suffix_live: string;
+  metaapi_live_configured: boolean;
+  metaapi_live_token_configured: boolean;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
@@ -232,6 +238,15 @@ function ScalpEdge() {
     metaapi_connected_at: null,
     metaapi_token_configured: false,
     metaapi_is_cent_account: false,
+    pair_auto_execute: {
+      "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
+      "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+    },
+    metaapi_active_mode: "demo",
+    metaapi_region_live: "london",
+    metaapi_symbol_suffix_live: "",
+    metaapi_live_configured: false,
+    metaapi_live_token_configured: false,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
@@ -308,6 +323,15 @@ function ScalpEdge() {
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
       metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
+      pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
+        "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
+        "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+      },
+      metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live" : "demo"),
+      metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
+      metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
+      metaapi_live_configured: !!cfg.metaapi_live_configured,
+      metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
@@ -1254,21 +1278,51 @@ function MetaApiPanel({
 
   const connected = !!status?.ok;
   const acct = status?.account;
-  const isDemo = acct?.type ? /demo/i.test(String(acct.type)) : true;
 
   return (
     <div className="border border-border rounded bg-card p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Auto-Trading</div>
         <div className="flex items-center gap-2">
-          {isDemo && connected && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4 font-bold">DEMO</span>
-          )}
+          {(() => {
+            const live = appSettings.metaapi_active_mode === "live";
+            return (
+              <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${
+                live ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull"
+              }`}>
+                {live ? "LIVE" : "DEMO"}
+              </span>
+            );
+          })()}
           <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded font-bold ${
             connected ? "bg-bull/20 text-bull" : "bg-bear/20 text-bear"
           }`}>
             {connected ? "● CONNECTED" : "○ DISCONNECTED"}
           </span>
+        </div>
+      </div>
+
+      {/* Trading mode switcher */}
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div>
+          <div className="text-sm font-semibold">Trading Mode</div>
+          <div className="text-xs text-muted-foreground">Switch the broker connection between demo and live accounts.</div>
+        </div>
+        <div className="inline-flex rounded border border-border overflow-hidden">
+          {(["demo", "live"] as const).map((m) => {
+            const active = appSettings.metaapi_active_mode === m;
+            return (
+              <button key={m}
+                onClick={() => saveAppSettings({ metaapi_active_mode: m } as any)}
+                className={`px-3 py-1.5 text-xs uppercase tracking-wider font-bold ${
+                  active
+                    ? (m === "live" ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull")
+                    : "text-muted-foreground hover:bg-muted/40"
+                }`}>
+                {m}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1325,6 +1379,78 @@ function MetaApiPanel({
           setTimeout(() => { ping(); }, 250);
         }}
       />
+
+      {appSettings.metaapi_active_mode === "live" && (
+        <div className="border border-chart-4/40 rounded bg-chart-4/5 p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-chart-4 font-bold">Live Account</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Account ID</div>
+              <input
+                defaultValue={appSettings.metaapi_live_configured ? "(configured)" : ""}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== "(configured)") saveAppSettings({ metaapi_account_id_live: v } as any);
+                }}
+                placeholder="e.g. 12abc34d-5678-..."
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+              />
+            </label>
+            <label className="text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Region</div>
+              <select
+                value={appSettings.metaapi_region_live}
+                onChange={(e) => saveAppSettings({ metaapi_region_live: e.target.value } as any)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
+                <option value="new-york">new-york</option>
+                <option value="london">london</option>
+                <option value="singapore">singapore</option>
+              </select>
+            </label>
+          </div>
+          <label className="text-xs block">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Symbol Suffix</div>
+            <input
+              value={appSettings.metaapi_symbol_suffix_live}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
+                saveAppSettings({ metaapi_symbol_suffix_live: cleaned } as any);
+              }}
+              placeholder="e.g. 'm' for Exness (leave blank for none)"
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            />
+          </label>
+          <TokenField
+            configured={appSettings.metaapi_live_token_configured}
+            onSave={async (value) => {
+              await saveAppSettings({ metaapi_token_live: value } as any);
+              setTimeout(() => { ping(); }, 250);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Pair auto-execute toggles */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Pair Auto-Execute</div>
+          <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {["XAU/USD","BTC/USD","GBP/USD","GBP/JPY","EUR/USD","EUR/JPY","USD/JPY"].map((p) => {
+            const cfg = appSettings.pair_auto_execute ?? {};
+            const on = cfg[p] !== false;
+            return (
+              <label key={p} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
+                <span className="font-mono">{p}</span>
+                <Toggle on={on} onChange={(v) => saveAppSettings({ pair_auto_execute: { ...cfg, [p]: v } } as any)} />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+
 
 
       <div className="flex items-center justify-between border-t border-border pt-3">
