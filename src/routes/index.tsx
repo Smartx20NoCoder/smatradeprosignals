@@ -1278,7 +1278,7 @@ function MetaApiPanel({
 
   const connected = !!status?.ok;
   const acct = status?.account;
-  const isDemo = acct?.type ? /demo/i.test(String(acct.type)) : true;
+  void appSettings;
 
   return (
     <div className="border border-border rounded bg-card p-4 space-y-3">
