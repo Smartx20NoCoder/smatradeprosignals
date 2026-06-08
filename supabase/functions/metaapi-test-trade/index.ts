@@ -32,23 +32,35 @@ Deno.serve(async (req) => {
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
 
-    const accountId = (cfg as any)?.metaapi_account_id as string | null;
-    const fallbackRegion = ((cfg as any)?.metaapi_region as string | null) ?? "new-york";
-    const suffix = ((cfg as any)?.metaapi_symbol_suffix as string | null) ?? "";
-    const token = ((cfg as any)?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const c: any = cfg ?? {};
+    const rawToken = (c?.metaapi_token as string | null) || Deno.env.get("METAAPI_TOKEN") || null;
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+    const accountId = isLive
+      ? ((c?.metaapi_account_id_live as string | null) ?? (c?.metaapi_account_id as string | null))
+      : (c?.metaapi_account_id as string | null);
+    const token = isLive
+      ? ((c?.metaapi_token_live as string | null) ?? rawToken)
+      : rawToken;
+    const fallbackRegion = isLive
+      ? ((c?.metaapi_region_live as string | null) ?? (c?.metaapi_region as string | null) ?? "london")
+      : ((c?.metaapi_region as string | null) ?? "london");
+    const suffix = isLive
+      ? ((c?.metaapi_symbol_suffix_live as string | null) ?? "")
+      : ((c?.metaapi_symbol_suffix as string | null) ?? "");
 
     // 1. Load config
     if (!accountId || !token) {
       push({
         label: "Load config", ok: false,
-        detail: `accountId=${accountId ? "set" : "missing"} token=${token ? "set" : "missing"} suffix="${suffix}"`,
+        detail: `mode=${mode} accountId=${accountId ? "set" : "missing"} token=${token ? "set" : "missing"} suffix="${suffix}"`,
         error: "Account ID and MetaApi token are both required",
       });
       return finish(false, "Test failed: configuration incomplete");
     }
     push({
       label: "Load config", ok: true,
-      detail: `accountId=${accountId.slice(0, 8)}… token=set suffix="${suffix}" fallbackRegion=${fallbackRegion}`,
+      detail: `mode=${mode} accountId=${accountId.slice(0, 8)}… token=set suffix="${suffix}" fallbackRegion=${fallbackRegion}`,
     });
 
     // Step 2 — verify broker connectivity via client API directly
