@@ -1454,7 +1454,7 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["XAU/USD","BTC/USD","GBP/USD","GBP/JPY","EUR/USD","EUR/JPY","USD/JPY"].map((p) => {
+          {["XAU/USD","BTC/USD","GBP/USD","GBP/JPY","EUR/USD","EUR/JPY","USD/JPY","EUR/GBP","AUD/JPY","AUD/USD"].map((p) => {
             const cfg = appSettings.pair_auto_execute ?? {};
             const on = cfg[p] !== false;
             return (
