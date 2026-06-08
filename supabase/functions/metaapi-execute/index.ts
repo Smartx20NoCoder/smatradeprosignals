@@ -235,7 +235,10 @@ Deno.serve(async (req) => {
     // Cent accounts (e.g. Exness Standard Cent / USC) settle in cents, so the pip value
     // expressed in account currency is 100× the standard value.
     const sym = symbol.toUpperCase();
-    const centMultiplier = Boolean(c?.metaapi_is_cent_account) ? 100 : 1;
+    const isCentAccount = isLive
+      ? Boolean(c?.metaapi_is_cent_account_live)
+      : Boolean(c?.metaapi_is_cent_account);
+    const centMultiplier = isCentAccount ? 100 : 1;
     const pointValuePer001Lot = (sym.includes("XAU") ? 1.0
       : sym.includes("BTC") ? 0.01
       : 0.10) * centMultiplier;
