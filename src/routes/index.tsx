@@ -1430,6 +1430,20 @@ function MetaApiPanel({
               setTimeout(() => { ping(); }, 250);
             }}
           />
+          <label className="flex items-start gap-2 text-xs cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={!!appSettings.metaapi_is_cent_account_live}
+              onChange={(e) => saveAppSettings({ metaapi_is_cent_account_live: e.target.checked } as any)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account (Live)</span>
+              <span className="block text-muted-foreground mt-0.5">
+                Enable for Exness Standard Cent (USC) live accounts. Adjusts pip values for correct lot sizing.
+              </span>
+            </span>
+          </label>
         </div>
       )}
 
