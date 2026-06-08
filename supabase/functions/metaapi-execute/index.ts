@@ -231,16 +231,22 @@ Deno.serve(async (req) => {
     const maxLot = Number(c?.metaapi_max_lot ?? 0.10);
     const fallbackLot = Number(c?.metaapi_fixed_lot ?? 0.02);
 
-    // Point value per 0.01 lot: XAU/USD = $1/point, BTC/USD = $0.01/point, FX = ~$0.10/point
-    // Cent accounts (e.g. Exness Standard Cent / USC) settle in cents, so the pip value
-    // expressed in account currency is 100× the standard value.
+    // Point value per 0.01 lot in account currency.
+    // FX pairs (EUR/USD, GBP/USD, GBP/JPY etc): $0.10 per pip per 0.01 lot on standard.
+    //   On cent accounts balance is USC, so pip value is 100× larger in USC terms → centMultiplier.
+    // XAU/USD & BTC/USD: price moves in USD directly. Even on cent accounts the raw
+    //   slPoints are already in dollar units (e.g. XAU SL of 9.37 = $9.37/point/lot).
+    //   Applying centMultiplier here would inflate the risk calc 100× and wrongly block trades.
     const sym = symbol.toUpperCase();
     const isCentAccount = isLive
       ? Boolean(c?.metaapi_is_cent_account_live)
       : Boolean(c?.metaapi_is_cent_account);
-    const centMultiplier = isCentAccount ? 100 : 1;
-    const pointValuePer001Lot = (sym.includes("XAU") ? 1.0
-      : sym.includes("BTC") ? 0.01
+    const isMetalOrCrypto = sym.includes("XAU") || sym.includes("XAG")
+      || sym.includes("BTC") || sym.includes("ETH");
+    // Only FX pairs scale with the cent multiplier — metals/crypto are USD-quoted at broker level.
+    const centMultiplier = (isCentAccount && !isMetalOrCrypto) ? 100 : 1;
+    const pointValuePer001Lot = (isMetalOrCrypto && (sym.includes("XAU") || sym.includes("XAG")) ? 1.0
+      : isMetalOrCrypto ? 0.01
       : 0.10) * centMultiplier;
 
     const slPoints = Math.abs(Number(s.entry) - Number(s.stop_loss));
