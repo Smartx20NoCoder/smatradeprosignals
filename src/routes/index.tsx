@@ -239,6 +239,7 @@ function ScalpEdge() {
     metaapi_connected_at: null,
     metaapi_token_configured: false,
     metaapi_is_cent_account: false,
+    metaapi_is_cent_account_live: false,
     pair_auto_execute: {
       "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
       "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
