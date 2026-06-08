@@ -325,6 +325,7 @@ function ScalpEdge() {
       metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
       metaapi_token_configured: !!cfg.metaapi_token_configured,
       metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
+      metaapi_is_cent_account_live: !!(cfg as any).metaapi_is_cent_account_live,
       pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
         "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
         "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
