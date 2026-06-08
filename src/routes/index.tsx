@@ -112,6 +112,7 @@ type AppSettings = {
   metaapi_symbol_suffix_live: string;
   metaapi_live_configured: boolean;
   metaapi_live_token_configured: boolean;
+  metaapi_is_cent_account_live: boolean;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
