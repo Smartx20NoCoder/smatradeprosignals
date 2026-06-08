@@ -45,6 +45,7 @@ export type Database = {
           metaapi_expiry_hours: number | null
           metaapi_fixed_lot: number
           metaapi_is_cent_account: boolean | null
+          metaapi_is_cent_account_live: boolean | null
           metaapi_max_daily_loss_pct: number | null
           metaapi_max_lot: number | null
           metaapi_max_trades: number | null
@@ -77,6 +78,7 @@ export type Database = {
           metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
           metaapi_is_cent_account?: boolean | null
+          metaapi_is_cent_account_live?: boolean | null
           metaapi_max_daily_loss_pct?: number | null
           metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
@@ -109,6 +111,7 @@ export type Database = {
           metaapi_expiry_hours?: number | null
           metaapi_fixed_lot?: number
           metaapi_is_cent_account?: boolean | null
+          metaapi_is_cent_account_live?: boolean | null
           metaapi_max_daily_loss_pct?: number | null
           metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
@@ -374,6 +377,7 @@ export type Database = {
           metaapi_expiry_hours: number
           metaapi_fixed_lot: number
           metaapi_is_cent_account: boolean
+          metaapi_is_cent_account_live: boolean
           metaapi_live_configured: boolean
           metaapi_live_token_configured: boolean
           metaapi_max_daily_loss_pct: number
