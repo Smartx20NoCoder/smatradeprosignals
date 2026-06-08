@@ -15,10 +15,17 @@ import {
   type PendingOrderAction,
 } from "../_shared/metaapi.ts";
 
+function mapBrokerError(err: string): string {
+  if (err && err.includes("10016")) {
+    return "Signal skipped — price moved too far before execution, stops now invalid. Wait for next signal.";
+  }
+  return err;
+}
+
 async function markFailed(supabase: any, signalId: string, error: string) {
   await supabase.from("signals").update({
     metaapi_execution_status: "failed",
-    metaapi_execution_error: error.slice(0, 500),
+    metaapi_execution_error: mapBrokerError(error).slice(0, 500),
     paper_status: "watching",
   }).eq("id", signalId);
 }
