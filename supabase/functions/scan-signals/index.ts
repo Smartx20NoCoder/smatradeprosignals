@@ -11,7 +11,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fn-secret",
 };
 
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD", "EUR/GBP", "AUD/JPY", "AUD/USD"];
+const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -50,7 +50,6 @@ function isPairAllowedNow(pair: string, d: Date): boolean {
 const SPREAD_PIPS: Record<string, number> = {
   "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2,
   "GBP/JPY": 2.5, "EUR/JPY": 2.5,
-  "EUR/GBP": 1.5, "AUD/JPY": 2.5, "AUD/USD": 1.2,
 };
 const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
@@ -144,12 +143,6 @@ function sessionScore(pair: string, dUTC: Date): number {
   if (isGold(pair) && (isLondon || isNY)) return 90;
   if (isGold(pair) && isAsian) return 30;
   if (pair.includes("JPY") && isAsian) return 70;
-  if (pair === "EUR/GBP" && isLondon) return 90;   // EUR/GBP is a London pair
-  if (pair === "EUR/GBP" && isNY) return 60;
-  if (pair === "EUR/GBP" && isAsian) return 20;
-  if (pair.startsWith("AUD") && isAsian) return 85; // AUD pairs peak in Asian session
-  if (pair.startsWith("AUD") && isLondon) return 70;
-  if (pair.startsWith("AUD") && isNY) return 55;
   if (isLondon) return 85;
   if (isNY) return 80;
   if (isAsian) return 25;
@@ -220,10 +213,15 @@ async function fetchCandles(
   let usedApi = 1;
 
   if (r.status === 429) {
-    const msg = `TwelveData 429 — skipping ${pair} this cycle`;
+    const msg = `TwelveData 429 — using stale cache for ${pair}`;
     console.log(msg);
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: msg });
-    throw new Error(msg);
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
+    if (cached) {
+      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    }
+    // No cache available — skip this pair this cycle
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
+    throw new Error(`429 no cache: ${pair}`);
   }
 
   if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
