@@ -972,7 +972,7 @@ Deno.serve(async (req) => {
         async start(controller) {
           const send = (payload: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
           try {
-            const result = await runScanJob(supabase, keys, settings, mode, (event) => send(event));
+            const result = await runScanJob(supabase, keys, settings, mode, (event) => send(event), source);
             send({ type: "complete", result });
             await finalize(result, true);
             controller.close();
