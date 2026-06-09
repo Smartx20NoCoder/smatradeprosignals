@@ -9,7 +9,7 @@ const PROVISIONING_BASE = "https://mt-provisioning-api-v1.agiliumtrade.agiliumtr
 
 type HealthStatus = "connected" | "reconnecting" | "error";
 
-async function runHealthCheck(): Promise<{
+async function runHealthCheck(opts: { force?: boolean } = {}): Promise<{
   status: HealthStatus;
   state?: string;
   connectionStatus?: string;
