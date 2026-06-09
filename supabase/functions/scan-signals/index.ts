@@ -683,6 +683,7 @@ async function runScanJob(
   settings: ActiveSettings,
   mode: "full" | "latest",
   emit?: ProgressEmitter,
+  source: string = "manual",
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = TFS;
