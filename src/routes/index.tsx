@@ -2126,7 +2126,8 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const [pairFilter, setPairFilter] = useState<string>("all");
   const [setupFilter, setSetupFilter] = useState<string>("all");
   const [sessionFilter, setSessionFilter] = useState<string>("all");
-  const [minConfidence, setMinConfidence] = useState<string>("");
+  const [minConfidence, setMinConfidence] = useState<string>("any");
+  const [minRR, setMinRR] = useState<string>("any");
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
   const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
@@ -2134,14 +2135,16 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const sessions = ["London", "New York", "Asian", "Off"];
 
   const filtered = useMemo(() => {
-    const minC = minConfidence.trim() === "" ? null : Number(minConfidence);
+    const minC = minConfidence === "any" ? null : Number(minConfidence);
+    const minR = minRR === "any" ? null : Number(minRR);
     return closed.filter((s) =>
       (pairFilter === "all" || s.pair === pairFilter) &&
       (setupFilter === "all" || s.setup === setupFilter) &&
       (sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
-      (minC == null || Number.isNaN(minC) || s.confidence >= minC)
+      (minC == null || s.confidence >= minC) &&
+      (minR == null || (s.rr ?? 0) >= minR)
     );
-  }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence]);
+  }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence, minRR]);
 
   // Group by Month-Year (most recent first)
   type MonthGroup = { key: string; label: string; items: Signal[] };
@@ -2224,15 +2227,23 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
           <option value="all">All sessions</option>
           {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <label className="flex items-center gap-1 text-muted-foreground uppercase tracking-wider">
-          <span>Conf %</span>
-          <input
-            type="number" min={0} max={100} placeholder="—"
-            value={minConfidence}
-            onChange={(e) => setMinConfidence(e.target.value)}
-            className="w-16 bg-secondary border border-border rounded px-2 py-1 text-foreground"
-          />
-        </label>
+        <select value={minRR} onChange={(e) => setMinRR(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="any">Min R:R · Any</option>
+          <option value="1.5">1.5+</option>
+          <option value="2">2.0+</option>
+          <option value="2.5">2.5+</option>
+          <option value="3">3.0+</option>
+        </select>
+        <select value={minConfidence} onChange={(e) => setMinConfidence(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="any">Min Conf · Any</option>
+          <option value="70">70%+</option>
+          <option value="75">75%+</option>
+          <option value="80">80%+</option>
+          <option value="85">85%+</option>
+          <option value="90">90%+</option>
+        </select>
         <button onClick={exportCSV}
           className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
           ⬇ Export CSV
