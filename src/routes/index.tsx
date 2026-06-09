@@ -2227,15 +2227,23 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
           <option value="all">All sessions</option>
           {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <label className="flex items-center gap-1 text-muted-foreground uppercase tracking-wider">
-          <span>Conf %</span>
-          <input
-            type="number" min={0} max={100} placeholder="—"
-            value={minConfidence}
-            onChange={(e) => setMinConfidence(e.target.value)}
-            className="w-16 bg-secondary border border-border rounded px-2 py-1 text-foreground"
-          />
-        </label>
+        <select value={minRR} onChange={(e) => setMinRR(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="any">Min R:R · Any</option>
+          <option value="1.5">1.5+</option>
+          <option value="2">2.0+</option>
+          <option value="2.5">2.5+</option>
+          <option value="3">3.0+</option>
+        </select>
+        <select value={minConfidence} onChange={(e) => setMinConfidence(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="any">Min Conf · Any</option>
+          <option value="70">70%+</option>
+          <option value="75">75%+</option>
+          <option value="80">80%+</option>
+          <option value="85">85%+</option>
+          <option value="90">90%+</option>
+        </select>
         <button onClick={exportCSV}
           className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
           ⬇ Export CSV
