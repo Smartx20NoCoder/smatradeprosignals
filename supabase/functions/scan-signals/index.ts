@@ -50,7 +50,6 @@ function isPairAllowedNow(pair: string, d: Date): boolean {
 const SPREAD_PIPS: Record<string, number> = {
   "EUR/USD": 1.2, "GBP/USD": 1.2, "USD/JPY": 1.2,
   "GBP/JPY": 2.5, "EUR/JPY": 2.5,
-  "EUR/GBP": 1.5, "AUD/JPY": 2.5, "AUD/USD": 1.2,
 };
 const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
