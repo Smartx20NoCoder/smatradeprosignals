@@ -986,7 +986,7 @@ Deno.serve(async (req) => {
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
     }
 
-    const result = await runScanJob(supabase, keys, settings, mode);
+    const result = await runScanJob(supabase, keys, settings, mode, undefined, source);
     await finalize(result, true);
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
