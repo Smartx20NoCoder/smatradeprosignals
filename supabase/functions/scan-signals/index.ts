@@ -672,7 +672,10 @@ async function runScanJob(
 
     const nowDate = new Date();
     // Filter pair list for weekend / Friday-late: only BTC trades.
-    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    // Filter to pairs enabled in auto-execute config (core pairs always scan).
+    const autoCfg = settings.pair_auto_execute ?? {};
+    const enabledPairs = PAIRS.filter((p) => CORE_PAIRS.has(p) || autoCfg[p] !== false);
+    const allowedPairs = enabledPairs.filter((p) => isPairAllowedNow(p, nowDate));
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
     // Load today's high-impact news once.
