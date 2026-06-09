@@ -564,7 +564,11 @@ type ActiveSettings = {
   active_td_key: 1 | 2;
   session_config: SessionConfig;
   key1_exhausted_at: string | null;
+  pair_auto_execute: Record<string, boolean>;
 };
+
+// Core pairs always scanned regardless of pair_auto_execute setting.
+const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,
@@ -613,6 +617,7 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
     active_td_key: effectiveKey,
     session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
     key1_exhausted_at: key1ExhaustedAt,
+    pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
   };
 }
 
@@ -667,7 +672,10 @@ async function runScanJob(
 
     const nowDate = new Date();
     // Filter pair list for weekend / Friday-late: only BTC trades.
-    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    // Filter to pairs enabled in auto-execute config (core pairs always scan).
+    const autoCfg = settings.pair_auto_execute ?? {};
+    const enabledPairs = PAIRS.filter((p) => CORE_PAIRS.has(p) || autoCfg[p] !== false);
+    const allowedPairs = enabledPairs.filter((p) => isPairAllowedNow(p, nowDate));
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
     // Load today's high-impact news once.
