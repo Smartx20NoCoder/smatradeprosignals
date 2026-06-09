@@ -51,7 +51,8 @@ async function runHealthCheck(opts: { force?: boolean } = {}): Promise<{
   const state = String(data?.state ?? "unknown");
   const connectionStatus = String(data?.connectionStatus ?? "unknown");
 
-  if (state.toUpperCase() === "DEPLOYED" && connectionStatus.toUpperCase() === "DISCONNECTED") {
+  const needsRedeploy = state.toUpperCase() === "DEPLOYED" && connectionStatus.toUpperCase() === "DISCONNECTED";
+  if (needsRedeploy || opts.force) {
     const redeployUrl = `${PROVISIONING_BASE}/users/current/accounts/${accountId}/redeploy`;
     try {
       const r = await fetch(redeployUrl, {
