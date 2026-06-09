@@ -564,7 +564,11 @@ type ActiveSettings = {
   active_td_key: 1 | 2;
   session_config: SessionConfig;
   key1_exhausted_at: string | null;
+  pair_auto_execute: Record<string, boolean>;
 };
+
+// Core pairs always scanned regardless of pair_auto_execute setting.
+const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,
