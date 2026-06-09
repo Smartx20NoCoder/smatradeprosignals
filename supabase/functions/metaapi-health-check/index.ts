@@ -86,7 +86,9 @@ Deno.serve(async (req) => {
   const unauth = checkInternalAuth(req);
   if (unauth) return unauth;
   try {
-    const result = await runHealthCheck();
+    const body = await req.json().catch(() => ({}));
+    const force = !!(body as any)?.force;
+    const result = await runHealthCheck({ force });
     return new Response(JSON.stringify(result), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
