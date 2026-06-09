@@ -65,9 +65,12 @@ export const pingMetaApiFn = createServerFn({ method: "POST" })
 // MetaApi health-check — reads provisioning state + connectionStatus,
 // auto-redeploys when DEPLOYED+DISCONNECTED. Used by the Health tab and cron.
 export const healthCheckMetaApiFn = createServerFn({ method: "POST" })
-  .handler(async () => {
-    const { status, data } = await callEdge("metaapi-health-check", {});
-    const d = (data ?? {}) as any;
+  .inputValidator((input: { force?: boolean } | undefined) =>
+    z.object({ force: z.boolean().optional() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { status, data: resp } = await callEdge("metaapi-health-check", { force: !!data.force });
+    const d = (resp ?? {}) as any;
     if (status >= 500) {
       return { status: "error" as "connected" | "reconnecting" | "error", reason: "health check failed" };
     }
