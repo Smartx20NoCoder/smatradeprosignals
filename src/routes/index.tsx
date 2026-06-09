@@ -1821,7 +1821,7 @@ function BrokerHealthCard() {
 
   async function check() {
     try {
-      const r = await healthCheckMetaApiFn({});
+      const r = await healthCheckMetaApiFn({ data: {} });
       setState({ ...r, checkedAt: Date.now() });
     } catch (e) {
       setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
