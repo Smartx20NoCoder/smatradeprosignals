@@ -1831,10 +1831,7 @@ function BrokerHealthCard() {
   async function forceReconnect() {
     setReconnecting(true);
     try {
-      // The edge function only redeploys when DEPLOYED+DISCONNECTED. To force a
-      // reconnect on demand we just re-run it; if already connected it returns
-      // connected, otherwise it triggers the redeploy.
-      const r = await healthCheckMetaApiFn({});
+      const r = await healthCheckMetaApiFn({ data: { force: true } });
       setState({ ...r, checkedAt: Date.now() });
     } catch (e) {
       setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
