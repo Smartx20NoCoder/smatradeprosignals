@@ -617,6 +617,7 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
     active_td_key: effectiveKey,
     session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
     key1_exhausted_at: key1ExhaustedAt,
+    pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
   };
 }
 
