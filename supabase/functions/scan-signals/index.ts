@@ -143,12 +143,6 @@ function sessionScore(pair: string, dUTC: Date): number {
   if (isGold(pair) && (isLondon || isNY)) return 90;
   if (isGold(pair) && isAsian) return 30;
   if (pair.includes("JPY") && isAsian) return 70;
-  if (pair === "EUR/GBP" && isLondon) return 90;   // EUR/GBP is a London pair
-  if (pair === "EUR/GBP" && isNY) return 60;
-  if (pair === "EUR/GBP" && isAsian) return 20;
-  if (pair.startsWith("AUD") && isAsian) return 85; // AUD pairs peak in Asian session
-  if (pair.startsWith("AUD") && isLondon) return 70;
-  if (pair.startsWith("AUD") && isNY) return 55;
   if (isLondon) return 85;
   if (isNY) return 80;
   if (isAsian) return 25;
