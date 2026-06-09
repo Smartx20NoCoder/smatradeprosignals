@@ -213,10 +213,15 @@ async function fetchCandles(
   let usedApi = 1;
 
   if (r.status === 429) {
-    const msg = `TwelveData 429 — skipping ${pair} this cycle`;
+    const msg = `TwelveData 429 — using stale cache for ${pair}`;
     console.log(msg);
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: msg });
-    throw new Error(msg);
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
+    if (cached) {
+      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+    }
+    // No cache available — skip this pair this cycle
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
+    throw new Error(`429 no cache: ${pair}`);
   }
 
   if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
