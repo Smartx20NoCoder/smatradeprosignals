@@ -21,7 +21,7 @@ const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "5m": 10, "15m": 15, "1h":
 const DEFAULT_CACHE_TTL_MIN = 15;
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 8.2s → safely under 8/min.
-const API_CALL_SPACING_MS = 8200;
+const API_CALL_SPACING_MS = 4500;
 const RATE_LIMIT_RETRY_MS = 60_000;
 const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
