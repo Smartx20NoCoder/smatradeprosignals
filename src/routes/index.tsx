@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
+  healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
   testTradeMetaApiFn,
@@ -1717,6 +1718,8 @@ function HealthPanel({
 
   return (
     <div className="mt-4 space-y-3">
+      <BrokerHealthCard />
+
       <div className="border border-border rounded bg-card p-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Scan Engine Status</div>
@@ -1800,6 +1803,105 @@ function HealthPanel({
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BrokerHealthCard() {
+  const [state, setState] = useState<{
+    status: "connected" | "reconnecting" | "error" | "loading";
+    state?: string;
+    connectionStatus?: string;
+    redeployed?: boolean;
+    reason?: string;
+    checkedAt?: number;
+  }>({ status: "loading" });
+  const [reconnecting, setReconnecting] = useState(false);
+
+  async function check() {
+    try {
+      const r = await healthCheckMetaApiFn({ data: {} });
+      setState({ ...r, checkedAt: Date.now() });
+    } catch (e) {
+      setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
+    }
+  }
+
+  async function forceReconnect() {
+    setReconnecting(true);
+    try {
+      const r = await healthCheckMetaApiFn({ data: { force: true } });
+      setState({ ...r, checkedAt: Date.now() });
+    } catch (e) {
+      setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
+    } finally {
+      setReconnecting(false);
+    }
+  }
+
+  useEffect(() => {
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const s = state.status;
+  const color = s === "connected" ? "var(--bull)"
+    : s === "reconnecting" ? "var(--chart-4)"
+    : s === "loading" ? "var(--muted-foreground)"
+    : "var(--bear)";
+  const label = s === "connected" ? "CONNECTED"
+    : s === "reconnecting" ? "RECONNECTING"
+    : s === "loading" ? "CHECKING…"
+    : "ERROR";
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Broker Connection</div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+          <span className="text-xs font-bold tracking-wider" style={{ color }}>{label}</span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">State</div>
+          <div className="font-semibold">{state.state ?? "—"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Connection</div>
+          <div className="font-semibold">{state.connectionStatus ?? "—"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Check</div>
+          <div className="font-semibold">{state.checkedAt ? `${timeAgo(new Date(state.checkedAt).toISOString())} ago` : "—"}</div>
+        </div>
+      </div>
+      {state.reason && s !== "connected" && (
+        <div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">
+          {state.reason}
+        </div>
+      )}
+      {state.redeployed && (
+        <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+          Redeploy triggered — broker will be back online in ~30s.
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={forceReconnect}
+          disabled={reconnecting}
+          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
+          {reconnecting ? "Reconnecting…" : "Force Reconnect"}
+        </button>
+        <button
+          onClick={check}
+          disabled={reconnecting}
+          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
+          Recheck
+        </button>
       </div>
     </div>
   );
