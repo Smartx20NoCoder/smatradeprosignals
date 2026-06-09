@@ -213,41 +213,17 @@ async function fetchCandles(
   }
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
 
-  const isCron = source === "cron";
-  const maxRetries = isCron ? 0 : MAX_429_RETRIES;
-
-  const tryKey = async (key: string): Promise<{ resp: Response; calls: number }> => {
-    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${key}`;
-    let resp: Response | null = null;
-    let calls = 0;
-    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      resp = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
-      calls += 1;
-      if (resp.status !== 429) break;
-      if (attempt > maxRetries) break;
-      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", attempt, message: `429 on key #${activeKeyRef.idx} — retrying in 60s` });
-      await delay(RATE_LIMIT_RETRY_MS);
-    }
-    return { resp: resp!, calls };
-  };
-
-  // Active key first; if it 429s after retries, fail over to the other key.
+  // No retries within a single execution. On 429, skip the pair entirely.
   const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
-  let { resp: r, calls: usedApi } = await tryKey(primaryKey);
-  if (r.status === 429 && !isCron && keys.secondary && keys.secondary !== primaryKey) {
-    const fallbackIdx: 1 | 2 = activeKeyRef.idx === 1 ? 2 : 1;
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Failing over to key #${fallbackIdx}` });
-    activeKeyRef.idx = fallbackIdx;
-    const fallbackKey = fallbackIdx === 1 ? keys.primary : keys.secondary;
-    const second = await tryKey(fallbackKey);
-    r = second.resp;
-    usedApi += second.calls;
-  }
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
+  const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+  let usedApi = 1;
 
-  // Cron path: on 429, fall back to cached (even if stale) instead of retrying/waiting.
-  if (r.status === 429 && isCron && cached) {
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `429 on cron — using stale cache` });
-    return { candles: cached.candles as Candle[], usedApi, cached: true };
+  if (r.status === 429) {
+    const msg = `TwelveData 429 — skipping ${pair} this cycle`;
+    console.log(msg);
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: msg });
+    throw new Error(msg);
   }
 
   if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
