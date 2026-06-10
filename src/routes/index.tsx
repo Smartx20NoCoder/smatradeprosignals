@@ -1761,6 +1761,10 @@ function HealthPanel({
                 backgroundColor: budgetPct > 85 ? "var(--bear)" : budgetPct > 60 ? "var(--chart-4)" : "var(--bull)",
               }}/>
             </div>
+            <div className="mt-1 text-[9px] text-muted-foreground tracking-wider flex justify-between gap-2">
+              <span>K1 <span className="text-foreground font-semibold">{budgetTodayKey1}</span></span>
+              <span>K2 <span className="text-foreground font-semibold">{budgetTodayKey2}</span></span>
+            </div>
           </div>
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
             <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Interval</div>
