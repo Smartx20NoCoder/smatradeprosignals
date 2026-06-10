@@ -932,19 +932,41 @@ async function runScanJob(
     }
 
     const day = new Date().toISOString().slice(0, 10);
-    // Atomic increment via SQL function — safe under concurrent scan runs.
-    const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
-      p_day: day, p_delta: apiCalls,
-    });
-    let newCalls: number;
-    if (incErr || typeof incRes !== "number") {
-      // Fallback to read-modify-write if RPC unavailable.
-      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
-      newCalls = (usage?.calls ?? 0) + apiCalls;
-      await supabase.from("api_usage").upsert(
-        { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
-    } else {
+    // Atomic per-key increments — safe under concurrent scan runs.
+    let newCalls = 0;
+    const perKey: Array<{ key: 1 | 2; delta: number }> = [
+      { key: 1, delta: apiCallsKey1 },
+      { key: 2, delta: apiCallsKey2 },
+    ];
+    let rpcFailed = false;
+    for (const { key, delta } of perKey) {
+      if (delta <= 0) continue;
+      const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
+        p_day: day, p_delta: delta, p_key: key,
+      });
+      if (incErr || typeof incRes !== "number") {
+        rpcFailed = true;
+        break;
+      }
       newCalls = incRes;
+    }
+    if (rpcFailed) {
+      // Fallback to read-modify-write if RPC unavailable.
+      const { data: usage } = await supabase.from("api_usage")
+        .select("calls, calls_key1, calls_key2").eq("day", day).maybeSingle();
+      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0 };
+      newCalls = (prev.calls ?? 0) + apiCalls;
+      await supabase.from("api_usage").upsert({
+        day,
+        calls: newCalls,
+        calls_key1: (prev.calls_key1 ?? 0) + apiCallsKey1,
+        calls_key2: (prev.calls_key2 ?? 0) + apiCallsKey2,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "day" });
+    } else if (newCalls === 0) {
+      // No API calls made this run — read the current daily total.
+      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
+      newCalls = (usage?.calls as number) ?? 0;
     }
 
     return {
