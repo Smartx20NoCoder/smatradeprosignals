@@ -1049,6 +1049,17 @@ Deno.serve(async (req) => {
         await finalize(skipResult, true);
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+      // 30-minute interval gate: cron fires every 15min at :02/:17/:32/:47.
+      // When interval=30, skip the :17 and :47 runs (minute % 30 in [15,19]).
+      if (settings.scan_interval_minutes === 30) {
+        const m = new Date().getUTCMinutes();
+        const modm = m % 30;
+        if (modm >= 15 && modm <= 19) {
+          const skipResult = { skipped: true, reason: "30min interval", new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+          await finalize(skipResult, true);
+          return new Response(JSON.stringify({ ok: true, skipped: "30min interval" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
       if (!isWithinTradingHours(new Date(), settings)) {
         const skipResult = { skipped: true, reason: `outside active trading window`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
         await finalize(skipResult, true);
