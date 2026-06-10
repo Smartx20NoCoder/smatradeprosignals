@@ -114,6 +114,7 @@ type AppSettings = {
   metaapi_live_configured: boolean;
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
+  scan_interval_minutes: 15 | 30;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
