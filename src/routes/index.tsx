@@ -763,6 +763,7 @@ function ScalpEdge() {
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
             todaysEvents={todaysEvents}
           />
         )}
