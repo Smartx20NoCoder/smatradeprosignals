@@ -1698,7 +1698,7 @@ function RiskExposureWidget({
 
 function HealthPanel({
   scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, lastCron, nextCronAt,
-  appSettings, todaysEvents,
+  appSettings, saveAppSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
   cacheRows: CacheRow[];
@@ -1708,9 +1708,11 @@ function HealthPanel({
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
   appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
   todaysEvents: EconomicEvent[];
 }) {
-  void appSettings; void todaysEvents;
+  void todaysEvents;
+  const scanInterval = appSettings.scan_interval_minutes === 30 ? 30 : 15;
   // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
   const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
   const lastOk = lastCron?.ok ?? false;
