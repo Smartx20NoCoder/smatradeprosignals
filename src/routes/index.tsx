@@ -343,6 +343,7 @@ function ScalpEdge() {
       metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
       metaapi_live_configured: !!cfg.metaapi_live_configured,
       metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
+      scan_interval_minutes: (Number((cfg as any).scan_interval_minutes ?? 15) === 30 ? 30 : 15) as 15 | 30,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
