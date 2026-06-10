@@ -312,7 +312,7 @@ Deno.serve(async (req) => {
         .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, paper_status, metaapi_execution_status")
         .in("paper_status", ["watching", "triggered", "tp1_hit"])
         .gte("created_at", since)
-        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped,metaapi_execution_status.eq.canceled,metaapi_execution_status.eq.closed");
+        .or("metaapi_execution_status.is.null,metaapi_execution_status.eq.none,metaapi_execution_status.eq.failed,metaapi_execution_status.eq.skipped,metaapi_execution_status.eq.canceled");
 
       for (const s of (tracked ?? []) as any[]) {
         try {
@@ -382,9 +382,33 @@ Deno.serve(async (req) => {
       console.error("paper-tracking pass failed", e);
     }
 
+    // Pass 4: backfill paper_status for executed-then-closed signals older than 12h.
+    let paperBackfilled = 0;
+    try {
+      const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const { data: stuck } = await supabase
+        .from("signals")
+        .select("id, status")
+        .eq("metaapi_execution_status", "closed")
+        .in("paper_status", ["watching", "triggered", "tp1_hit"])
+        .lt("created_at", cutoff);
+      for (const r of (stuck ?? []) as any[]) {
+        const st = String(r.status ?? "").toLowerCase();
+        const next = st === "tp1" ? "tp1_hit"
+          : st === "tp2" ? "tp2_hit"
+          : st === "sl" ? "sl_hit"
+          : "expired";
+        await supabase.from("signals").update({ paper_status: next }).eq("id", r.id);
+        paperBackfilled++;
+      }
+      console.log(`[metaapi-sync] paper_status backfill cleaned ${paperBackfilled} rows`);
+    } catch (e) {
+      console.error("paper-status backfill failed", e);
+    }
+
     return new Response(JSON.stringify({
       ok: true, updated, checked: openSignals?.length ?? 0, partials, breakevens, closes, pendingPromoted,
-      paperUpdated, paperExpired,
+      paperUpdated, paperExpired, paperBackfilled,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-sync error", e);
