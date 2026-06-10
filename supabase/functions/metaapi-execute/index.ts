@@ -194,8 +194,10 @@ Deno.serve(async (req) => {
 
     const symbol = pairToSymbol(s.pair, effectiveSuffix);
     let priceRes = await getSymbolPrice({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken, symbol });
-    if (priceRes.ok && (priceRes.bid == null || priceRes.ask == null)) {
-      await new Promise((r) => setTimeout(r, 1500));
+    // Retry on 500 (transient MetaAPI server error) or empty price (stream warm-up)
+    if ((priceRes.ok === false && priceRes.error?.includes("500")) ||
+        (priceRes.ok && (priceRes.bid == null || priceRes.ask == null))) {
+      await new Promise((r) => setTimeout(r, 2000));
       priceRes = await getSymbolPrice({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken, symbol });
     }
     if (!priceRes.ok || !priceRes.bid || !priceRes.ask) {
