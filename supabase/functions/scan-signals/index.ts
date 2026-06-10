@@ -720,6 +720,14 @@ async function runScanJob(
     const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
+    let apiCallsKey1 = 0;
+    let apiCallsKey2 = 0;
+    const accumulateCall = (usedApi: number, usedKey: 1 | 2) => {
+      if (usedApi <= 0) return;
+      apiCalls += usedApi;
+      if (usedKey === 1) apiCallsKey1 += usedApi;
+      else apiCallsKey2 += usedApi;
+    };
     const signals: Signal[] = [];
     const errors: string[] = [];
     const report: Array<{
