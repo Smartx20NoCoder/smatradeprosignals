@@ -207,7 +207,8 @@ async function fetchCandles(
   outputSize: number,
   emit?: ProgressEmitter,
   source: string = "manual",
-): Promise<{ candles: Candle[]; usedApi: number; cached: boolean }> {
+): Promise<{ candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }> {
+  const keyIdx: 1 | 2 = activeKeyRef.idx;
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
@@ -216,13 +217,14 @@ async function fetchCandles(
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
     if (ageMin < ttlMin) {
       emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cached (${ageMin.toFixed(1)}m / ${ttlMin}m TTL)` });
-      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+      return { candles: cached.candles as Candle[], usedApi: 0, usedKey: keyIdx, cached: true };
     }
   }
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
 
   // No retries within a single execution. On 429, skip the pair entirely.
   const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
+  const fetchKey: 1 | 2 = activeKeyRef.idx;
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
   let usedApi = 1;
@@ -233,12 +235,13 @@ async function fetchCandles(
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
       // The HTTP request was sent (and counted by TwelveData), so count it locally too.
-      return { candles: cached.candles as Candle[], usedApi: 1, cached: true };
+      return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
     }
     // No cache available — skip this pair this cycle. Still counts as an API call.
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
     const err = new Error(`429 no cache: ${pair}`);
     (err as any).usedApi = 1;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
 
@@ -246,6 +249,7 @@ async function fetchCandles(
     // No HTTP request was actually completed — do not count.
     const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 0;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
   const j = await r.json().catch(() => ({}));
@@ -255,6 +259,7 @@ async function fetchCandles(
     // HTTP call was sent (non-429) — count it even though the body was unusable.
     const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 1;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
