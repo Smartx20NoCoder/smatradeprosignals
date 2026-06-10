@@ -11,6 +11,7 @@ const corsHeaders = {
 const ALLOWED_KEYS = new Set([
   "paused", "trading_hours_start_utc", "trading_hours_end_utc",
   "active_td_key", "session_config",
+  "scan_interval_minutes",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
@@ -25,7 +26,7 @@ const ALLOWED_KEYS = new Set([
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
@@ -39,6 +40,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if ((k === "trading_hours_start_utc" || k === "trading_hours_end_utc") &&
         (typeof v !== "number" || v < 0 || v > 23 || !Number.isInteger(v))) continue;
     if (k === "active_td_key" && (typeof v !== "number" || ![1, 2].includes(v))) continue;
+    if (k === "scan_interval_minutes" && (typeof v !== "number" || ![15, 30].includes(v))) continue;
     if (k === "session_config" && (typeof v !== "object" || v === null)) continue;
     if (k === "metaapi_account_id" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
     if (k === "metaapi_region" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;

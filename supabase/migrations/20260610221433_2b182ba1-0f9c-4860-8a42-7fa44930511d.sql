@@ -1,0 +1,1 @@
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS scan_interval_minutes integer NOT NULL DEFAULT 15;

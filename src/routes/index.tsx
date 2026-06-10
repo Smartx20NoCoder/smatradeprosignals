@@ -114,6 +114,7 @@ type AppSettings = {
   metaapi_live_configured: boolean;
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
+  scan_interval_minutes: 15 | 30;
 };
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
@@ -252,6 +253,7 @@ function ScalpEdge() {
     metaapi_symbol_suffix_live: "",
     metaapi_live_configured: false,
     metaapi_live_token_configured: false,
+    scan_interval_minutes: 15,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
@@ -341,6 +343,7 @@ function ScalpEdge() {
       metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
       metaapi_live_configured: !!cfg.metaapi_live_configured,
       metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
+      scan_interval_minutes: (Number((cfg as any).scan_interval_minutes ?? 15) === 30 ? 30 : 15) as 15 | 30,
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
@@ -760,6 +763,7 @@ function ScalpEdge() {
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
             todaysEvents={todaysEvents}
           />
         )}
@@ -1694,7 +1698,7 @@ function RiskExposureWidget({
 
 function HealthPanel({
   scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, lastCron, nextCronAt,
-  appSettings, todaysEvents,
+  appSettings, saveAppSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
   cacheRows: CacheRow[];
@@ -1704,9 +1708,11 @@ function HealthPanel({
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
   appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
   todaysEvents: EconomicEvent[];
 }) {
-  void appSettings; void todaysEvents;
+  void todaysEvents;
+  const scanInterval = appSettings.scan_interval_minutes === 30 ? 30 : 15;
   // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
   const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
   const lastOk = lastCron?.ok ?? false;
@@ -1767,8 +1773,23 @@ function HealthPanel({
             </div>
           </div>
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
-            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Interval</div>
-            <div className="font-semibold">{CRON_INTERVAL_MIN}m</div>
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">Scan Interval</div>
+            <div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
+              {([15, 30] as const).map((opt) => {
+                const active = scanInterval === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { if (!active) saveAppSettings({ scan_interval_minutes: opt }); }}
+                    className={`px-2 py-1 transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-secondary/60 text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {opt} min
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">cron base {CRON_INTERVAL_MIN}m</div>
           </div>
         </div>
       </div>

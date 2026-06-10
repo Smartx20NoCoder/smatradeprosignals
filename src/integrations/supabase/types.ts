@@ -67,6 +67,7 @@ export type Database = {
           metaapi_token_live: string | null
           pair_auto_execute: Json
           paused: boolean
+          scan_interval_minutes: number
           session_config: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
@@ -100,6 +101,7 @@ export type Database = {
           metaapi_token_live?: string | null
           pair_auto_execute?: Json
           paused?: boolean
+          scan_interval_minutes?: number
           session_config?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
@@ -133,6 +135,7 @@ export type Database = {
           metaapi_token_live?: string | null
           pair_auto_execute?: Json
           paused?: boolean
+          scan_interval_minutes?: number
           session_config?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
@@ -400,6 +403,7 @@ export type Database = {
           metaapi_token_configured: boolean
           pair_auto_execute: Json
           paused: boolean
+          scan_interval_minutes: number
           session_config: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
