@@ -755,6 +755,8 @@ function ScalpEdge() {
             scanRuns={scanRuns}
             cacheRows={cacheRows}
             budgetToday={budgetToday}
+            budgetTodayKey1={budgetTodayKey1}
+            budgetTodayKey2={budgetTodayKey2}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
