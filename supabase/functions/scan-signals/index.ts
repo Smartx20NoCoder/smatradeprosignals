@@ -232,19 +232,30 @@ async function fetchCandles(
     console.log(msg);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
-      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+      // The HTTP request was sent (and counted by TwelveData), so count it locally too.
+      return { candles: cached.candles as Candle[], usedApi: 1, cached: true };
     }
-    // No cache available — skip this pair this cycle
+    // No cache available — skip this pair this cycle. Still counts as an API call.
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
-    throw new Error(`429 no cache: ${pair}`);
+    const err = new Error(`429 no cache: ${pair}`);
+    (err as any).usedApi = 1;
+    throw err;
   }
 
-  if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+  if (!r) {
+    // No HTTP request was actually completed — do not count.
+    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    (err as any).usedApi = 0;
+    throw err;
+  }
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
     console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
-    throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    // HTTP call was sent (non-429) — count it even though the body was unusable.
+    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    (err as any).usedApi = 1;
+    throw err;
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
@@ -735,6 +746,7 @@ async function runScanJob(
           pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
+          apiCalls += ((e as any)?.usedApi ?? 0);
           console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
           pairData[pair] = null;
           emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
@@ -754,6 +766,7 @@ async function runScanJob(
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
+        apiCalls += ((e as any)?.usedApi ?? 0);
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
@@ -906,10 +919,20 @@ async function runScanJob(
     }
 
     const day = new Date().toISOString().slice(0, 10);
-    const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
-    const newCalls = (usage?.calls ?? 0) + apiCalls;
-    await supabase.from("api_usage").upsert(
-      { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
+    // Atomic increment via SQL function — safe under concurrent scan runs.
+    const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
+      p_day: day, p_delta: apiCalls,
+    });
+    let newCalls: number;
+    if (incErr || typeof incRes !== "number") {
+      // Fallback to read-modify-write if RPC unavailable.
+      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
+      newCalls = (usage?.calls ?? 0) + apiCalls;
+      await supabase.from("api_usage").upsert(
+        { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
+    } else {
+      newCalls = incRes;
+    }
 
     return {
       signals, new_signals: toInsert.length,
