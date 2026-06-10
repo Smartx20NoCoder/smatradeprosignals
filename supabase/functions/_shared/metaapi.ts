@@ -179,13 +179,17 @@ export async function placeOrder(opts: {
     payload.expiration = opts.expiration;
   }
 
+  const headers = { "Content-Type": "application/json", "auth-token": opts.token };
+  const body = JSON.stringify(payload);
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "auth-token": opts.token },
-      body: JSON.stringify(payload),
-    });
-    const text = await res.text();
+    let res = await fetch(url, { method: "POST", headers, body });
+    let text = await res.text();
+    // Retry once on 500 — MetaAPI transient server errors are recoverable
+    if (!res.ok && res.status === 500) {
+      await new Promise((r) => setTimeout(r, 2000));
+      res = await fetch(url, { method: "POST", headers, body });
+      text = await res.text();
+    }
     let data: any = null;
     try { data = JSON.parse(text); } catch { /* */ }
     if (!res.ok) {
