@@ -919,10 +919,20 @@ async function runScanJob(
     }
 
     const day = new Date().toISOString().slice(0, 10);
-    const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
-    const newCalls = (usage?.calls ?? 0) + apiCalls;
-    await supabase.from("api_usage").upsert(
-      { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
+    // Atomic increment via SQL function — safe under concurrent scan runs.
+    const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
+      p_day: day, p_delta: apiCalls,
+    });
+    let newCalls: number;
+    if (incErr || typeof incRes !== "number") {
+      // Fallback to read-modify-write if RPC unavailable.
+      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
+      newCalls = (usage?.calls ?? 0) + apiCalls;
+      await supabase.from("api_usage").upsert(
+        { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
+    } else {
+      newCalls = incRes;
+    }
 
     return {
       signals, new_signals: toInsert.length,
