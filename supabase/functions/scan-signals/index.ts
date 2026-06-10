@@ -286,7 +286,7 @@ async function fetchCandles(
     { onConflict: "pair,timeframe" },
   );
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
-  return { candles: fresh, usedApi, cached: false };
+  return { candles: fresh, usedApi, usedKey: fetchKey, cached: false };
 }
 
 // ---------- Setups ----------
