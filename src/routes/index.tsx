@@ -291,8 +291,11 @@ function ScalpEdge() {
     lastSeenSignalIdsRef.current = new Set(incoming);
     setSignals(next);
     const today = new Date().toISOString().slice(0, 10);
-    const { data: u } = await supabase.from("api_usage").select("calls").eq("day", today).maybeSingle();
-    setBudgetToday((u?.calls as number) ?? 0);
+    const { data: u } = await supabase.from("api_usage")
+      .select("calls, calls_key1, calls_key2").eq("day", today).maybeSingle();
+    setBudgetToday(((u as any)?.calls as number) ?? 0);
+    setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
+    setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
   }
 
   async function loadHealth() {
