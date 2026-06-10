@@ -750,16 +750,16 @@ async function runScanJob(
       // Secondary pairs: silently skip on any fetch failure (429, 500, timeout)
       if (SECONDARY_PAIRS.has(pair)) {
         try {
-          const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+          const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
           for (const tf of tfsToFetch) {
             const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
             fetches.push(f);
-            apiCalls += f.usedApi;
+            accumulateCall(f.usedApi, f.usedKey);
           }
           pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
-          apiCalls += ((e as any)?.usedApi ?? 0);
+          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
           console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
           pairData[pair] = null;
           emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
@@ -768,18 +768,18 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
           const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
           fetches.push(f);
-          apiCalls += f.usedApi;
+          accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
         const c1h = fetches[2].candles;
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
-        apiCalls += ((e as any)?.usedApi ?? 0);
+        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
