@@ -11,7 +11,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fn-secret",
 };
 
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD", "EUR/GBP", "AUD/JPY", "AUD/USD"];
+const PAIRS = [
+  "XAU/USD", "BTC/USD",           // top priority — always scan first
+  "GBP/USD", "GBP/JPY",           // core FX
+  "EUR/USD", "USD/JPY",           // secondary FX
+  "EUR/JPY",                       // tracked only
+  "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
+];
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
