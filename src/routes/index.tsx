@@ -253,6 +253,7 @@ function ScalpEdge() {
     metaapi_symbol_suffix_live: "",
     metaapi_live_configured: false,
     metaapi_live_token_configured: false,
+    scan_interval_minutes: 15,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
