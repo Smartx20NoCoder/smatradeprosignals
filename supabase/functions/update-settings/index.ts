@@ -11,6 +11,7 @@ const corsHeaders = {
 const ALLOWED_KEYS = new Set([
   "paused", "trading_hours_start_utc", "trading_hours_end_utc",
   "active_td_key", "session_config",
+  "scan_interval_minutes",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
