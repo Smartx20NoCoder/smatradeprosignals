@@ -408,7 +408,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       ok: true, updated, checked: openSignals?.length ?? 0, partials, breakevens, closes, pendingPromoted,
-      paperUpdated, paperExpired,
+      paperUpdated, paperExpired, paperBackfilled,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-sync error", e);
