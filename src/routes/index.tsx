@@ -212,6 +212,8 @@ function ScalpEdge() {
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [budgetToday, setBudgetToday] = useState(0);
+  const [budgetTodayKey1, setBudgetTodayKey1] = useState(0);
+  const [budgetTodayKey2, setBudgetTodayKey2] = useState(0);
   const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
   const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
@@ -289,8 +291,11 @@ function ScalpEdge() {
     lastSeenSignalIdsRef.current = new Set(incoming);
     setSignals(next);
     const today = new Date().toISOString().slice(0, 10);
-    const { data: u } = await supabase.from("api_usage").select("calls").eq("day", today).maybeSingle();
-    setBudgetToday((u?.calls as number) ?? 0);
+    const { data: u } = await supabase.from("api_usage")
+      .select("calls, calls_key1, calls_key2").eq("day", today).maybeSingle();
+    setBudgetToday(((u as any)?.calls as number) ?? 0);
+    setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
+    setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
   }
 
   async function loadHealth() {
@@ -750,6 +755,8 @@ function ScalpEdge() {
             scanRuns={scanRuns}
             cacheRows={cacheRows}
             budgetToday={budgetToday}
+            budgetTodayKey1={budgetTodayKey1}
+            budgetTodayKey2={budgetTodayKey2}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
@@ -1686,12 +1693,14 @@ function RiskExposureWidget({
 }
 
 function HealthPanel({
-  scanRuns, cacheRows, budgetToday, lastCron, nextCronAt,
+  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, lastCron, nextCronAt,
   appSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
   cacheRows: CacheRow[];
   budgetToday: number;
+  budgetTodayKey1: number;
+  budgetTodayKey2: number;
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
   appSettings: AppSettings;
@@ -1751,6 +1760,10 @@ function HealthPanel({
                 width: `${budgetPct}%`,
                 backgroundColor: budgetPct > 85 ? "var(--bear)" : budgetPct > 60 ? "var(--chart-4)" : "var(--bull)",
               }}/>
+            </div>
+            <div className="mt-1 text-[9px] text-muted-foreground tracking-wider flex justify-between gap-2">
+              <span>K1 <span className="text-foreground font-semibold">{budgetTodayKey1}</span></span>
+              <span>K2 <span className="text-foreground font-semibold">{budgetTodayKey2}</span></span>
             </div>
           </div>
           <div className="bg-secondary/40 px-2 py-1.5 rounded">

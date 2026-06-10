@@ -207,7 +207,8 @@ async function fetchCandles(
   outputSize: number,
   emit?: ProgressEmitter,
   source: string = "manual",
-): Promise<{ candles: Candle[]; usedApi: number; cached: boolean }> {
+): Promise<{ candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }> {
+  const keyIdx: 1 | 2 = activeKeyRef.idx;
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
@@ -216,13 +217,14 @@ async function fetchCandles(
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
     if (ageMin < ttlMin) {
       emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cached (${ageMin.toFixed(1)}m / ${ttlMin}m TTL)` });
-      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+      return { candles: cached.candles as Candle[], usedApi: 0, usedKey: keyIdx, cached: true };
     }
   }
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
 
   // No retries within a single execution. On 429, skip the pair entirely.
   const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
+  const fetchKey: 1 | 2 = activeKeyRef.idx;
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
   let usedApi = 1;
@@ -233,12 +235,13 @@ async function fetchCandles(
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
       // The HTTP request was sent (and counted by TwelveData), so count it locally too.
-      return { candles: cached.candles as Candle[], usedApi: 1, cached: true };
+      return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
     }
     // No cache available — skip this pair this cycle. Still counts as an API call.
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
     const err = new Error(`429 no cache: ${pair}`);
     (err as any).usedApi = 1;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
 
@@ -246,6 +249,7 @@ async function fetchCandles(
     // No HTTP request was actually completed — do not count.
     const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 0;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
   const j = await r.json().catch(() => ({}));
@@ -255,6 +259,7 @@ async function fetchCandles(
     // HTTP call was sent (non-429) — count it even though the body was unusable.
     const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 1;
+    (err as any).usedKey = fetchKey;
     throw err;
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
@@ -281,7 +286,7 @@ async function fetchCandles(
     { onConflict: "pair,timeframe" },
   );
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
-  return { candles: fresh, usedApi, cached: false };
+  return { candles: fresh, usedApi, usedKey: fetchKey, cached: false };
 }
 
 // ---------- Setups ----------
@@ -715,6 +720,14 @@ async function runScanJob(
     const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
+    let apiCallsKey1 = 0;
+    let apiCallsKey2 = 0;
+    const accumulateCall = (usedApi: number, usedKey: 1 | 2) => {
+      if (usedApi <= 0) return;
+      apiCalls += usedApi;
+      if (usedKey === 1) apiCallsKey1 += usedApi;
+      else apiCallsKey2 += usedApi;
+    };
     const signals: Signal[] = [];
     const errors: string[] = [];
     const report: Array<{
@@ -737,16 +750,16 @@ async function runScanJob(
       // Secondary pairs: silently skip on any fetch failure (429, 500, timeout)
       if (SECONDARY_PAIRS.has(pair)) {
         try {
-          const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+          const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
           for (const tf of tfsToFetch) {
             const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
             fetches.push(f);
-            apiCalls += f.usedApi;
+            accumulateCall(f.usedApi, f.usedKey);
           }
           pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
-          apiCalls += ((e as any)?.usedApi ?? 0);
+          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
           console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
           pairData[pair] = null;
           emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
@@ -755,18 +768,18 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
           const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
           fetches.push(f);
-          apiCalls += f.usedApi;
+          accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
         const c1h = fetches[2].candles;
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
-        apiCalls += ((e as any)?.usedApi ?? 0);
+        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
@@ -919,19 +932,41 @@ async function runScanJob(
     }
 
     const day = new Date().toISOString().slice(0, 10);
-    // Atomic increment via SQL function — safe under concurrent scan runs.
-    const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
-      p_day: day, p_delta: apiCalls,
-    });
-    let newCalls: number;
-    if (incErr || typeof incRes !== "number") {
-      // Fallback to read-modify-write if RPC unavailable.
-      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
-      newCalls = (usage?.calls ?? 0) + apiCalls;
-      await supabase.from("api_usage").upsert(
-        { day, calls: newCalls, updated_at: new Date().toISOString() }, { onConflict: "day" });
-    } else {
+    // Atomic per-key increments — safe under concurrent scan runs.
+    let newCalls = 0;
+    const perKey: Array<{ key: 1 | 2; delta: number }> = [
+      { key: 1, delta: apiCallsKey1 },
+      { key: 2, delta: apiCallsKey2 },
+    ];
+    let rpcFailed = false;
+    for (const { key, delta } of perKey) {
+      if (delta <= 0) continue;
+      const { data: incRes, error: incErr } = await supabase.rpc("increment_api_usage", {
+        p_day: day, p_delta: delta, p_key: key,
+      });
+      if (incErr || typeof incRes !== "number") {
+        rpcFailed = true;
+        break;
+      }
       newCalls = incRes;
+    }
+    if (rpcFailed) {
+      // Fallback to read-modify-write if RPC unavailable.
+      const { data: usage } = await supabase.from("api_usage")
+        .select("calls, calls_key1, calls_key2").eq("day", day).maybeSingle();
+      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0 };
+      newCalls = (prev.calls ?? 0) + apiCalls;
+      await supabase.from("api_usage").upsert({
+        day,
+        calls: newCalls,
+        calls_key1: (prev.calls_key1 ?? 0) + apiCallsKey1,
+        calls_key2: (prev.calls_key2 ?? 0) + apiCallsKey2,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "day" });
+    } else if (newCalls === 0) {
+      // No API calls made this run — read the current daily total.
+      const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
+      newCalls = (usage?.calls as number) ?? 0;
     }
 
     return {
