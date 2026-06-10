@@ -681,7 +681,7 @@ async function runScanJob(
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
-    const enabledPairs = PAIRS.filter((p) => CORE_PAIRS.has(p) || autoCfg[p] !== false);
+    const enabledPairs = PAIRS.filter((p) => CORE_PAIRS.has(p) || SECONDARY_PAIRS.has(p) || autoCfg[p] !== false);
     const allowedPairs = enabledPairs.filter((p) => isPairAllowedNow(p, nowDate));
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
@@ -712,6 +712,26 @@ async function runScanJob(
     // Sequential pair loop; each pair+timeframe fetch is independently throttled.
     for (const pair of allowedPairs) {
       emit?.({ type: "pair_start", pair, status: "pending", message: `Analyzing ${pair}` });
+
+      // Secondary pairs: silently skip on any fetch failure (429, 500, timeout)
+      if (SECONDARY_PAIRS.has(pair)) {
+        try {
+          const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
+          for (const tf of tfsToFetch) {
+            const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
+            fetches.push(f);
+            apiCalls += f.usedApi;
+          }
+          pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
+          emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
+        } catch (e) {
+          console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
+          pairData[pair] = null;
+          emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
+        }
+        continue;
+      }
+
       try {
         const fetches: { candles: Candle[]; usedApi: number; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
