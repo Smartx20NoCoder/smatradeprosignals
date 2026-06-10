@@ -1763,26 +1763,38 @@ function HealthPanel({
       <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Per-Pair Cache Freshness</div>
         <div className="space-y-1 text-xs font-mono">
-          {PAIRS.map((p) => (
-            <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
-              <span className="font-bold w-20">{p}</span>
-              {(["5m", "15m", "1h"] as const).map((tf) => {
-                const at = cacheByPair[p]?.[tf];
-                const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
-                const ttl = tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
-                const fresh = ageMin !== null && ageMin < ttl;
-                return (
-                  <span key={tf} className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
-                    <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
-                      {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+          {(() => {
+            const visiblePairs = PAIRS.filter((p) => {
+              const at = cacheByPair[p]?.["5m"];
+              if (!at) return false;
+              const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
+              return ageMin < 120;
+            });
+            if (visiblePairs.length === 0) {
+              return <div className="text-muted-foreground">No pairs scanned in the last 2 hours.</div>;
+            }
+            return visiblePairs.map((p) => (
+              <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+                <span className="font-bold w-20">{p}</span>
+                {(["5m", "15m", "1h"] as const).map((tf) => {
+                  const at = cacheByPair[p]?.[tf];
+                  const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
+                  const ttl = tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
+                  const fresh = ageMin !== null && ageMin < ttl;
+                  return (
+                    <span key={tf} className="flex items-center gap-1">
+                      <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
+                      <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
+                        {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+                      </span>
                     </span>
-                  </span>
-                );
-              })}
-            </div>
-          ))}
+                  );
+                })}
+              </div>
+            ));
+          })()}
         </div>
+        <div className="text-[10px] text-muted-foreground mt-2">Pairs not scanned in the last 2 hours are hidden.</div>
       </div>
 
       <div className="border border-border rounded bg-card p-4">

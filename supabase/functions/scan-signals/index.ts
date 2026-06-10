@@ -11,7 +11,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-fn-secret",
 };
 
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD", "EUR/GBP", "AUD/JPY", "AUD/USD"];
+const PAIRS = [
+  "XAU/USD", "BTC/USD",           // top priority — always scan first
+  "GBP/USD", "GBP/JPY",           // core FX
+  "EUR/USD", "USD/JPY",           // secondary FX
+  "EUR/JPY",                       // tracked only
+  "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
+];
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -681,8 +687,10 @@ async function runScanJob(
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
-    const enabledPairs = PAIRS.filter((p) => CORE_PAIRS.has(p) || SECONDARY_PAIRS.has(p) || autoCfg[p] !== false);
-    const allowedPairs = enabledPairs.filter((p) => isPairAllowedNow(p, nowDate));
+    // Scan ALL pairs regardless of pair_auto_execute — that flag only gates
+    // whether metaapi-execute is called below. Signals are still generated
+    // and paper-tracked for disabled pairs.
+    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
     // Load today's high-impact news once.
@@ -873,6 +881,7 @@ async function runScanJob(
         const baseUrl = Deno.env.get("SUPABASE_URL")!;
         for (const row of insertedRows) {
           if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
+          if (autoCfg[row.pair] === false) continue; // pair disabled for auto-execute
           // Fire-and-forget — don't block the scan.
           // Send both auth headers so checkInternalAuth passes regardless of which
           // it validates against (x-fn-secret OR Bearer service-role).
