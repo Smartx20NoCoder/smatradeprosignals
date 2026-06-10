@@ -25,6 +25,26 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    // Diagnostic: log MetaApi execution failure breakdown (last 48h).
+    try {
+      const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const { data: failedRows } = await supabase
+        .from("signals")
+        .select("metaapi_execution_error")
+        .eq("metaapi_execution_status", "failed")
+        .gte("created_at", since48h);
+      const breakdown: Record<string, number> = {};
+      for (const r of (failedRows ?? []) as any[]) {
+        const key = String(r.metaapi_execution_error ?? "(null)").slice(0, 200);
+        breakdown[key] = (breakdown[key] ?? 0) + 1;
+      }
+      const sorted = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+      console.log("[metaapi-sync] failed-execution breakdown (48h):", JSON.stringify(sorted));
+    } catch (e) {
+      console.error("[metaapi-sync] failure breakdown query error", e);
+    }
+
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
     const c: any = cfg ?? {};
