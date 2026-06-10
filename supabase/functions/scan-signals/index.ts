@@ -594,6 +594,7 @@ type ActiveSettings = {
   session_config: SessionConfig;
   key1_exhausted_at: string | null;
   pair_auto_execute: Record<string, boolean>;
+  scan_interval_minutes: number;
 };
 
 // Core pairs always scanned regardless of pair_auto_execute setting.
