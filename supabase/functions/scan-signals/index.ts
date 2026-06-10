@@ -766,6 +766,7 @@ async function runScanJob(
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
+        apiCalls += ((e as any)?.usedApi ?? 0);
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
