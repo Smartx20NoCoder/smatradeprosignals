@@ -400,6 +400,10 @@ export type Database = {
           updated_at: string
         }[]
       }
+      increment_api_usage: {
+        Args: { p_day: string; p_delta: number }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never
