@@ -40,6 +40,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if ((k === "trading_hours_start_utc" || k === "trading_hours_end_utc") &&
         (typeof v !== "number" || v < 0 || v > 23 || !Number.isInteger(v))) continue;
     if (k === "active_td_key" && (typeof v !== "number" || ![1, 2].includes(v))) continue;
+    if (k === "scan_interval_minutes" && (typeof v !== "number" || ![15, 30].includes(v))) continue;
     if (k === "session_config" && (typeof v !== "object" || v === null)) continue;
     if (k === "metaapi_account_id" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
     if (k === "metaapi_region" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
