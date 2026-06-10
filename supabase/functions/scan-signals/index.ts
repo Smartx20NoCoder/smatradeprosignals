@@ -631,11 +631,15 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
       // Key 1 was rate-limited today — start directly on Key 2.
       effectiveKey = 2;
     } else {
-      // Prior UTC day — clear the flag so Key 1 is tried again today.
+      // Prior UTC day — clear the flag AND reset active_td_key back to 1
+      // so Key 1 is brought back into rotation each UTC day.
       key1ExhaustedAt = null;
+      effectiveKey = 1;
       try {
         await supabase.from("app_settings").update({
-          key1_exhausted_at: null, updated_at: new Date().toISOString(),
+          key1_exhausted_at: null,
+          active_td_key: 1,
+          updated_at: new Date().toISOString(),
         }).eq("id", "singleton");
       } catch (_) { /* ignore */ }
     }
