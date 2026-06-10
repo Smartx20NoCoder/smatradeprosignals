@@ -232,19 +232,30 @@ async function fetchCandles(
     console.log(msg);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
-      return { candles: cached.candles as Candle[], usedApi: 0, cached: true };
+      // The HTTP request was sent (and counted by TwelveData), so count it locally too.
+      return { candles: cached.candles as Candle[], usedApi: 1, cached: true };
     }
-    // No cache available — skip this pair this cycle
+    // No cache available — skip this pair this cycle. Still counts as an API call.
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
-    throw new Error(`429 no cache: ${pair}`);
+    const err = new Error(`429 no cache: ${pair}`);
+    (err as any).usedApi = 1;
+    throw err;
   }
 
-  if (!r) throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+  if (!r) {
+    // No HTTP request was actually completed — do not count.
+    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    (err as any).usedApi = 0;
+    throw err;
+  }
   const j = await r.json().catch(() => ({}));
   if (!j.values || !Array.isArray(j.values)) {
     console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
-    throw new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    // HTTP call was sent (non-429) — count it even though the body was unusable.
+    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    (err as any).usedApi = 1;
+    throw err;
   }
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
