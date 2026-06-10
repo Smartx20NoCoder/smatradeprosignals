@@ -1773,8 +1773,23 @@ function HealthPanel({
             </div>
           </div>
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
-            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Interval</div>
-            <div className="font-semibold">{CRON_INTERVAL_MIN}m</div>
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">Scan Interval</div>
+            <div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
+              {([15, 30] as const).map((opt) => {
+                const active = scanInterval === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { if (!active) saveAppSettings({ scan_interval_minutes: opt }); }}
+                    className={`px-2 py-1 transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-secondary/60 text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {opt} min
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">cron base {CRON_INTERVAL_MIN}m</div>
           </div>
         </div>
       </div>
