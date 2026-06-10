@@ -18,6 +18,8 @@ const PAIRS = [
   "EUR/JPY",                       // tracked only
   "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
 ];
+// Disabled setups — kept in code but filtered out of signal generation.
+const DISABLED_SETUPS = new Set(["OB+FVG", "Order Block", "CHOCH"]);
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -800,6 +802,10 @@ async function runScanJob(
       const hits = blackoutHits(events, ccys, nowDate);
       for (const [name, raw] of setups) {
         if (!raw) { pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" }); continue; }
+        if (DISABLED_SETUPS.has(raw.setup)) {
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
+          continue;
+        }
         if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
