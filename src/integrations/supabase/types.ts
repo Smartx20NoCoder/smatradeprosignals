@@ -17,16 +17,22 @@ export type Database = {
       api_usage: {
         Row: {
           calls: number
+          calls_key1: number
+          calls_key2: number
           day: string
           updated_at: string
         }
         Insert: {
           calls?: number
+          calls_key1?: number
+          calls_key2?: number
           day: string
           updated_at?: string
         }
         Update: {
           calls?: number
+          calls_key1?: number
+          calls_key2?: number
           day?: string
           updated_at?: string
         }
@@ -400,10 +406,12 @@ export type Database = {
           updated_at: string
         }[]
       }
-      increment_api_usage: {
-        Args: { p_day: string; p_delta: number }
-        Returns: number
-      }
+      increment_api_usage:
+        | { Args: { p_day: string; p_delta: number }; Returns: number }
+        | {
+            Args: { p_day: string; p_delta: number; p_key?: number }
+            Returns: number
+          }
     }
     Enums: {
       [_ in never]: never
