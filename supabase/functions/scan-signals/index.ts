@@ -881,6 +881,7 @@ async function runScanJob(
         const baseUrl = Deno.env.get("SUPABASE_URL")!;
         for (const row of insertedRows) {
           if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
+          if (autoCfg[row.pair] === false) continue; // pair disabled for auto-execute
           // Fire-and-forget — don't block the scan.
           // Send both auth headers so checkInternalAuth passes regardless of which
           // it validates against (x-fn-secret OR Bearer service-role).
