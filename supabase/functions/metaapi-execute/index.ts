@@ -30,24 +30,6 @@ async function markFailed(supabase: any, signalId: string, error: string) {
   }).eq("id", signalId);
 }
 
-function pickAction(
-  direction: "Long" | "Short",
-  entry: number,
-  bid: number,
-  ask: number,
-): { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" } {
-  const mid = (bid + ask) / 2 || entry;
-  const tol = Math.max(mid * 0.0003, 0.0001);
-  if (direction === "Long") {
-    if (entry > ask + tol) return { action: "ORDER_TYPE_BUY_STOP", openPrice: entry, kind: "stop" };
-    if (entry < bid - tol) return { action: "ORDER_TYPE_BUY_LIMIT", openPrice: entry, kind: "limit" };
-    return { action: "ORDER_TYPE_BUY", kind: "market" };
-  } else {
-    if (entry < bid - tol) return { action: "ORDER_TYPE_SELL_STOP", openPrice: entry, kind: "stop" };
-    if (entry > ask + tol) return { action: "ORDER_TYPE_SELL_LIMIT", openPrice: entry, kind: "limit" };
-    return { action: "ORDER_TYPE_SELL", kind: "market" };
-  }
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -212,15 +194,20 @@ Deno.serve(async (req) => {
     }
 
     const entry = Number(s.entry);
-    const picked = pickAction(s.direction, entry, priceRes.bid, priceRes.ask);
+    const orderType = (s as any).order_type as string | undefined;
+    const orderTypeMap: Record<string, { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" }> = {
+      "Buy Limit":   { action: "ORDER_TYPE_BUY_LIMIT",  openPrice: entry, kind: "limit" },
+      "Buy Stop":    { action: "ORDER_TYPE_BUY_STOP",   openPrice: entry, kind: "stop" },
+      "Buy Market":  { action: "ORDER_TYPE_BUY",        openPrice: undefined, kind: "market" },
+      "Sell Limit":  { action: "ORDER_TYPE_SELL_LIMIT", openPrice: entry, kind: "limit" },
+      "Sell Stop":   { action: "ORDER_TYPE_SELL_STOP",  openPrice: entry, kind: "stop" },
+      "Sell Market": { action: "ORDER_TYPE_SELL",       openPrice: undefined, kind: "market" },
+    };
+    const picked = orderType && orderTypeMap[orderType]
+      ? orderTypeMap[orderType]
+      : (() => { throw new Error(`Unknown or missing order_type: "${orderType}"`); })();
 
-    const spreadBuffer = Math.abs(Number(priceRes.ask) - Number(priceRes.bid)) * 2;
-    const isMarket = picked.kind === "market";
-    const orderBStopLoss = isMarket
-      ? (picked.action === "ORDER_TYPE_SELL"
-          ? Number(s.entry) + spreadBuffer
-          : Number(s.entry) - spreadBuffer)
-      : Number(s.stop_loss);
+    const orderBStopLoss = Number(s.stop_loss);
 
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
     const slDistance = Math.abs(mid - Number(s.stop_loss));
