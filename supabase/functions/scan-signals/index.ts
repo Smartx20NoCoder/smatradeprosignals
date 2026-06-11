@@ -329,8 +329,9 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const e21 = ema(c15.map(x => x.c), 21).at(-1)!;
   const e50 = ema(c15.map(x => x.c), 50).at(-1)!;
   const a = atr(c5); if (a === 0) return null;
-  const lookback = c5.slice(-23, -3); if (lookback.length < 10) return null;
-  const sh = Math.max(...lookback.map(x => x.h)), sl = Math.min(...lookback.map(x => x.l));
+  // Structure levels from last 20 closed 15m candles (~5h), excluding the current forming bar.
+  const structure = c15.slice(-21, -1); if (structure.length < 20) return null;
+  const sh = Math.max(...structure.map(x => x.h)), sl = Math.min(...structure.map(x => x.l));
   const recent = c5.slice(-3), last = c5.at(-1)!;
   const ct = new Date(last.t).toISOString();
   if (e21 > e50 && recent.some(x => x.c > sh)) {
