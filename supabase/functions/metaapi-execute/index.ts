@@ -193,19 +193,23 @@ Deno.serve(async (req) => {
       });
     }
 
-    const entry = Number(s.entry);
-    const orderType = (s as any).order_type as string | undefined;
     const orderTypeMap: Record<string, { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" }> = {
-      "Buy Limit":   { action: "ORDER_TYPE_BUY_LIMIT",  openPrice: entry, kind: "limit" },
-      "Buy Stop":    { action: "ORDER_TYPE_BUY_STOP",   openPrice: entry, kind: "stop" },
-      "Buy Market":  { action: "ORDER_TYPE_BUY",        openPrice: undefined, kind: "market" },
-      "Sell Limit":  { action: "ORDER_TYPE_SELL_LIMIT", openPrice: entry, kind: "limit" },
-      "Sell Stop":   { action: "ORDER_TYPE_SELL_STOP",  openPrice: entry, kind: "stop" },
-      "Sell Market": { action: "ORDER_TYPE_SELL",       openPrice: undefined, kind: "market" },
+      "Buy Limit":  { action: "ORDER_TYPE_BUY_LIMIT",  openPrice: Number(s.entry), kind: "limit" },
+      "Buy Stop":   { action: "ORDER_TYPE_BUY_STOP",   openPrice: Number(s.entry), kind: "stop" },
+      "Buy Market": { action: "ORDER_TYPE_BUY",        openPrice: undefined,        kind: "market" },
+      "Sell Limit": { action: "ORDER_TYPE_SELL_LIMIT", openPrice: Number(s.entry), kind: "limit" },
+      "Sell Stop":  { action: "ORDER_TYPE_SELL_STOP",  openPrice: Number(s.entry), kind: "stop" },
+      "Sell Market":{ action: "ORDER_TYPE_SELL",       openPrice: undefined,        kind: "market" },
     };
-    const picked = orderType && orderTypeMap[orderType]
-      ? orderTypeMap[orderType]
-      : (() => { throw new Error(`Unknown or missing order_type: "${orderType}"`); })();
+    const orderTypeKey = String(s.order_type ?? "");
+    const picked = orderTypeMap[orderTypeKey];
+    if (!picked) {
+      const msg = `Unknown order_type: "${orderTypeKey}" — cannot execute`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const orderBStopLoss = Number(s.stop_loss);
 
