@@ -354,14 +354,15 @@ function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
   if (c5.length < 30) return null;
   const a = atr(c5); if (a === 0) return null;
   const now = new Date(), hUTC = now.getUTCHours();
-  let rs: number | null = null;
-  if (hUTC >= 8 && hUTC < 11) rs = 7;
-  else if (hUTC >= 14 && hUTC < 17) rs = 13;
-  if (rs === null) return null;
+  // 30-minute session range windows: London 07:00–07:30 UTC, NY 13:30–14:00 UTC.
+  let rStartMin: number | null = null;
+  if (hUTC >= 8 && hUTC < 11) rStartMin = 7 * 60;            // London: 07:00–07:30
+  else if (hUTC >= 14 && hUTC < 17) rStartMin = 13 * 60 + 30; // NY: 13:30–14:00
+  if (rStartMin === null) return null;
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const rStart = today.getTime() + rs * 3600_000, rEnd = rStart + 3600_000;
+  const rStart = today.getTime() + rStartMin * 60_000, rEnd = rStart + 30 * 60_000;
   const range = c5.filter(x => x.t >= rStart && x.t < rEnd);
-  if (range.length < 6) return null;
+  if (range.length < 4) return null;
   const rh = Math.max(...range.map(x => x.h)), rl = Math.min(...range.map(x => x.l));
   if (rh - rl > a * 3) return null;
   const after = c5.filter(x => x.t >= rEnd); if (!after.length) return null;
