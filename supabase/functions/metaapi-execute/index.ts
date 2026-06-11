@@ -30,24 +30,6 @@ async function markFailed(supabase: any, signalId: string, error: string) {
   }).eq("id", signalId);
 }
 
-function pickAction(
-  direction: "Long" | "Short",
-  entry: number,
-  bid: number,
-  ask: number,
-): { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" } {
-  const mid = (bid + ask) / 2 || entry;
-  const tol = Math.max(mid * 0.0003, 0.0001);
-  if (direction === "Long") {
-    if (entry > ask + tol) return { action: "ORDER_TYPE_BUY_STOP", openPrice: entry, kind: "stop" };
-    if (entry < bid - tol) return { action: "ORDER_TYPE_BUY_LIMIT", openPrice: entry, kind: "limit" };
-    return { action: "ORDER_TYPE_BUY", kind: "market" };
-  } else {
-    if (entry < bid - tol) return { action: "ORDER_TYPE_SELL_STOP", openPrice: entry, kind: "stop" };
-    if (entry > ask + tol) return { action: "ORDER_TYPE_SELL_LIMIT", openPrice: entry, kind: "limit" };
-    return { action: "ORDER_TYPE_SELL", kind: "market" };
-  }
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
