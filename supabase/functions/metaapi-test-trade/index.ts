@@ -106,12 +106,13 @@ Deno.serve(async (req) => {
     const bid = price.bid;
     const ask = price.ask;
     const spread = ask - bid;
-    const sl = +(bid - spread * 5).toFixed(5);
-    const tp = +(ask + spread * 10).toFixed(5);
+    const sl = +(bid - Math.max(spread * 2, 30)).toFixed(2);
+    const tp = +(ask + Math.max(spread * 4, 60)).toFixed(2);
+    const volume = 0.1; // RoboForex ProCent minimum lot
     const order = await placeOrder({
       region: acctRegion, accountId, token,
       actionType: "ORDER_TYPE_BUY",
-      symbol, volume: 0.01,
+      symbol, volume,
       stopLoss: sl, takeProfit: tp,
       comment: "scalpedge-test",
     });
