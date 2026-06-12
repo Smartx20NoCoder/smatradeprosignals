@@ -546,6 +546,23 @@ function qualifyAndScore(
   };
 }
 
+function formatDistance(pair: string, entry: number, level: number, isAbove: boolean): string {
+  const raw = Math.abs(level - entry);
+  const sym = pair.toUpperCase();
+  let display: string;
+  if (sym.includes("XAU") || sym.includes("XAG")) {
+    display = `${raw.toFixed(2)}pts`;
+  } else if (sym.includes("BTC") || sym.includes("ETH")) {
+    display = `$${raw.toFixed(0)}`;
+  } else if (sym.includes("JPY")) {
+    display = `${(raw * 100).toFixed(1)}pips`;
+  } else {
+    display = `${(raw * 10000).toFixed(1)}pips`;
+  }
+  const dir = isAbove ? "↑" : "↓";
+  return `${dir}${display}`;
+}
+
 async function sendTelegramAlerts(signals: Signal[]) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -562,12 +579,16 @@ async function sendTelegramAlerts(signals: Signal[]) {
       if (s.pair === "BTC/USD") return n.toFixed(1);
       return n.toFixed(s.pair.includes("JPY") ? 3 : 5);
     };
+    const isLong = s.direction === "Long";
+    const slDist = formatDistance(s.pair, s.entry, s.stop_loss, !isLong);
+    const tp1Dist = formatDistance(s.pair, s.entry, s.tp1, isLong);
+    const tp2Dist = formatDistance(s.pair, s.entry, s.tp2, isLong);
     const text =
       `${arrow}  *${s.pair}*  (${s.timeframe})\n` +
       `Order: *${s.order_type ?? ""}*\n` +
-      `Entry: \`${fmt(s.entry)}\`\n` +
-      `SL: \`${fmt(s.stop_loss)}\`\n` +
-      `TP1: \`${fmt(s.tp1)}\`   TP2: \`${fmt(s.tp2)}\`\n` +
+      `📍 Entry: \`${fmt(s.entry)}\`\n` +
+      `🛑 SL: \`${fmt(s.stop_loss)}\` [${slDist}]\n` +
+      `🎯 TP1: \`${fmt(s.tp1)}\` [${tp1Dist}]   🏆 TP2: \`${fmt(s.tp2)}\` [${tp2Dist}]\n` +
       `R:R 1:${s.rr.toFixed(2)}  ·  Conf *${s.confidence}%*\n` +
       `Setup: ${s.setup}\n` +
       `Session: ${session}` +
