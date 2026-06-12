@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
+  checkSymbolsMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
   testTradeMetaApiFn,
   updateAppSettingsFn,
 } from "@/lib/api.functions";
+
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
