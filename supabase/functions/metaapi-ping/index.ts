@@ -49,6 +49,12 @@ Deno.serve(async (req) => {
     await supabase.from("app_settings")
       .update({ metaapi_connected_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", "singleton");
+    if (info.ok && (info as any).data?.balance != null) {
+      await supabase.from("app_settings").update({
+        metaapi_last_balance: Number((info as any).data.balance),
+        metaapi_last_balance_at: new Date().toISOString(),
+      }).eq("id", "singleton");
+    }
     return new Response(JSON.stringify({ ok: true, account: info.data }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
