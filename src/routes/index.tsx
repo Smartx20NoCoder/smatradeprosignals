@@ -1675,6 +1675,33 @@ function MetaApiPanel({
             </div>
           </div>
         )}
+
+        {symbolsResult && (
+          <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-2 text-xs">
+            {!symbolsResult.ok ? (
+              <div className="text-bear">❌ {symbolsResult.reason ?? "symbols check failed"}</div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-bull font-bold">✅ Found:</span>{" "}
+                  <span className="font-mono break-all">
+                    {symbolsResult.found.length > 0 ? symbolsResult.found.join(", ") : "(none)"}
+                  </span>
+                </div>
+                {symbolsResult.notFound.length > 0 && (
+                  <div>
+                    <span className="text-chart-4 font-bold">⚠️ Not found:</span>{" "}
+                    <span className="font-mono break-all">{symbolsResult.notFound.join(", ")}</span>
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border">
+                  Use the exact suffix shown above in your Broker Symbol Suffix field. Broker exposes {symbolsResult.count} symbols total.
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );
