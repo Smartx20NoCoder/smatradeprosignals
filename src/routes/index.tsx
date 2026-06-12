@@ -1261,6 +1261,8 @@ function MetaApiPanel({
   const [status, setStatus] = useState<{ ok: boolean; reason?: string; account?: any } | null>(null);
   const [testing, setTesting] = useState(false);
   const [testTrading, setTestTrading] = useState(false);
+  const [testTradePair, setTestTradePair] = useState("BTC/USD");
+
   const [testTradeResult, setTestTradeResult] = useState<{
     ok: boolean;
     steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
