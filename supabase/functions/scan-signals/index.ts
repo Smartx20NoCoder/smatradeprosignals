@@ -553,14 +553,13 @@ function formatDistance(pair: string, entry: number, level: number, isAbove: boo
   if (sym.includes("XAU") || sym.includes("XAG")) {
     display = `${raw.toFixed(2)}pts`;
   } else if (sym.includes("BTC") || sym.includes("ETH")) {
-    display = `$${raw.toFixed(1)}`;
+    display = `${raw.toFixed(1)}`;
   } else if (sym.includes("JPY")) {
     display = `${(raw * 100).toFixed(1)}pips`;
   } else {
     display = `${(raw * 10000).toFixed(1)}pips`;
   }
-  const dir = isAbove ? "↑" : "↓";
-  return `${dir}${display}`;
+  return `(${display})`;
 }
 
 function estimateLot(
