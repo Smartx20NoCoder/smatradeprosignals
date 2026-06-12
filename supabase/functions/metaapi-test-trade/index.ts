@@ -86,8 +86,11 @@ Deno.serve(async (req) => {
     });
     const acctRegion = fallbackRegion;
 
-    // Get BTC/USD price (with streaming warm-up retry)
-    const symbol = pairToSymbol("BTC/USD", suffix);
+    // Get price (with streaming warm-up retry)
+    const symbol = pairToSymbol(pairLabel, suffix);
+    const symUpper = symbol.toUpperCase();
+    const isBTCsym = symUpper.includes("BTC") || symUpper.includes("ETH");
+    const isXAUsym = symUpper.includes("XAU") || symUpper.includes("XAG");
     let price = await getSymbolPrice({ region: acctRegion, accountId, token, symbol });
     if (price.ok && (price.bid == null || price.ask == null)) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -95,24 +98,26 @@ Deno.serve(async (req) => {
     }
     if (!price.ok || !price.bid || !price.ask) {
       push({
-        label: "Get BTC/USD price", ok: false,
+        label: `Get ${pairLabel} price`, ok: false,
         detail: `symbol=${symbol}`,
         error: price.error ?? "no price returned — check Broker Symbol Suffix in Settings",
       });
       return finish(false, `Test failed: could not fetch price for ${symbol}`);
     }
     push({
-      label: "Get BTC/USD price", ok: true,
+      label: `Get ${pairLabel} price`, ok: true,
       detail: `symbol=${symbol} bid=${price.bid} ask=${price.ask}`,
     });
 
-    // 5. Place BUY order — SL/TP derived from current spread.
+    // 5. Place BUY order — SL/TP per symbol type so broker doesn't reject.
     const bid = price.bid;
     const ask = price.ask;
-    const spread = ask - bid;
-    const sl = +(bid - Math.max(spread * 2, 30)).toFixed(2);
-    const tp = +(ask + Math.max(spread * 4, 60)).toFixed(2);
-    const volume = 0.1; // RoboForex ProCent minimum lot
+    const slBuffer = isBTCsym ? 150 : isXAUsym ? 2.0 : 0.0015;
+    const tpBuffer = isBTCsym ? 300 : isXAUsym ? 4.0 : 0.0030;
+    const priceDecimals = isXAUsym ? 2 : isBTCsym ? 1 : 5;
+    const sl = +(bid - slBuffer).toFixed(priceDecimals);
+    const tp = +(ask + tpBuffer).toFixed(priceDecimals);
+    const volume = isBTCsym ? 0.1 : 0.10; // BTC step 0.1, all others 0.10
     const order = await placeOrder({
       region: acctRegion, accountId, token,
       actionType: "ORDER_TYPE_BUY",
@@ -122,17 +127,18 @@ Deno.serve(async (req) => {
     });
     if (!order.ok || !order.data?.positionId) {
       push({
-        label: "Place BUY order", ok: false,
-        detail: `symbol=${symbol} volume=0.01 sl=${sl} tp=${tp}`,
+        label: `Place ${pairLabel} BUY order`, ok: false,
+        detail: `symbol=${symbol} volume=${volume} sl=${sl} tp=${tp}`,
         error: order.error ?? "no positionId returned",
       });
       return finish(false, "Test failed: broker rejected the order");
     }
     const positionId = String(order.data.positionId);
     push({
-      label: "Place BUY order", ok: true,
-      detail: `positionId=${positionId} orderId=${order.data.orderId ?? "—"} sl=${sl} tp=${tp}`,
+      label: `Place ${pairLabel} BUY order`, ok: true,
+      detail: `positionId=${positionId} orderId=${order.data.orderId ?? "—"} volume=${volume} sl=${sl} tp=${tp}`,
     });
+
 
     // 6. Wait 2s, then close position via POSITION_CLOSE_ID
     await new Promise((r) => setTimeout(r, 2000));
