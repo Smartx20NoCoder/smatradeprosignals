@@ -553,7 +553,7 @@ function formatDistance(pair: string, entry: number, level: number, isAbove: boo
   if (sym.includes("XAU") || sym.includes("XAG")) {
     display = `${raw.toFixed(2)}pts`;
   } else if (sym.includes("BTC") || sym.includes("ETH")) {
-    display = `$${raw.toFixed(0)}`;
+    display = `$${raw.toFixed(1)}`;
   } else if (sym.includes("JPY")) {
     display = `${(raw * 100).toFixed(1)}pips`;
   } else {
