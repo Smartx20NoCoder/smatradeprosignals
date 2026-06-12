@@ -957,13 +957,15 @@ async function runScanJob(
     const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - toInsert.length, to_insert: toInsert.length } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
+    let cfg: any = null;
     if (toInsert.length) {
       const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
       insertedRows = (ins as any) ?? [];
-      await sendTelegramAlerts(toInsert);
+      const { data: cfgRow } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+      cfg = cfgRow;
+      await sendTelegramAlerts(toInsert, cfg);
 
       // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
-      const { data: cfg } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
       const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
       const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 75);
       const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
