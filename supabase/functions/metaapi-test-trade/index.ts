@@ -17,12 +17,16 @@ Deno.serve(async (req) => {
   const unauth = checkSecret(req);
   if (unauth) return unauth;
 
+  const { pair = "BTC/USD" } = await req.json().catch(() => ({} as { pair?: string }));
+  const pairLabel = String(pair);
+
   const steps: Step[] = [];
   const push = (s: Step) => { steps.push(s); return s; };
   const finish = (ok: boolean, summary: string) =>
     new Response(JSON.stringify({ ok, steps, summary }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
 
   try {
     const supabase = createClient(
