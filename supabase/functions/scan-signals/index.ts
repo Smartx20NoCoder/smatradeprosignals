@@ -563,10 +563,38 @@ function formatDistance(pair: string, entry: number, level: number, isAbove: boo
   return `${dir}${display}`;
 }
 
-async function sendTelegramAlerts(signals: Signal[]) {
+function estimateLot(
+  pair: string, entry: number, sl: number,
+  balance: number, riskPct: number,
+  minLot: number, maxLot: number,
+  isLive: boolean, isCentLive: boolean
+): string {
+  if (!balance || balance <= 0) return "n/a";
+  const sym = pair.toUpperCase();
+  const isMetalOrCrypto = sym.includes("XAU") || sym.includes("XAG")
+    || sym.includes("BTC") || sym.includes("ETH");
+  const centMult = (isLive && isCentLive && !isMetalOrCrypto) ? 100 : 1;
+  const pv = (sym.includes("XAU") || sym.includes("XAG") ? 1.0
+    : isMetalOrCrypto ? 0.01
+    : 0.10) * centMult;
+  const slPts = Math.abs(entry - sl);
+  if (slPts === 0) return `${minLot * 2}`;
+  const halfRisk = (balance * (riskPct / 100)) / 2;
+  let half = Math.round((halfRisk / (slPts * pv * 100)) * 100) / 100;
+  half = Math.max(minLot, Math.min(maxLot / 2, half));
+  return `~${(half * 2).toFixed(2)}`;
+}
+
+async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
   if (!token || !chatId || !signals.length) return;
+  const balance = Number(cfg?.metaapi_last_balance ?? 0);
+  const riskPct = Number(cfg?.metaapi_risk_per_trade_pct ?? 3);
+  const minLot = Number(cfg?.metaapi_min_lot ?? 0.01);
+  const maxLot = Number(cfg?.metaapi_max_lot ?? 1);
+  const isLive = String(cfg?.metaapi_active_mode ?? "demo") === "live";
+  const isCentLive = Boolean(cfg?.metaapi_is_cent_account_live);
   for (const s of signals) {
     const arrow = s.direction === "Long" ? "🟢 BUY" : "🔴 SELL";
     const session =
@@ -583,6 +611,8 @@ async function sendTelegramAlerts(signals: Signal[]) {
     const slDist = formatDistance(s.pair, s.entry, s.stop_loss, !isLong);
     const tp1Dist = formatDistance(s.pair, s.entry, s.tp1, isLong);
     const tp2Dist = formatDistance(s.pair, s.entry, s.tp2, isLong);
+    const lotStr = estimateLot(s.pair, s.entry, s.stop_loss, balance, riskPct, minLot, maxLot, isLive, isCentLive);
+    const balStr = balance > 0 ? ` (bal: ${balance.toFixed(0)})` : "";
     const text =
       `${arrow}  *${s.pair}*  (${s.timeframe})\n` +
       `Order: *${s.order_type ?? ""}*\n` +
@@ -590,6 +620,7 @@ async function sendTelegramAlerts(signals: Signal[]) {
       `🛑 SL: \`${fmt(s.stop_loss)}\` [${slDist}]\n` +
       `🎯 TP1: \`${fmt(s.tp1)}\` [${tp1Dist}]   🏆 TP2: \`${fmt(s.tp2)}\` [${tp2Dist}]\n` +
       `R:R 1:${s.rr.toFixed(2)}  ·  Conf *${s.confidence}%*\n` +
+      `📦 Lots: ${lotStr}${balStr}\n` +
       `Setup: ${s.setup}\n` +
       `Session: ${session}` +
       (s.htf_bias && s.htf_bias !== "neutral" ? `  ·  1H ${s.htf_bias}` : "");
