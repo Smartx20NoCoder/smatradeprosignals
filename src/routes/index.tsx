@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
+  checkSymbolsMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
   testTradeMetaApiFn,
   updateAppSettingsFn,
 } from "@/lib/api.functions";
+
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -1268,6 +1270,17 @@ function MetaApiPanel({
     steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
     summary: string;
   } | null>(null);
+  const [checkingSymbols, setCheckingSymbols] = useState(false);
+  const [symbolsResult, setSymbolsResult] = useState<{
+    ok: boolean;
+    reason?: string;
+    found: string[];
+    notFound: string[];
+    matches: Record<string, string[]>;
+    all: string[];
+    count: number;
+  } | null>(null);
+
 
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
@@ -1605,9 +1618,34 @@ function MetaApiPanel({
             )}
             {testTrading ? "Running…" : "Run Test Trade"}
           </button>
+          <button
+            onClick={async () => {
+              setCheckingSymbols(true);
+              setSymbolsResult(null);
+              try {
+                const r = await checkSymbolsMetaApiFn({});
+                setSymbolsResult(r as any);
+              } catch (e) {
+                setSymbolsResult({
+                  ok: false, reason: (e as Error).message,
+                  found: [], notFound: [], matches: {}, all: [], count: 0,
+                });
+              } finally {
+                setCheckingSymbols(false);
+              }
+            }}
+            disabled={checkingSymbols || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-2/60 text-chart-2 hover:bg-chart-2/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {checkingSymbols && (
+              <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            )}
+            {checkingSymbols ? "Checking…" : "Check Symbols"}
+          </button>
           {appSettings.metaapi_connected_at && (
             <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
           )}
+
         </div>
         <div className="text-[10px] text-muted-foreground">
           Places a real minimum-lot market order on the selected pair and immediately closes it. Uses live account — confirm demo mode before running.
@@ -1637,6 +1675,33 @@ function MetaApiPanel({
             </div>
           </div>
         )}
+
+        {symbolsResult && (
+          <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-2 text-xs">
+            {!symbolsResult.ok ? (
+              <div className="text-bear">❌ {symbolsResult.reason ?? "symbols check failed"}</div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-bull font-bold">✅ Found:</span>{" "}
+                  <span className="font-mono break-all">
+                    {symbolsResult.found.length > 0 ? symbolsResult.found.join(", ") : "(none)"}
+                  </span>
+                </div>
+                {symbolsResult.notFound.length > 0 && (
+                  <div>
+                    <span className="text-chart-4 font-bold">⚠️ Not found:</span>{" "}
+                    <span className="font-mono break-all">{symbolsResult.notFound.join(", ")}</span>
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border">
+                  Use the exact suffix shown above in your Broker Symbol Suffix field. Broker exposes {symbolsResult.count} symbols total.
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );

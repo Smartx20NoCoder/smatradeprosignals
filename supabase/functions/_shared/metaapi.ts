@@ -293,6 +293,26 @@ export async function getAccountInfo(opts: { region: string; accountId: string; 
   }
 }
 
+export async function getAvailableSymbols(opts: {
+  region: string; accountId: string; token: string;
+}): Promise<{ ok: boolean; symbols?: string[]; error?: string }> {
+  try {
+    const base = await clientBase(opts);
+    const url = `${base}/users/current/accounts/${opts.accountId}/symbols`;
+    const res = await fetch(url, {
+      headers: { "auth-token": opts.token, "Content-Type": "application/json" },
+    });
+    const text = await res.text();
+    if (!res.ok) return { ok: false, error: `${res.status}: ${text.slice(0, 200)}` };
+    const symbols = JSON.parse(text) as string[];
+    return { ok: true, symbols };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+
+
 export async function getOpenPositions(opts: { region: string; accountId: string; token: string }) {
   const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/positions`;
   try {
