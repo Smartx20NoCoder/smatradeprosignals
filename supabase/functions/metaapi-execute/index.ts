@@ -257,9 +257,15 @@ Deno.serve(async (req) => {
       ? halfRiskDollars / (slPoints * pointValuePer001Lot * 100)
       : fallbackLot / 2;
 
-    // Round to 2 decimal places, clamp between min and max
-    let halfLot = Math.round(rawLot * 100) / 100;
-    halfLot = Math.max(minLot, Math.min(maxLot / 2, halfLot));
+// Broker lot step rules — round DOWN to nearest valid step (never round up, never over-risk)
+const isBTC = sym.includes("BTC") || sym.includes("ETH");
+const lotStep = isBTC ? 0.1 : 0.01;   // BTC: 0.1 step only. XAU/FX: 0.01 step.
+const lotMin  = isBTC ? 0.1 : 0.10;   // Both have 0.10 minimum but BTC enforces 0.1 step
+
+// Round DOWN to nearest step, then clamp between min and half of maxLot
+let halfLot = Math.floor(rawLot / lotStep) * lotStep;
+halfLot = Math.max(lotMin, Math.min(maxLot / 2, halfLot));
+halfLot = Math.round(halfLot * 1000) / 1000; // clean floating point
 
     const lot = halfLot * 2; // total for reference only — orders use halfLot each
 
