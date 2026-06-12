@@ -101,6 +101,27 @@ export const testTradeMetaApiFn = createServerFn({ method: "POST" })
     };
   });
 
+// MetaApi symbols — list broker symbols and highlight matches for traded pairs.
+export const checkSymbolsMetaApiFn = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { status, data: resp } = await callEdge("metaapi-symbols", {});
+    const d = (resp ?? {}) as any;
+    if (status >= 500) {
+      return { ok: false as boolean, reason: "symbols check failed", all: [] as string[], found: [] as string[], notFound: [] as string[], matches: {} as Record<string, string[]>, count: 0 };
+    }
+    return {
+      ok: !!d.ok,
+      reason: typeof d.reason === "string" ? d.reason : undefined,
+      mode: typeof d.mode === "string" ? d.mode : undefined,
+      all: Array.isArray(d.all) ? (d.all as string[]) : [],
+      found: Array.isArray(d.found) ? (d.found as string[]) : [],
+      notFound: Array.isArray(d.notFound) ? (d.notFound as string[]) : [],
+      matches: (d.matches ?? {}) as Record<string, string[]>,
+      count: Number(d.count ?? 0),
+    };
+  });
+
+
 
 const NewsSchema = z.object({
   source: z.string().min(1).max(32).optional(),
