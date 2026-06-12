@@ -1261,6 +1261,8 @@ function MetaApiPanel({
   const [status, setStatus] = useState<{ ok: boolean; reason?: string; account?: any } | null>(null);
   const [testing, setTesting] = useState(false);
   const [testTrading, setTestTrading] = useState(false);
+  const [testTradePair, setTestTradePair] = useState("BTC/USD");
+
   const [testTradeResult, setTestTradeResult] = useState<{
     ok: boolean;
     steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
@@ -1569,12 +1571,22 @@ function MetaApiPanel({
             className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
             {testing ? "Testing…" : "Test Connection"}
           </button>
+          <select
+            value={testTradePair}
+            onChange={(e) => setTestTradePair(e.target.value)}
+            disabled={testTrading}
+            className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
+          >
+            {["BTC/USD","XAU/USD","EUR/USD","GBP/USD","GBP/JPY","EUR/JPY","USD/JPY","AUD/USD","AUD/JPY","EUR/GBP"].map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
           <button
             onClick={async () => {
               setTestTrading(true);
               setTestTradeResult(null);
               try {
-                const r = await testTradeMetaApiFn({});
+                const r = await testTradeMetaApiFn({ data: { pair: testTradePair } });
                 setTestTradeResult(r as any);
               } catch (e) {
                 setTestTradeResult({
@@ -1598,8 +1610,9 @@ function MetaApiPanel({
           )}
         </div>
         <div className="text-[10px] text-muted-foreground">
-          Places a real 0.01 lot BTC/USD market order on your broker and immediately closes it. Uses live account — confirm demo mode before running.
+          Places a real minimum-lot market order on the selected pair and immediately closes it. Uses live account — confirm demo mode before running.
         </div>
+
 
         {testTradeResult && (
           <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-1.5">

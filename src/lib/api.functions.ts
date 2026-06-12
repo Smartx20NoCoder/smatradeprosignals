@@ -83,11 +83,14 @@ export const healthCheckMetaApiFn = createServerFn({ method: "POST" })
     };
   });
 
-// MetaApi test trade — places & immediately closes a tiny EUR/USD order.
+// MetaApi test trade — places & immediately closes a tiny order on the chosen pair.
 export const testTradeMetaApiFn = createServerFn({ method: "POST" })
-  .handler(async () => {
-    const { status, data } = await callEdge("metaapi-test-trade", {});
-    const d = (data ?? {}) as any;
+  .inputValidator((input: { pair?: string } | undefined) =>
+    z.object({ pair: z.string().min(3).max(16).optional() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { status, data: resp } = await callEdge("metaapi-test-trade", { pair: data.pair ?? "BTC/USD" });
+    const d = (resp ?? {}) as any;
     if (status >= 500 && !Array.isArray(d.steps)) {
       return { ok: false as boolean, steps: [] as Array<any>, summary: "Test failed: edge function error" };
     }
@@ -97,6 +100,7 @@ export const testTradeMetaApiFn = createServerFn({ method: "POST" })
       summary: typeof d.summary === "string" ? d.summary : "",
     };
   });
+
 
 const NewsSchema = z.object({
   source: z.string().min(1).max(32).optional(),
