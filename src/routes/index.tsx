@@ -1618,9 +1618,34 @@ function MetaApiPanel({
             )}
             {testTrading ? "Running…" : "Run Test Trade"}
           </button>
+          <button
+            onClick={async () => {
+              setCheckingSymbols(true);
+              setSymbolsResult(null);
+              try {
+                const r = await checkSymbolsMetaApiFn({});
+                setSymbolsResult(r as any);
+              } catch (e) {
+                setSymbolsResult({
+                  ok: false, reason: (e as Error).message,
+                  found: [], notFound: [], matches: {}, all: [], count: 0,
+                });
+              } finally {
+                setCheckingSymbols(false);
+              }
+            }}
+            disabled={checkingSymbols || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-2/60 text-chart-2 hover:bg-chart-2/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {checkingSymbols && (
+              <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            )}
+            {checkingSymbols ? "Checking…" : "Check Symbols"}
+          </button>
           {appSettings.metaapi_connected_at && (
             <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
           )}
+
         </div>
         <div className="text-[10px] text-muted-foreground">
           Places a real minimum-lot market order on the selected pair and immediately closes it. Uses live account — confirm demo mode before running.
