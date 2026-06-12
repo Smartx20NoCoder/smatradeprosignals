@@ -1270,6 +1270,17 @@ function MetaApiPanel({
     steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
     summary: string;
   } | null>(null);
+  const [checkingSymbols, setCheckingSymbols] = useState(false);
+  const [symbolsResult, setSymbolsResult] = useState<{
+    ok: boolean;
+    reason?: string;
+    found: string[];
+    notFound: string[];
+    matches: Record<string, string[]>;
+    all: string[];
+    count: number;
+  } | null>(null);
+
 
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
