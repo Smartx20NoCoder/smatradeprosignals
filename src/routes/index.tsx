@@ -251,6 +251,12 @@ function ScalpEdge() {
       "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
       "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
     },
+    setup_auto_execute: {
+      "EMA Pullback": true,
+      "BOS Retest": true,
+      "Session Range Break": true,
+      "VERITAS": false,
+    },
     metaapi_active_mode: "demo",
     metaapi_region_live: "london",
     metaapi_symbol_suffix_live: "",
