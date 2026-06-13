@@ -71,6 +71,7 @@ export type Database = {
           paused: boolean
           scan_interval_minutes: number
           session_config: Json
+          setup_auto_execute: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
           updated_at: string
@@ -107,6 +108,7 @@ export type Database = {
           paused?: boolean
           scan_interval_minutes?: number
           session_config?: Json
+          setup_auto_execute?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
           updated_at?: string
@@ -143,6 +145,7 @@ export type Database = {
           paused?: boolean
           scan_interval_minutes?: number
           session_config?: Json
+          setup_auto_execute?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
           updated_at?: string
@@ -411,6 +414,7 @@ export type Database = {
           paused: boolean
           scan_interval_minutes: number
           session_config: Json
+          setup_auto_execute: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
           updated_at: string

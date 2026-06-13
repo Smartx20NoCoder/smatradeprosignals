@@ -454,6 +454,250 @@ function choch(pair: string, c5: Candle[]): RawSignal | null {
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// V.E.R.I.T.A.S. — Volatility-Encoded Regime-Adaptive Trading
+// ═══════════════════════════════════════════════════════════════
+
+function veritasEMA(arr: number[], period: number): number[] {
+  if (arr.length === 0) return [];
+  const k = 2 / (period + 1);
+  const result = [arr[0]];
+  for (let i = 1; i < arr.length; i++) {
+    result.push(arr[i] * k + result[i - 1] * (1 - k));
+  }
+  return result;
+}
+
+function calcHurst(closes: number[]): number {
+  const prices = closes.slice(-100);
+  if (prices.length < 20) return 0.5;
+  const logReturns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const lr = Math.log(prices[i] / prices[i - 1]);
+    if (!isFinite(lr)) continue;
+    logReturns.push(lr);
+  }
+  if (logReturns.length < 15) return 0.5;
+  const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
+  let cumSum = 0;
+  const profile = logReturns.map((r) => { cumSum += r - mean; return cumSum; });
+  const windowSizes: number[] = [];
+  const fluctuations: number[] = [];
+  for (let w = 10; w <= Math.min(50, Math.floor(profile.length / 2)); w += 5) {
+    const nw = Math.floor(profile.length / w);
+    if (nw < 2) continue;
+    let totalRms = 0;
+    let validWindows = 0;
+    for (let i = 0; i < nw; i++) {
+      const seg = profile.slice(i * w, (i + 1) * w);
+      const n = seg.length;
+      const xMean = (n - 1) / 2;
+      const yMean = seg.reduce((a, b) => a + b, 0) / n;
+      let num = 0; let den = 0;
+      for (let j = 0; j < n; j++) {
+        num += (j - xMean) * (seg[j] - yMean);
+        den += (j - xMean) ** 2;
+      }
+      const slope = den !== 0 ? num / den : 0;
+      const intercept = yMean - slope * xMean;
+      const rms = Math.sqrt(seg.reduce((a, v, j) => a + (v - (slope * j + intercept)) ** 2, 0) / n);
+      if (isFinite(rms) && rms > 0) { totalRms += rms; validWindows++; }
+    }
+    if (validWindows > 0) {
+      windowSizes.push(Math.log(w));
+      fluctuations.push(Math.log(totalRms / validWindows));
+    }
+  }
+  if (windowSizes.length < 3) return 0.5;
+  const n = windowSizes.length;
+  const sx = windowSizes.reduce((a, b) => a + b, 0);
+  const sy = fluctuations.reduce((a, b) => a + b, 0);
+  const sxy = windowSizes.reduce((a, x, i) => a + x * fluctuations[i], 0);
+  const sxx = windowSizes.reduce((a, x) => a + x * x, 0);
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return 0.5;
+  const hurst = (n * sxy - sx * sy) / denom;
+  return Math.max(0.1, Math.min(0.9, hurst));
+}
+
+function calcTSI(closes: number[], longP = 25, shortP = 13, sigP = 13): {
+  tsi: number; signal: number; prev: number;
+} {
+  if (closes.length < longP + shortP + sigP) return { tsi: 0, signal: 0, prev: 0 };
+  const pc = closes.map((c, i) => i === 0 ? 0 : c - closes[i - 1]);
+  const apc = pc.map(Math.abs);
+  const ps1 = veritasEMA(pc, longP);
+  const ps2 = veritasEMA(ps1, shortP);
+  const ap1 = veritasEMA(apc, longP);
+  const ap2 = veritasEMA(ap1, shortP);
+  const tsiArr = ps2.map((v, i) => ap2[i] !== 0 ? 100 * v / ap2[i] : 0);
+  const sigArr = veritasEMA(tsiArr, sigP);
+  const last = tsiArr.length - 1;
+  return {
+    tsi: tsiArr[last] ?? 0,
+    signal: sigArr[last] ?? 0,
+    prev: tsiArr[last - 1] ?? 0,
+  };
+}
+
+function calcSNR(closes: number[], fastP = 20, slowP = 50, volP = 20): number {
+  if (closes.length < slowP + 5) return 0;
+  const fastEma = veritasEMA(closes, fastP);
+  const slowEma = veritasEMA(closes, slowP);
+  const last = closes.length - 1;
+  const signal = fastEma[last] - slowEma[last];
+  const recent = closes.slice(-volP);
+  const changes = recent.map((c, i) => i === 0 ? 0 : c - recent[i - 1]);
+  const mean = changes.reduce((a, b) => a + b, 0) / changes.length;
+  const variance = changes.reduce((a, c) => a + (c - mean) ** 2, 0) / changes.length;
+  const noise = Math.sqrt(variance) + 1e-10;
+  const snr = Math.abs(signal) / noise;
+  return Math.min(100, 100 * (1 - Math.exp(-snr * 2)));
+}
+
+function calcVPT(candles: Candle[]): { vptRoc: number; bullish: boolean } {
+  if (candles.length < 15) return { vptRoc: 0, bullish: false };
+  let vpt = 0;
+  const vptArr: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = Number(candles[i - 1].c);
+    const curr = Number(candles[i].c);
+    // Prefer real volume when present; fall back to bar range as a proxy.
+    const v = candles[i].v;
+    const vol = (v != null && isFinite(Number(v)) && Number(v) > 0)
+      ? Number(v)
+      : Math.max(0, Number(candles[i].h) - Number(candles[i].l));
+    const pctChange = prev !== 0 ? (curr - prev) / prev : 0;
+    vpt += vol * pctChange;
+    vptArr.push(vpt);
+  }
+  if (vptArr.length < 11) return { vptRoc: 0, bullish: false };
+  const current = vptArr[vptArr.length - 1];
+  const tenAgo = vptArr[vptArr.length - 11];
+  const vptRoc = tenAgo !== 0 ? ((current - tenAgo) / Math.abs(tenAgo)) * 100 : 0;
+  return { vptRoc, bullish: vptRoc > 0 };
+}
+
+function calcATR14(candles: Candle[]): number {
+  const period = 14;
+  if (candles.length < period + 1) return 0;
+  const slice = candles.slice(-(period + 1));
+  let atrSum = 0;
+  for (let i = 1; i < slice.length; i++) {
+    const h = Number(slice[i].h);
+    const l = Number(slice[i].l);
+    const pc = Number(slice[i - 1].c);
+    atrSum += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+  }
+  return atrSum / period;
+}
+
+function veritasSetup(
+  pair: string,
+  c5: Candle[],
+  c15: Candle[],
+  ss: number,
+): Signal | null {
+  if (c5.length < 65 || c15.length < 110) return null;
+
+  const closes5 = c5.map((x) => Number(x.c));
+  const closes15 = c15.map((x) => Number(x.c));
+
+  // PILLAR 1: Hurst Regime (15M)
+  const hurst = calcHurst(closes15);
+  const isTrending = hurst > 0.55;
+  const isMeanReverting = hurst < 0.45;
+  if (!isTrending && !isMeanReverting) return null;
+
+  // PILLAR 2: HTF Bias (15M close vs 15-period SMA)
+  const htfRecent = closes15.slice(-16);
+  const htfSMA = htfRecent.slice(0, 15).reduce((a, b) => a + b, 0) / 15;
+  const htfLast = closes15[closes15.length - 1];
+  const htfBull = htfLast > htfSMA;
+  const htfBear = htfLast < htfSMA;
+
+  // PILLAR 3: TSI Momentum (5M)
+  const { tsi, signal: tsiSig, prev: tsiPrev } = calcTSI(closes5);
+
+  // PILLAR 4: SNR Directional Conviction (5M)
+  const snr = calcSNR(closes5);
+  if (snr < 20) return null;
+
+  // PILLAR 5: VPT Volume Confirmation (5M)
+  const { vptRoc } = calcVPT(c5);
+  const vptConfirms = (dir: boolean) => dir ? vptRoc > 0.5 : vptRoc < -0.5;
+
+  // Session filter
+  if (ss < 60) return null;
+
+  // ATR
+  const atrVal = calcATR14(c5);
+  if (atrVal <= 0) return null;
+
+  const lastClose = closes5[closes5.length - 1];
+  const atrPct = atrVal / lastClose;
+  if (atrPct < 0.00005) return null;
+
+  // Direction
+  let isLong: boolean | null = null;
+  if (isTrending) {
+    if (htfBull && tsi > tsiSig && tsi > 0 && vptConfirms(true)) isLong = true;
+    else if (htfBear && tsi < tsiSig && tsi < 0 && vptConfirms(false)) isLong = false;
+  } else {
+    if (htfBull && tsi < -20 && tsi > tsiPrev && vptConfirms(true)) isLong = true;
+    else if (htfBear && tsi > 20 && tsi < tsiPrev && vptConfirms(false)) isLong = false;
+  }
+  if (isLong === null) return null;
+
+  // Entry / SL / TPs via ATR
+  const slDist = 1.5 * atrVal;
+  const tp2Dist = 2.5 * atrVal;
+  const tp1Dist = tp2Dist * 0.4;
+  const entry = lastClose;
+  const sl  = isLong ? entry - slDist  : entry + slDist;
+  const tp1 = isLong ? entry + tp1Dist : entry - tp1Dist;
+  const tp2 = isLong ? entry + tp2Dist : entry - tp2Dist;
+  const rr  = +(tp2Dist / slDist).toFixed(2);
+
+  // Confluence Score
+  const regScore  = hurst > 0.60 || hurst < 0.40 ? 28 : 18;
+  const snrScore  = snr > 60 ? 28 : snr > 40 ? 20 : 12;
+  const tsiScore  = Math.abs(tsi) > 25 ? 24 : Math.abs(tsi) > 10 ? 16 : 8;
+  const vptScore  = Math.abs(vptRoc) > 2 ? 12 : 7;
+  const sessScore = ss > 80 ? 8 : 5;
+  const confidence = Math.min(99, regScore + snrScore + tsiScore + vptScore + sessScore);
+  if (confidence < 65) return null;
+
+  const regime   = isTrending ? "Trend" : "MeanRev";
+  const snrLabel = snr > 60 ? "SNR++" : snr > 40 ? "SNR+" : "SNR~";
+  const candleTime = new Date(c5.at(-1)!.t).toISOString();
+  const direction: "Long" | "Short" = isLong ? "Long" : "Short";
+
+  return {
+    pair,
+    timeframe: "5m",
+    setup: `VERITAS (H=${hurst.toFixed(2)} ${regime} ${snrLabel})`,
+    direction,
+    entry: +entry.toFixed(5),
+    stop_loss: +sl.toFixed(5),
+    tp1: +tp1.toFixed(5),
+    tp2: +tp2.toFixed(5),
+    rr,
+    atr: atrVal,
+    candle_time: candleTime,
+    session_score: ss,
+    confidence,
+    news_flag: false,
+    order_type: isLong ? "Buy Market" : "Sell Market",
+    spread_pips: spreadDisplay(pair),
+    htf_bias: isLong ? "1H BULL" : "1H BEAR",
+    mfi_score: +snr.toFixed(1),
+    mfi_divergence: false,
+  };
+}
+
+
+
 function mfiBoost(c5: Candle[], dir: "Long" | "Short"): { value: number; div: boolean; boost: number } {
   const m = mfi(c5);
   const v = m.value;
@@ -905,8 +1149,26 @@ async function runScanJob(
           candidates.push(q.signal);
         }
       }
+
+      // VERITAS — scored internally, bypasses qualifyAndScore. Still respects news blackout.
+      if (!DISABLED_SETUPS.has("VERITAS")) {
+        const ssNow = sessionScore(pair, nowDate);
+        const veritas = veritasSetup(pair, d.c5, d.c15, ssNow);
+        if (!veritas) {
+          pairReport.checks.push({ setup: "VERITAS", status: "none", reason: "No setup pattern" });
+        } else if (hits.length > 0) {
+          const h = hits[0];
+          pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
+            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+        } else {
+          pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
+          candidates.push(veritas);
+        }
+      }
+
       report.push(pairReport);
     }
+
 
     // One signal per pair per direction → keep highest confidence; merge setup names
     const byKey = new Map<string, Signal>();

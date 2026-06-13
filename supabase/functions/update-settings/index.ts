@@ -18,7 +18,7 @@ const ALLOWED_KEYS = new Set([
   "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct",
   "metaapi_risk_per_trade_pct", "metaapi_min_lot", "metaapi_max_lot",
   "metaapi_is_cent_account", "metaapi_is_cent_account_live",
-  "pair_auto_execute",
+  "pair_auto_execute", "setup_auto_execute",
   "metaapi_active_mode",
   "metaapi_account_id_live", "metaapi_token_live",
   "metaapi_region_live", "metaapi_symbol_suffix_live",
@@ -67,6 +67,19 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
       let bad = false;
       for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
         if (typeof pk !== "string" || pk.length > 16 || !/^[A-Z]{3}\/[A-Z]{3}$/.test(pk)) { bad = true; break; }
+        if (typeof pv !== "boolean") { bad = true; break; }
+        clean[pk] = pv;
+      }
+      if (bad) continue;
+      out[k] = clean;
+      continue;
+    }
+    if (k === "setup_auto_execute") {
+      if (typeof v !== "object" || v === null || Array.isArray(v)) continue;
+      const clean: Record<string, boolean> = {};
+      let bad = false;
+      for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
+        if (typeof pk !== "string" || pk.length < 1 || pk.length > 64 || !/^[A-Za-z0-9 +._-]+$/.test(pk)) { bad = true; break; }
         if (typeof pv !== "boolean") { bad = true; break; }
         clean[pk] = pv;
       }

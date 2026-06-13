@@ -110,6 +110,7 @@ type AppSettings = {
   metaapi_connected_at: string | null;
   metaapi_token_configured: boolean;
   pair_auto_execute: Record<string, boolean>;
+  setup_auto_execute: Record<string, boolean>;
   metaapi_active_mode: "demo" | "live";
   metaapi_region_live: string;
   metaapi_symbol_suffix_live: string;
@@ -250,6 +251,12 @@ function ScalpEdge() {
       "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
       "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
     },
+    setup_auto_execute: {
+      "EMA Pullback": true,
+      "BOS Retest": true,
+      "Session Range Break": true,
+      "VERITAS": false,
+    },
     metaapi_active_mode: "demo",
     metaapi_region_live: "london",
     metaapi_symbol_suffix_live: "",
@@ -339,6 +346,12 @@ function ScalpEdge() {
       pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
         "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
         "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+      },
+      setup_auto_execute: ((cfg as any).setup_auto_execute as Record<string, boolean>) ?? {
+        "EMA Pullback": true,
+        "BOS Retest": true,
+        "Session Range Break": true,
+        "VERITAS": false,
       },
       metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live" : "demo"),
       metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
@@ -1493,6 +1506,31 @@ function MetaApiPanel({
           })}
         </div>
       </div>
+
+      {/* Setup auto-execute toggles */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Setup Auto-Execute</div>
+          <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS"].map((name) => {
+            const defaults: Record<string, boolean> = {
+              "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
+            };
+            const cfg = appSettings.setup_auto_execute ?? {};
+            const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
+            return (
+              <label key={name} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
+                <span className="font-mono truncate" title={name}>{name}</span>
+                <Toggle on={on} onChange={(v) => saveAppSettings({ setup_auto_execute: { ...cfg, [name]: v } } as any)} />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+
 
 
 

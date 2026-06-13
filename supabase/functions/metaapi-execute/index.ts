@@ -121,6 +121,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Setup auto-execute gate
+    const setupConfig = (c?.setup_auto_execute ?? {}) as Record<string, boolean>;
+    const signalSetupBase = String(s.setup ?? "").split("(")[0].trim(); // strip VERITAS params
+    const setupEnabled = setupConfig[signalSetupBase] !== false;
+    if (!setupEnabled) {
+      await supabase.from("signals").update({
+        metaapi_execution_status: "skipped",
+        metaapi_execution_error: `${signalSetupBase} auto-execution is disabled in Settings. Paper-tracked only.`,
+        paper_status: "watching",
+      }).eq("id", signal_id);
+      return new Response(JSON.stringify({ ok: false, reason: "setup_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
+
 
 
     // Concurrent trades gate — count active open positions only (pending orders have no risk yet).
