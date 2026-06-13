@@ -74,6 +74,19 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
       out[k] = clean;
       continue;
     }
+    if (k === "setup_auto_execute") {
+      if (typeof v !== "object" || v === null || Array.isArray(v)) continue;
+      const clean: Record<string, boolean> = {};
+      let bad = false;
+      for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
+        if (typeof pk !== "string" || pk.length < 1 || pk.length > 64 || !/^[A-Za-z0-9 +._-]+$/.test(pk)) { bad = true; break; }
+        if (typeof pv !== "boolean") { bad = true; break; }
+        clean[pk] = pv;
+      }
+      if (bad) continue;
+      out[k] = clean;
+      continue;
+    }
     if (k === "metaapi_active_mode" && (typeof v !== "string" || !["demo", "live"].includes(v))) continue;
     if (k === "metaapi_account_id_live" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
     if (k === "metaapi_token_live") {
