@@ -1850,6 +1850,8 @@ function HealthPanel({
   return (
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
+      <SymbolKeepaliveCard />
+
 
       <div className="border border-border rounded bg-card p-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
