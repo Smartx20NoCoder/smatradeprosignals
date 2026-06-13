@@ -1170,18 +1170,32 @@ async function runScanJob(
     }
 
 
-    // One signal per pair per direction → keep highest confidence; merge setup names
+    // One signal per pair per direction → merge setup names.
+    // Non-market setups (Buy/Sell Limit|Stop) always own the order_type + entry;
+    // VERITAS market orders are treated as a confluence confirmation only.
+    const isNonMarket = (ot?: string) => !!ot && /\b(Limit|Stop)\b/i.test(ot);
     const byKey = new Map<string, Signal>();
     for (const s of candidates) {
       const key = `${s.pair}|${s.direction}`;
       const existing = byKey.get(key);
       if (!existing) { byKey.set(key, s); continue; }
-      if (s.confidence > existing.confidence) {
-        s.setup = `${s.setup} + ${existing.setup}`;
-        byKey.set(key, s);
-      } else {
-        existing.setup = `${existing.setup} + ${s.setup}`;
-      }
+
+      // Pick which signal's order_type + entry to keep:
+      // prefer non-market over market; otherwise keep higher confidence.
+      const sNon = isNonMarket(s.order_type);
+      const eNon = isNonMarket(existing.order_type);
+      let base: Signal, other: Signal;
+      if (sNon && !eNon)       { base = s;        other = existing; }
+      else if (eNon && !sNon)  { base = existing; other = s;        }
+      else                     { base = s.confidence > existing.confidence ? s : existing;
+                                 other = base === s ? existing : s; }
+
+      const merged: Signal = {
+        ...base,
+        setup: `${base.setup} + ${other.setup}`,
+        confidence: Math.min(100, Math.max(base.confidence, other.confidence) + 5),
+      };
+      byKey.set(key, merged);
     }
     const merged = Array.from(byKey.values());
     signals.push(...merged);
