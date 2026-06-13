@@ -953,21 +953,26 @@ async function runScanJob(
     const seen = new Set((recent ?? [])
       .filter((r: any) => r.status === "pending" || r.status === "executed")
       .map((r: any) => `${r.pair}|${r.direction}`));
-    const toInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
-    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - toInsert.length, to_insert: toInsert.length } }));
+    const dedupedInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
+    // Apply manual-trading threshold gate: signals below min_confidence or min_rr
+    // are NOT saved and NOT alerted (keeps signals tab + Telegram aligned with what
+    // you'd trade manually). Only gates NEW signals; previously-saved paper-tracked
+    // signals are unaffected.
+    const { data: cfgRowPre } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+    let cfg: any = cfgRowPre ?? null;
+    const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 70);
+    const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
+    const toInsert = dedupedInsert.filter(s => s.confidence >= minConf && s.rr >= minRR);
+    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
-    let cfg: any = null;
     if (toInsert.length) {
       const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
       insertedRows = (ins as any) ?? [];
-      const { data: cfgRow } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-      cfg = cfgRow;
       await sendTelegramAlerts(toInsert, cfg);
 
       // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
       const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
-      const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 75);
-      const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2);
+
       if (autoTrade) {
         const fnSecret = Deno.env.get("INTERNAL_FN_SECRET") ?? "";
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
