@@ -110,6 +110,7 @@ type AppSettings = {
   metaapi_connected_at: string | null;
   metaapi_token_configured: boolean;
   pair_auto_execute: Record<string, boolean>;
+  setup_auto_execute: Record<string, boolean>;
   metaapi_active_mode: "demo" | "live";
   metaapi_region_live: string;
   metaapi_symbol_suffix_live: string;
