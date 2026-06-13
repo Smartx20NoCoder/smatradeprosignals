@@ -688,7 +688,7 @@ function veritasSetup(
     session_score: ss,
     confidence,
     news_flag: false,
-    order_type: isLong ? "Buy Market" : "Sell Market",
+    order_type: isLong ? "Buy Limit" : "Sell Limit",
     spread_pips: spreadDisplay(pair),
     htf_bias: isLong ? "1H BULL" : "1H BEAR",
     mfi_score: +snr.toFixed(1),
