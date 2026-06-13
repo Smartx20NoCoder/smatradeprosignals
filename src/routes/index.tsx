@@ -1850,6 +1850,8 @@ function HealthPanel({
   return (
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
+      <SymbolKeepaliveCard />
+
 
       <div className="border border-border rounded bg-card p-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -2069,7 +2071,73 @@ function BrokerHealthCard() {
   );
 }
 
+function SymbolKeepaliveCard() {
+  const [data, setData] = useState<{
+    keepalive: Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>;
+    checkedAt?: number;
+    loading: boolean;
+    error?: string;
+  }>({ keepalive: [], loading: true });
+
+  async function refresh() {
+    setData((d) => ({ ...d, loading: true }));
+    try {
+      const r = await pingMetaApiFn({});
+      setData({ keepalive: r.keepalive ?? [], checkedAt: Date.now(), loading: false, error: r.ok ? undefined : r.reason });
+    } catch (e) {
+      setData({ keepalive: [], loading: false, checkedAt: Date.now(), error: (e as Error).message });
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Symbol Subscriptions</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground">
+            {data.checkedAt ? `${timeAgo(new Date(data.checkedAt).toISOString())} ago` : "—"}
+          </span>
+          <button
+            onClick={refresh}
+            disabled={data.loading}
+            className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
+            {data.loading ? "…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+      {data.error && (
+        <div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">{data.error}</div>
+      )}
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+        {data.keepalive.length === 0 && !data.loading && (
+          <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
+        )}
+        {data.keepalive.map((k) => (
+          <div key={k.pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5">
+              <span className={k.ok ? "text-bull" : "text-bear"}>{k.ok ? "✅" : "❌"}</span>
+              <span className="font-semibold">{k.pair}</span>
+              <span className="text-[10px] text-muted-foreground">{k.symbol}</span>
+            </span>
+            <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
+              {k.bid != null ? k.bid.toFixed(5) : "—"}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="text-[10px] text-muted-foreground mt-2">Refreshes on cron fire and on click.</div>
+    </div>
+  );
+}
+
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+
   return (
     <button onClick={() => onChange(!on)}
       className={`relative w-11 h-6 rounded-full transition-colors ${on ? "bg-primary" : "bg-secondary"}`}>

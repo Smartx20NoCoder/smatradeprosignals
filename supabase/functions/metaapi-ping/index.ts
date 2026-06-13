@@ -66,22 +66,25 @@ Deno.serve(async (req) => {
       .filter(([, enabled]) => enabled)
       .map(([pair]) => pair);
 
+    const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number }[] = [];
     for (const pair of activePairs) {
+      const symbol = pairToSymbol(pair, effectiveSuffix);
       try {
-        const symbol = pairToSymbol(pair, effectiveSuffix);
-        await getSymbolPrice({
-          region,
-          accountId,
-          token,
-          symbol,
-        });
+        const price = await getSymbolPrice({ region, accountId, token, symbol });
+        keepalive.push({ pair, symbol, ok: price.ok, bid: price.bid });
+        if (!price.ok) console.log(`Keepalive ping failed for ${pair}: ${price.error}`);
       } catch (e) {
+        keepalive.push({ pair, symbol, ok: false });
         console.log(`Keepalive ping failed for ${pair}: ${e}`);
       }
       await new Promise((r) => setTimeout(r, 800)); // space calls 800ms apart
     }
 
-    return new Response(JSON.stringify({ ok: true, account: info.data }), {
+    await supabase.from("app_settings").update({
+      metaapi_keepalive_last: { checked_at: new Date().toISOString(), results: keepalive },
+    }).eq("id", "singleton");
+
+    return new Response(JSON.stringify({ ok: true, account: info.data, keepalive }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
