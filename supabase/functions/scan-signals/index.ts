@@ -1149,8 +1149,26 @@ async function runScanJob(
           candidates.push(q.signal);
         }
       }
+
+      // VERITAS — scored internally, bypasses qualifyAndScore. Still respects news blackout.
+      if (!DISABLED_SETUPS.has("VERITAS")) {
+        const ssNow = sessionScore(pair, nowDate);
+        const veritas = veritasSetup(pair, d.c5, d.c15, ssNow);
+        if (!veritas) {
+          pairReport.checks.push({ setup: "VERITAS", status: "none", reason: "No setup pattern" });
+        } else if (hits.length > 0) {
+          const h = hits[0];
+          pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
+            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+        } else {
+          pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
+          candidates.push(veritas);
+        }
+      }
+
       report.push(pairReport);
     }
+
 
     // One signal per pair per direction → keep highest confidence; merge setup names
     const byKey = new Map<string, Signal>();
