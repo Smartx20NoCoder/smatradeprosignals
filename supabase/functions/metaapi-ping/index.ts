@@ -1,6 +1,6 @@
 // Verifies MetaApi token + account and reports broker connection state.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { checkSecret, corsHeaders, getAccountInfo } from "../_shared/metaapi.ts";
+import { checkSecret, corsHeaders, getAccountInfo, getSymbolPrice, pairToSymbol } from "../_shared/metaapi.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -29,6 +29,10 @@ Deno.serve(async (req) => {
     const token = isLive
       ? ((c?.metaapi_token_live as string | null) || baseToken)
       : baseToken;
+    const baseSuffix = (c?.metaapi_symbol_suffix as string | null) ?? "";
+    const effectiveSuffix = isLive
+      ? ((c?.metaapi_symbol_suffix_live as string | null) ?? baseSuffix)
+      : baseSuffix;
     if (!token) {
       return new Response(JSON.stringify({ ok: false, reason: "broker token not configured" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -55,6 +59,28 @@ Deno.serve(async (req) => {
         metaapi_last_balance_at: new Date().toISOString(),
       }).eq("id", "singleton");
     }
+
+    // Keep symbol subscriptions alive for RoboForex and other MT4 brokers
+    const pairConfig = (c?.pair_auto_execute ?? {}) as Record<string, boolean>;
+    const activePairs = Object.entries(pairConfig)
+      .filter(([, enabled]) => enabled)
+      .map(([pair]) => pair);
+
+    for (const pair of activePairs) {
+      try {
+        const symbol = pairToSymbol(pair, effectiveSuffix);
+        await getSymbolPrice({
+          region,
+          accountId,
+          token,
+          symbol,
+        });
+      } catch (e) {
+        console.log(`Keepalive ping failed for ${pair}: ${e}`);
+      }
+      await new Promise((r) => setTimeout(r, 800)); // space calls 800ms apart
+    }
+
     return new Response(JSON.stringify({ ok: true, account: info.data }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
