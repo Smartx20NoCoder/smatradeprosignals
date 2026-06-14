@@ -66,18 +66,41 @@ Deno.serve(async (req) => {
       .filter(([, enabled]) => enabled)
       .map(([pair]) => pair);
 
-    const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number }[] = [];
+    const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number; attempt: number }[] = [];
+
+    // Pass 1 — force fresh subscription for all pairs
     for (const pair of activePairs) {
       const symbol = pairToSymbol(pair, effectiveSuffix);
+      let ok = false;
+      let bid: number | undefined;
+      let attempts = 1;
+
       try {
-        const price = await getSymbolPrice({ region, accountId, token, symbol });
-        keepalive.push({ pair, symbol, ok: price.ok, bid: price.bid });
-        if (!price.ok) console.log(`Keepalive ping failed for ${pair}: ${price.error}`);
+        // First attempt — no keepSubscription, forces fresh subscribe request
+        const p1 = await getSymbolPrice({ region, accountId, token, symbol, keepSubscription: false });
+        if (p1.ok && p1.bid != null) {
+          ok = true; bid = p1.bid;
+        } else {
+          // 404 or empty — wait and retry once
+          await new Promise(r => setTimeout(r, 2500));
+          attempts = 2;
+          const p2 = await getSymbolPrice({ region, accountId, token, symbol, keepSubscription: false });
+          if (p2.ok && p2.bid != null) { ok = true; bid = p2.bid; }
+        }
       } catch (e) {
-        keepalive.push({ pair, symbol, ok: false });
-        console.log(`Keepalive ping failed for ${pair}: ${e}`);
+        console.log(`Keepalive pass1 error ${pair}: ${e}`);
       }
-      await new Promise((r) => setTimeout(r, 800)); // space calls 800ms apart
+
+      keepalive.push({ pair, symbol, ok, bid, attempt: attempts });
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    // Pass 2 — lock in subscriptions for all pairs that responded
+    for (const entry of keepalive.filter(k => k.ok)) {
+      try {
+        await getSymbolPrice({ region, accountId, token, symbol: entry.symbol, keepSubscription: true });
+      } catch { /* silent */ }
+      await new Promise(r => setTimeout(r, 500));
     }
 
     await supabase.from("app_settings").update({
