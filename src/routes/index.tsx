@@ -2356,8 +2356,8 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const [pairFilter, setPairFilter] = useState<string>("all");
   const [setupFilter, setSetupFilter] = useState<string>("all");
   const [sessionFilter, setSessionFilter] = useState<string>("all");
-  const [minConfidence, setMinConfidence] = useState<string>("any");
-  const [minRR, setMinRR] = useState<string>("any");
+  const [minConfidence, setMinConfidence] = useState<number | null>(null);
+  const [minRR, setMinRR] = useState<number | null>(null);
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
   const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
@@ -2365,14 +2365,12 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   const sessions = ["London", "New York", "Asian", "Off"];
 
   const filtered = useMemo(() => {
-    const minC = minConfidence === "any" ? null : Number(minConfidence);
-    const minR = minRR === "any" ? null : Number(minRR);
     return closed.filter((s) =>
       (pairFilter === "all" || s.pair === pairFilter) &&
       (setupFilter === "all" || s.setup === setupFilter) &&
       (sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
-      (minC == null || s.confidence >= minC) &&
-      (minR == null || (s.rr ?? 0) >= minR)
+      (minConfidence == null || s.confidence >= minConfidence) &&
+      (minRR == null || (s.rr ?? 0) >= minRR)
     );
   }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence, minRR]);
 
@@ -2457,23 +2455,56 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
           <option value="all">All sessions</option>
           {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={minRR} onChange={(e) => setMinRR(e.target.value)}
-          className="bg-secondary border border-border rounded px-2 py-1">
-          <option value="any">Min R:R · Any</option>
-          <option value="1.5">1.5+</option>
-          <option value="2">2.0+</option>
-          <option value="2.5">2.5+</option>
-          <option value="3">3.0+</option>
-        </select>
-        <select value={minConfidence} onChange={(e) => setMinConfidence(e.target.value)}
-          className="bg-secondary border border-border rounded px-2 py-1">
-          <option value="any">Min Conf · Any</option>
-          <option value="70">70%+</option>
-          <option value="75">75%+</option>
-          <option value="80">80%+</option>
-          <option value="85">85%+</option>
-          <option value="90">90%+</option>
-        </select>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase text-muted-foreground">Min Conf %</label>
+          <input
+            type="number" min={0} max={100} step={1}
+            value={minConfidence ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMinConfidence(v === "" ? null : Number(v));
+            }}
+            className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
+            placeholder="e.g. 70"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {[70, 75, 80, 85, 90].map((v) => (
+              <button key={v} onClick={() => setMinConfidence(v)}
+                className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === v ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+                {v}%
+              </button>
+            ))}
+            <button onClick={() => setMinConfidence(null)}
+              className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === null ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+              Any
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase text-muted-foreground">Min R:R</label>
+          <input
+            type="number" min={0} max={10} step={0.1}
+            value={minRR ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMinRR(v === "" ? null : Number(v));
+            }}
+            className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
+            placeholder="e.g. 2.0"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {[1.5, 1.8, 2.0, 2.5, 3.0].map((v) => (
+              <button key={v} onClick={() => setMinRR(v)}
+                className={`text-xs px-1.5 py-0.5 rounded border ${minRR === v ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+                {v}
+              </button>
+            ))}
+            <button onClick={() => setMinRR(null)}
+              className={`text-xs px-1.5 py-0.5 rounded border ${minRR === null ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+              Any
+            </button>
+          </div>
+        </div>
         <button onClick={exportCSV}
           className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
           ⬇ Export CSV
