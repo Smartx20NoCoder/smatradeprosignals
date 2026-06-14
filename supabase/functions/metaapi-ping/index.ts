@@ -7,6 +7,9 @@ Deno.serve(async (req) => {
   const unauth = checkSecret(req);
   if (unauth) return unauth;
 
+  const reqBody = await req.json().catch(() => ({}));
+  const isConnectionOnly = reqBody?.mode === "connection";
+
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -58,6 +61,13 @@ Deno.serve(async (req) => {
         metaapi_last_balance: Number((info as any).data.balance),
         metaapi_last_balance_at: new Date().toISOString(),
       }).eq("id", "singleton");
+    }
+
+    // Connection-only mode (Test Connection button): skip keepalive entirely.
+    if (isConnectionOnly) {
+      return new Response(JSON.stringify({ ok: true, account: info.data, keepalive: [], reconnect_triggered: false }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Keep symbol subscriptions alive for RoboForex and other MT4 brokers

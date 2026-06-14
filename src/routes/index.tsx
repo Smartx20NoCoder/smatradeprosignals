@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
+  checkSubscriptionFn,
   checkSymbolsMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
@@ -1301,7 +1302,7 @@ function MetaApiPanel({
   async function ping() {
     setTesting(true);
     try {
-      const j = await pingMetaApiFn({});
+      const j = await pingMetaApiFn({ data: { mode: "connection" } });
       setStatus(j as any);
     } catch (e) {
       setStatus({ ok: false, reason: (e as Error).message });
@@ -1850,7 +1851,7 @@ function HealthPanel({
   return (
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
-      <SymbolKeepaliveCard />
+      <SymbolKeepaliveCard appSettings={appSettings} />
 
 
       <div className="border border-border rounded bg-card p-4">
@@ -2071,22 +2072,45 @@ function BrokerHealthCard() {
   );
 }
 
-function SymbolKeepaliveCard() {
-  const [data, setData] = useState<{
-    keepalive: Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>;
-    checkedAt?: number;
-    loading: boolean;
-    error?: string;
-    reconnect_triggered?: boolean;
-  }>({ keepalive: [], loading: true });
+function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
+  const activePairs = useMemo(
+    () => Object.entries(appSettings.pair_auto_execute ?? {})
+      .filter(([, on]) => on)
+      .map(([p]) => p),
+    [appSettings.pair_auto_execute],
+  );
+
+  type Entry = { ok: boolean; bid?: number; loading: boolean; symbol?: string };
+  const [subResults, setSubResults] = useState<Record<string, Entry>>({});
+  const [checkedAt, setCheckedAt] = useState<number | undefined>();
+  const [running, setRunning] = useState(false);
+  const runIdRef = useRef(0);
 
   async function refresh() {
-    setData((d) => ({ ...d, loading: true }));
-    try {
-      const r = await pingMetaApiFn({});
-      setData({ keepalive: r.keepalive ?? [], checkedAt: Date.now(), loading: false, error: r.ok ? undefined : r.reason, reconnect_triggered: r.reconnect_triggered });
-    } catch (e) {
-      setData({ keepalive: [], loading: false, checkedAt: Date.now(), error: (e as Error).message });
+    const myRun = ++runIdRef.current;
+    setRunning(true);
+    // Seed everyone as loading immediately so the panel renders the full grid.
+    const initial: Record<string, Entry> = {};
+    for (const p of activePairs) initial[p] = { ok: false, loading: true };
+    setSubResults(initial);
+
+    for (const pair of activePairs) {
+      if (runIdRef.current !== myRun) return; // cancelled by newer refresh
+      try {
+        const r = await checkSubscriptionFn({ data: { pair } });
+        if (runIdRef.current !== myRun) return;
+        setSubResults((prev) => ({
+          ...prev,
+          [pair]: { ok: r.ok, bid: r.bid, loading: false, symbol: r.symbol },
+        }));
+      } catch {
+        if (runIdRef.current !== myRun) return;
+        setSubResults((prev) => ({ ...prev, [pair]: { ok: false, loading: false } }));
+      }
+    }
+    if (runIdRef.current === myRun) {
+      setCheckedAt(Date.now());
+      setRunning(false);
     }
   }
 
@@ -2094,55 +2118,52 @@ function SymbolKeepaliveCard() {
     refresh();
     const t = setInterval(refresh, 60_000);
     return () => clearInterval(t);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePairs.join(",")]);
 
   return (
     <div className="border border-border rounded bg-card p-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Symbol Subscriptions</div>
         <div className="flex items-center gap-2">
-          {data.reconnect_triggered && (
-            <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-500">
-              ⟳ Reconnected
-            </span>
-          )}
           <span className="text-[10px] text-muted-foreground">
-            {data.checkedAt ? `${timeAgo(new Date(data.checkedAt).toISOString())} ago` : "—"}
+            {checkedAt ? `${timeAgo(new Date(checkedAt).toISOString())} ago` : running ? "checking…" : "—"}
           </span>
           <button
             onClick={refresh}
-            disabled={data.loading}
+            disabled={running}
             className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
-            {data.loading ? "…" : "Refresh"}
+            {running ? "…" : "Refresh"}
           </button>
         </div>
       </div>
-      {data.error && (
-        <div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">{data.error}</div>
-      )}
-      {data.keepalive != null && (
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-          {(data.keepalive ?? []).length === 0 && !data.loading && (
-            <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
-          )}
-          {(data.keepalive ?? []).map((k) => (
-            <div key={k.pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+        {activePairs.length === 0 && (
+          <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
+        )}
+        {activePairs.map((pair) => {
+          const k = subResults[pair] ?? { ok: false, loading: true };
+          return (
+            <div key={pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5">
-                <span className={k.ok ? "text-bull" : "text-bear"}>{k.ok ? "✅" : "❌"}</span>
-                <span className="font-semibold">{k.pair}</span>
-                <span className="text-[10px] text-muted-foreground">{k.symbol}</span>
+                <span className={k.loading ? "text-muted-foreground" : k.ok ? "text-bull" : "text-bear"}>
+                  {k.loading ? "⏳" : k.ok ? "✅" : "❌"}
+                </span>
+                <span className="font-semibold">{pair}</span>
+                {k.symbol && <span className="text-[10px] text-muted-foreground">{k.symbol}</span>}
               </span>
               <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
-                {k.bid != null ? k.bid.toFixed(5) : "—"}
+                {k.bid != null ? k.bid.toFixed(5) : k.loading ? "…" : "—"}
               </span>
             </div>
-          ))}
-        </div>
-      )}
-      <div className="text-[10px] text-muted-foreground mt-2">Refreshes on cron fire and on click.</div>
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-muted-foreground mt-2">Probes one pair at a time. Background keepalive runs on the cron cycle.</div>
     </div>
   );
 }
+
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
 
