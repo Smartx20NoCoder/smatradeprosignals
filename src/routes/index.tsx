@@ -2114,23 +2114,25 @@ function SymbolKeepaliveCard() {
       {data.error && (
         <div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">{data.error}</div>
       )}
-      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-        {data.keepalive.length === 0 && !data.loading && (
-          <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
-        )}
-        {data.keepalive.map((k) => (
-          <div key={k.pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
-            <span className="flex items-center gap-1.5">
-              <span className={k.ok ? "text-bull" : "text-bear"}>{k.ok ? "✅" : "❌"}</span>
-              <span className="font-semibold">{k.pair}</span>
-              <span className="text-[10px] text-muted-foreground">{k.symbol}</span>
-            </span>
-            <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
-              {k.bid != null ? k.bid.toFixed(5) : "—"}
-            </span>
-          </div>
-        ))}
-      </div>
+      {data.keepalive != null && (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+          {(data.keepalive ?? []).length === 0 && !data.loading && (
+            <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
+          )}
+          {(data.keepalive ?? []).map((k) => (
+            <div key={k.pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5">
+                <span className={k.ok ? "text-bull" : "text-bear"}>{k.ok ? "✅" : "❌"}</span>
+                <span className="font-semibold">{k.pair}</span>
+                <span className="text-[10px] text-muted-foreground">{k.symbol}</span>
+              </span>
+              <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
+                {k.bid != null ? k.bid.toFixed(5) : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="text-[10px] text-muted-foreground mt-2">Refreshes on cron fire and on click.</div>
     </div>
   );
