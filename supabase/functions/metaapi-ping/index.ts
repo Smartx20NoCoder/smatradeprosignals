@@ -148,6 +148,58 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Extended retry for slow-to-initialise feeds (crypto + gold on MT4)
+    for (const targetPair of ["BTC/USD", "XAU/USD"]) {
+      const entry = keepalive.find(k => k.pair === targetPair && !k.ok);
+      if (!entry) continue;
+      console.log(`${targetPair} still dead after reconnect — starting extended retry (3 attempts × 4s)`);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await new Promise(r => setTimeout(r, 4000));
+        try {
+          const price = await getSymbolPrice({
+            region: effectiveRegion,
+            accountId: effectiveAccountId,
+            token: effectiveToken,
+            symbol: entry.symbol,
+          });
+          if (price.ok && price.bid != null) {
+            entry.ok = true;
+            entry.bid = price.bid;
+            console.log(`${targetPair} recovered on attempt ${attempt}: bid=${price.bid}`);
+            break;
+          }
+          console.log(`${targetPair} attempt ${attempt} still failed`);
+        } catch (e) {
+          console.log(`${targetPair} attempt ${attempt} error: ${e}`);
+        }
+      }
+
+      if (!entry.ok) {
+        console.log(`${targetPair} unrecovered — triggering second reconnect`);
+        try {
+          const reconnectUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/reconnect`;
+          await fetch(reconnectUrl, {
+            method: "POST",
+            headers: { "auth-token": effectiveToken, "Content-Type": "application/json" },
+          });
+          await new Promise(r => setTimeout(r, 8000));
+          const finalPrice = await getSymbolPrice({
+            region: effectiveRegion,
+            accountId: effectiveAccountId,
+            token: effectiveToken,
+            symbol: entry.symbol,
+          });
+          if (finalPrice.ok && finalPrice.bid != null) {
+            entry.ok = true;
+            entry.bid = finalPrice.bid;
+            console.log(`${targetPair} recovered after second reconnect: bid=${finalPrice.bid}`);
+          }
+        } catch (e) {
+          console.log(`Second reconnect failed for ${targetPair}: ${e}`);
+        }
+      }
+    }
+
     await supabase.from("app_settings").update({
       metaapi_keepalive_last: { checked_at: new Date().toISOString(), results: keepalive, reconnect_triggered },
     }).eq("id", "singleton");
