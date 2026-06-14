@@ -51,16 +51,39 @@ export const updateAppSettingsFn = createServerFn({ method: "POST" })
 
 // MetaApi ping — read-only status check.
 export const pingMetaApiFn = createServerFn({ method: "POST" })
-  .handler(async () => {
-    const { status, data } = await callEdge("metaapi-ping", {});
+  .inputValidator((input: { mode?: "connection" | "keepalive" } | undefined) =>
+    z.object({ mode: z.enum(["connection", "keepalive"]).optional() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { status, data: resp } = await callEdge("metaapi-ping", data);
     if (status >= 500) return { ok: false as boolean, reason: "broker check failed", account: null as any, keepalive: [] as Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>, reconnect_triggered: false };
-    const d = (data ?? {}) as any;
+    const d = (resp ?? {}) as any;
     return {
       ok: !!d.ok,
       reason: typeof d.reason === "string" ? d.reason : undefined,
       account: d.account ?? null,
       keepalive: Array.isArray(d.keepalive) ? (d.keepalive as Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>) : [],
       reconnect_triggered: !!d.reconnect_triggered,
+    };
+  });
+
+// MetaApi subscription probe — single-pair, fast, no retries.
+export const checkSubscriptionFn = createServerFn({ method: "POST" })
+  .inputValidator((input: { pair: string }) =>
+    z.object({ pair: z.string().min(3).max(16) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { status, data: resp } = await callEdge("metaapi-subscriptions", data);
+    const d = (resp ?? {}) as any;
+    if (status >= 500) {
+      return { pair: data.pair, symbol: "", ok: false as boolean, bid: undefined as number | undefined, elapsed_ms: 0 };
+    }
+    return {
+      pair: String(d.pair ?? data.pair),
+      symbol: typeof d.symbol === "string" ? d.symbol : "",
+      ok: !!d.ok,
+      bid: typeof d.bid === "number" ? d.bid : undefined,
+      elapsed_ms: Number(d.elapsed_ms ?? 0),
     };
   });
 
