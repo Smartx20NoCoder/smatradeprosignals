@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
+  checkSubscriptionFn,
   checkSymbolsMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
