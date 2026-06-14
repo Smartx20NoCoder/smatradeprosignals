@@ -131,8 +131,10 @@ export async function getSymbolPrice(opts: {
   accountId: string;
   token: string;
   symbol: string;
+  keepSubscription?: boolean;
 }): Promise<{ ok: boolean; bid?: number; ask?: number; error?: string }> {
-  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price?keepSubscription=true`;
+  const qs = opts.keepSubscription !== false ? "?keepSubscription=true" : "";
+  const url = `${await clientBase(opts)}/users/current/accounts/${opts.accountId}/symbols/${encodeURIComponent(opts.symbol)}/current-price${qs}`;
   try {
     const res = await fetch(url, { headers: { "auth-token": opts.token } });
     const text = await res.text();
