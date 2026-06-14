@@ -2077,13 +2077,14 @@ function SymbolKeepaliveCard() {
     checkedAt?: number;
     loading: boolean;
     error?: string;
+    reconnect_triggered?: boolean;
   }>({ keepalive: [], loading: true });
 
   async function refresh() {
     setData((d) => ({ ...d, loading: true }));
     try {
       const r = await pingMetaApiFn({});
-      setData({ keepalive: r.keepalive ?? [], checkedAt: Date.now(), loading: false, error: r.ok ? undefined : r.reason });
+      setData({ keepalive: r.keepalive ?? [], checkedAt: Date.now(), loading: false, error: r.ok ? undefined : r.reason, reconnect_triggered: r.reconnect_triggered });
     } catch (e) {
       setData({ keepalive: [], loading: false, checkedAt: Date.now(), error: (e as Error).message });
     }
@@ -2100,6 +2101,11 @@ function SymbolKeepaliveCard() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Symbol Subscriptions</div>
         <div className="flex items-center gap-2">
+          {data.reconnect_triggered && (
+            <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-500">
+              ⟳ Reconnected
+            </span>
+          )}
           <span className="text-[10px] text-muted-foreground">
             {data.checkedAt ? `${timeAgo(new Date(data.checkedAt).toISOString())} ago` : "—"}
           </span>
