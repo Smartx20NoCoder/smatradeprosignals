@@ -103,11 +103,56 @@ Deno.serve(async (req) => {
       await new Promise(r => setTimeout(r, 500));
     }
 
+    // Auto-reconnect when more than half the symbols are dead
+    const effectiveRegion = region;
+    const effectiveAccountId = accountId;
+    const effectiveToken = token;
+    const deadCount = keepalive.filter(k => !k.ok).length;
+    const totalCount = keepalive.length;
+    const reconnect_triggered = deadCount > 0 && deadCount >= Math.ceil(totalCount / 2);
+
+    if (reconnect_triggered) {
+      try {
+        console.log(`Auto-reconnect triggered: ${deadCount}/${totalCount} symbols dead`);
+        const reconnectUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/reconnect`;
+        await fetch(reconnectUrl, {
+          method: "POST",
+          headers: {
+            "auth-token": effectiveToken,
+            "Content-Type": "application/json",
+          },
+        });
+
+        // Wait for terminal to reconnect and refresh Market Watch
+        await new Promise(r => setTimeout(r, 6000));
+
+        // Re-ping dead symbols after reconnect
+        for (const entry of keepalive.filter(k => !k.ok)) {
+          try {
+            const price = await getSymbolPrice({
+              region: effectiveRegion,
+              accountId: effectiveAccountId,
+              token: effectiveToken,
+              symbol: entry.symbol,
+            });
+            if (price.ok && price.bid != null) {
+              entry.ok = true;
+              entry.bid = price.bid;
+              console.log(`Recovered after reconnect: ${entry.pair} bid=${price.bid}`);
+            }
+          } catch { /* silent */ }
+          await new Promise(r => setTimeout(r, 800));
+        }
+      } catch (e) {
+        console.log(`Auto-reconnect failed: ${e}`);
+      }
+    }
+
     await supabase.from("app_settings").update({
-      metaapi_keepalive_last: { checked_at: new Date().toISOString(), results: keepalive },
+      metaapi_keepalive_last: { checked_at: new Date().toISOString(), results: keepalive, reconnect_triggered },
     }).eq("id", "singleton");
 
-    return new Response(JSON.stringify({ ok: true, account: info.data, keepalive }), {
+    return new Response(JSON.stringify({ ok: true, account: info.data, keepalive, reconnect_triggered }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

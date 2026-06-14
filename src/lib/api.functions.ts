@@ -53,13 +53,14 @@ export const updateAppSettingsFn = createServerFn({ method: "POST" })
 export const pingMetaApiFn = createServerFn({ method: "POST" })
   .handler(async () => {
     const { status, data } = await callEdge("metaapi-ping", {});
-    if (status >= 500) return { ok: false as boolean, reason: "broker check failed", account: null as any, keepalive: [] as Array<{ pair: string; symbol: string; ok: boolean; bid?: number }> };
+    if (status >= 500) return { ok: false as boolean, reason: "broker check failed", account: null as any, keepalive: [] as Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>, reconnect_triggered: false };
     const d = (data ?? {}) as any;
     return {
       ok: !!d.ok,
       reason: typeof d.reason === "string" ? d.reason : undefined,
       account: d.account ?? null,
       keepalive: Array.isArray(d.keepalive) ? (d.keepalive as Array<{ pair: string; symbol: string; ok: boolean; bid?: number }>) : [],
+      reconnect_triggered: !!d.reconnect_triggered,
     };
   });
 
