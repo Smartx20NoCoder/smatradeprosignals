@@ -1301,7 +1301,7 @@ function MetaApiPanel({
   async function ping() {
     setTesting(true);
     try {
-      const j = await pingMetaApiFn({ mode: "connection" });
+      const j = await pingMetaApiFn({ data: { mode: "connection" } });
       setStatus(j as any);
     } catch (e) {
       setStatus({ ok: false, reason: (e as Error).message });
