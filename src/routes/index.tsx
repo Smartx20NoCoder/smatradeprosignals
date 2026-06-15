@@ -903,13 +903,15 @@ function SignalList({
 }
 
 function SignalRow({
-  s, onStatus, onPartial, warning, newsRisk,
+  s, onStatus, onPartial, warning, newsRisk, appSettings, onRefresh,
 }: {
   s: Signal;
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   warning: string | null;
   newsRisk: string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
 }) {
   const long = s.direction === "Long";
   const stage = stageOf(s);
@@ -920,6 +922,38 @@ function SignalRow({
 
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
+
+  // Retry eligibility — failed/skipped/never-executed, within 3h, auto-trade + pair both enabled.
+  const retryFn = useServerFn(retryExecutionFn);
+  const [retryState, setRetryState] = useState<
+    { kind: "idle" } | { kind: "loading" } | { kind: "sent" } | { kind: "error"; msg: string }
+  >({ kind: "idle" });
+  const execStatus = s.metaapi_execution_status ?? null;
+  const retryStatusEligible =
+    execStatus === "failed" || execStatus === "skipped" || execStatus === null || execStatus === "none";
+  const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
+  const retryEligible =
+    retryStatusEligible &&
+    signalAgeMs < 3 * 60 * 60 * 1000 &&
+    !!appSettings.metaapi_auto_trade &&
+    (appSettings.pair_auto_execute?.[s.pair] !== false);
+
+  async function handleRetry() {
+    setRetryState({ kind: "loading" });
+    try {
+      const res = await retryFn({ data: { signal_id: s.id } });
+      if (res.ok) {
+        setRetryState({ kind: "sent" });
+        setTimeout(() => { setRetryState({ kind: "idle" }); void onRefresh(); }, 3000);
+      } else {
+        setRetryState({ kind: "error", msg: res.reason ?? "Retry failed" });
+        setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+      }
+    } catch (e: any) {
+      setRetryState({ kind: "error", msg: String(e?.message ?? e).slice(0, 200) });
+      setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+    }
+  }
 
   return (
     <div className={`border rounded p-3 transition-colors ${
