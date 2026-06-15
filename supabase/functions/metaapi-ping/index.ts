@@ -79,6 +79,81 @@ Deno.serve(async (req) => {
 
     const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number; attempt: number }[] = [];
 
+    const effectiveRegion = region;
+    const effectiveAccountId = accountId;
+    const effectiveToken = token;
+
+    // Force-subscribe mode (manual button): aggressive redeploy + reconnect + per-pair retries.
+    if (isForceSubscribe) {
+      const results: { pair: string; symbol: string; ok: boolean; bid?: number; recovered: boolean }[] = [];
+
+      // Step A — Force full account redeploy (stronger than reconnect)
+      try {
+        const redeployUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/deploy`;
+        await fetch(redeployUrl, {
+          method: "POST",
+          headers: { "auth-token": effectiveToken, "Content-Type": "application/json" },
+        });
+        console.log("Force deploy triggered");
+      } catch (e) { console.log("Deploy failed:", e); }
+
+      // Step B — Wait for terminal to re-establish
+      await new Promise(r => setTimeout(r, 8000));
+
+      // Step C — Try reconnect as well
+      try {
+        const reconnectUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/reconnect`;
+        await fetch(reconnectUrl, {
+          method: "POST",
+          headers: { "auth-token": effectiveToken, "Content-Type": "application/json" },
+        });
+      } catch (e) { console.log("Reconnect failed:", e); }
+
+      // Step D — Wait again after reconnect
+      await new Promise(r => setTimeout(r, 5000));
+
+      // Step E — Probe all pairs with up to 5 retries each, 3s apart
+      for (const pair of activePairs) {
+        const symbol = pairToSymbol(pair, effectiveSuffix);
+        let ok = false; let bid: number | undefined; let recovered = false;
+
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          try {
+            const price = await getSymbolPrice({
+              region: effectiveRegion,
+              accountId: effectiveAccountId,
+              token: effectiveToken,
+              symbol,
+            });
+            if (price.ok && price.bid != null) {
+              ok = true; bid = price.bid;
+              recovered = attempt > 1;
+              console.log(`${pair} OK on attempt ${attempt}: bid=${price.bid}`);
+              break;
+            }
+          } catch (e) { console.log(`${pair} attempt ${attempt} error: ${e}`); }
+          if (attempt < 5) await new Promise(r => setTimeout(r, 3000));
+        }
+        results.push({ pair, symbol, ok, bid, recovered });
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      // Save results and return
+      await supabase.from("app_settings").update({
+        metaapi_keepalive_last: JSON.stringify(results),
+      }).eq("id", "singleton");
+
+      return new Response(JSON.stringify({
+        ok: true,
+        keepalive: results,
+        force_subscribe: true,
+        recovered: results.filter(r => r.ok).length,
+        total: results.length,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+
+
 
 
     // Pass 1 — force fresh subscription for all pairs
