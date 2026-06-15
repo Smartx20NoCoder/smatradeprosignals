@@ -6,6 +6,7 @@ import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
   checkSubscriptionFn,
   checkSymbolsMetaApiFn,
+  forceSubscribeMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
