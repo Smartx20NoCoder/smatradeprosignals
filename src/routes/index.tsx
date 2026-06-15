@@ -9,6 +9,7 @@ import {
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
+  retryExecutionFn,
   testTradeMetaApiFn,
   updateAppSettingsFn,
 } from "@/lib/api.functions";
