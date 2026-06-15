@@ -851,13 +851,15 @@ function ScanReport({ report }: { report: PairReport[] }) {
 type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
 
 function SignalList({
-  signals, onStatus, onPartial, exposureCheck, newsRiskCheck,
+  signals, onStatus, onPartial, exposureCheck, newsRiskCheck, appSettings, onRefresh,
 }: {
   signals: Signal[];
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   exposureCheck: (s: Signal) => string | null;
   newsRiskCheck: (s: Signal) => string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
 }) {
   const PAGE = 50;
   const [page, setPage] = useState(0);
@@ -877,7 +879,8 @@ function SignalList({
       {slice.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
           warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
-          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
+          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null}
+          appSettings={appSettings} onRefresh={onRefresh} />
       ))}
       {signals.length > PAGE && (
         <div className="flex items-center justify-between gap-3 pt-3 text-xs">
