@@ -192,9 +192,7 @@ Deno.serve(async (req) => {
     }
 
     // Auto-reconnect when more than half the symbols are dead
-    const effectiveRegion = region;
-    const effectiveAccountId = accountId;
-    const effectiveToken = token;
+
     const deadCount = keepalive.filter(k => !k.ok).length;
     const totalCount = keepalive.length;
     const reconnect_triggered = deadCount > 0 && deadCount >= Math.ceil(totalCount / 2);
