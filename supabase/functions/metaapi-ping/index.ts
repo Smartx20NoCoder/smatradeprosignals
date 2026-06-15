@@ -76,60 +76,8 @@ Deno.serve(async (req) => {
       .filter(([, enabled]) => enabled)
       .map(([pair]) => pair);
 
-    const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number; attempt: number; recovered?: boolean }[] = [];
+    const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number; attempt: number }[] = [];
 
-    // Force-subscribe mode (manual button): explicit reconnect + fresh subscribe for every active pair.
-    if (isForceSubscribe) {
-      console.log(`Force-subscribe triggered for ${activePairs.length} pairs`);
-      try {
-        const reconnectUrl = `https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${accountId}/reconnect`;
-        await fetch(reconnectUrl, {
-          method: "POST",
-          headers: { "auth-token": token, "Content-Type": "application/json" },
-        });
-      } catch (e) {
-        console.log(`Force-subscribe reconnect call failed: ${e}`);
-      }
-      // Allow terminal to come back + refresh Market Watch
-      await new Promise((r) => setTimeout(r, 8000));
-
-      for (const pair of activePairs) {
-        const symbol = pairToSymbol(pair, effectiveSuffix);
-        let ok = false;
-        let bid: number | undefined;
-        let attempts = 1;
-        try {
-          const p1 = await getSymbolPrice({ region, accountId, token, symbol, keepSubscription: false });
-          if (p1.ok && p1.bid != null) {
-            ok = true;
-            bid = p1.bid;
-          } else {
-            await new Promise((r) => setTimeout(r, 3000));
-            attempts = 2;
-            const p2 = await getSymbolPrice({ region, accountId, token, symbol, keepSubscription: false });
-            if (p2.ok && p2.bid != null) { ok = true; bid = p2.bid; }
-          }
-        } catch (e) {
-          console.log(`Force-subscribe error ${pair}: ${e}`);
-        }
-        // Lock in subscription for survivors
-        if (ok) {
-          try {
-            await getSymbolPrice({ region, accountId, token, symbol, keepSubscription: true });
-          } catch { /* silent */ }
-        }
-        keepalive.push({ pair, symbol, ok, bid, attempt: attempts, recovered: ok });
-        await new Promise((r) => setTimeout(r, 600));
-      }
-
-      await supabase.from("app_settings").update({
-        metaapi_keepalive_last: { checked_at: new Date().toISOString(), results: keepalive, reconnect_triggered: true, mode: "force_subscribe" },
-      }).eq("id", "singleton");
-
-      return new Response(JSON.stringify({ ok: true, account: info.data, keepalive, reconnect_triggered: true, mode: "force_subscribe" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
 
     // Pass 1 — force fresh subscription for all pairs
