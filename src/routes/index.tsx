@@ -1515,15 +1515,25 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS"].map((name) => {
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH"].map((name) => {
             const defaults: Record<string, boolean> = {
               "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
+              "OB+FVG": false, "Order Block": false, "CHOCH": false,
             };
+            const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
             const cfg = appSettings.setup_auto_execute ?? {};
             const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
             return (
               <label key={name} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
-                <span className="font-mono truncate" title={name}>{name}</span>
+                <span className="flex items-center gap-1 min-w-0">
+                  <span className="font-mono truncate" title={name}>{name}</span>
+                  {lowSample && (
+                    <span
+                      className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-4/20 text-chart-4 uppercase tracking-wider shrink-0"
+                      title="Low sample size — unproven setup. Enable at your own risk."
+                    >⚠ Low</span>
+                  )}
+                </span>
                 <Toggle on={on} onChange={(v) => saveAppSettings({ setup_auto_execute: { ...cfg, [name]: v } } as any)} />
               </label>
             );
