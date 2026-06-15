@@ -9,6 +9,7 @@ import {
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
+  retryExecutionFn,
   testTradeMetaApiFn,
   updateAppSettingsFn,
 } from "@/lib/api.functions";
@@ -752,7 +753,8 @@ function ScalpEdge() {
               maxTrades={appSettings.metaapi_max_trades ?? 3}
             />
             <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
-              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck} />
+              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck}
+              appSettings={appSettings} onRefresh={loadSignals} />
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
@@ -850,13 +852,15 @@ function ScanReport({ report }: { report: PairReport[] }) {
 type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
 
 function SignalList({
-  signals, onStatus, onPartial, exposureCheck, newsRiskCheck,
+  signals, onStatus, onPartial, exposureCheck, newsRiskCheck, appSettings, onRefresh,
 }: {
   signals: Signal[];
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   exposureCheck: (s: Signal) => string | null;
   newsRiskCheck: (s: Signal) => string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
 }) {
   const PAGE = 50;
   const [page, setPage] = useState(0);
@@ -876,7 +880,8 @@ function SignalList({
       {slice.map((s) => (
         <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
           warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
-          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null} />
+          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null}
+          appSettings={appSettings} onRefresh={onRefresh} />
       ))}
       {signals.length > PAGE && (
         <div className="flex items-center justify-between gap-3 pt-3 text-xs">
@@ -898,13 +903,15 @@ function SignalList({
 }
 
 function SignalRow({
-  s, onStatus, onPartial, warning, newsRisk,
+  s, onStatus, onPartial, warning, newsRisk, appSettings, onRefresh,
 }: {
   s: Signal;
   onStatus: (s: Signal, status: StatusKey) => void;
   onPartial: (s: Signal) => void;
   warning: string | null;
   newsRisk: string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
 }) {
   const long = s.direction === "Long";
   const stage = stageOf(s);
@@ -915,6 +922,38 @@ function SignalRow({
 
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
+
+  // Retry eligibility — failed/skipped/never-executed, within 3h, auto-trade + pair both enabled.
+  const retryFn = useServerFn(retryExecutionFn);
+  const [retryState, setRetryState] = useState<
+    { kind: "idle" } | { kind: "loading" } | { kind: "sent" } | { kind: "error"; msg: string }
+  >({ kind: "idle" });
+  const execStatus = s.metaapi_execution_status ?? null;
+  const retryStatusEligible =
+    execStatus === "failed" || execStatus === "skipped" || execStatus === null || execStatus === "none";
+  const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
+  const retryEligible =
+    retryStatusEligible &&
+    signalAgeMs < 3 * 60 * 60 * 1000 &&
+    !!appSettings.metaapi_auto_trade &&
+    (appSettings.pair_auto_execute?.[s.pair] !== false);
+
+  async function handleRetry() {
+    setRetryState({ kind: "loading" });
+    try {
+      const res = await retryFn({ data: { signal_id: s.id } });
+      if (res.ok) {
+        setRetryState({ kind: "sent" });
+        setTimeout(() => { setRetryState({ kind: "idle" }); void onRefresh(); }, 3000);
+      } else {
+        setRetryState({ kind: "error", msg: res.reason ?? "Retry failed" });
+        setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+      }
+    } catch (e: any) {
+      setRetryState({ kind: "error", msg: String(e?.message ?? e).slice(0, 200) });
+      setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+    }
+  }
 
   return (
     <div className={`border rounded p-3 transition-colors ${
@@ -986,6 +1025,31 @@ function SignalRow({
               </span>
             );
           })()}
+          {retryEligible && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={retryState.kind === "loading" || retryState.kind === "sent"}
+              title="Retry auto-execution. Only available within 3 hours of signal. All risk gates still apply."
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded border uppercase tracking-wider transition-colors ${
+                retryState.kind === "sent"
+                  ? "border-bull/60 text-bull bg-bull/10"
+                  : retryState.kind === "error"
+                  ? "border-destructive/60 text-destructive bg-destructive/10"
+                  : "border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50"
+              }`}
+            >
+              {retryState.kind === "loading" ? "⟳ …"
+                : retryState.kind === "sent" ? "✓ Sent"
+                : retryState.kind === "error" ? "✗ Failed"
+                : "↺ Retry"}
+            </button>
+          )}
+          {retryState.kind === "error" && (
+            <span className="text-[10px] text-destructive truncate max-w-[240px]" title={retryState.msg}>
+              ↳ {retryState.msg}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-xs">
           {s.mfi_score != null && (<><span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
@@ -1515,15 +1579,25 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS"].map((name) => {
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH"].map((name) => {
             const defaults: Record<string, boolean> = {
               "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
+              "OB+FVG": false, "Order Block": false, "CHOCH": false,
             };
+            const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
             const cfg = appSettings.setup_auto_execute ?? {};
             const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
             return (
               <label key={name} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
-                <span className="font-mono truncate" title={name}>{name}</span>
+                <span className="flex items-center gap-1 min-w-0">
+                  <span className="font-mono truncate" title={name}>{name}</span>
+                  {lowSample && (
+                    <span
+                      className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-4/20 text-chart-4 uppercase tracking-wider shrink-0"
+                      title="Low sample size — unproven setup. Enable at your own risk."
+                    >⚠ Low</span>
+                  )}
+                </span>
                 <Toggle on={on} onChange={(v) => saveAppSettings({ setup_auto_execute: { ...cfg, [name]: v } } as any)} />
               </label>
             );

@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
   if (unauth) return unauth;
 
   try {
-    const { signal_id } = await req.json().catch(() => ({}));
+    const { signal_id, force_retry } = await req.json().catch(() => ({}));
     if (!signal_id || typeof signal_id !== "string") {
       return safeError("signal_id required", 400);
     }
@@ -51,10 +51,17 @@ Deno.serve(async (req) => {
       supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle(),
     ]);
     if (!signal) return safeError("signal not found", 404);
-    if ((signal as any).metaapi_position_id || (signal as any).metaapi_order_id) {
+    if (!force_retry && ((signal as any).metaapi_position_id || (signal as any).metaapi_order_id)) {
       return new Response(JSON.stringify({ ok: true, skipped: "already executed" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    if (force_retry) {
+      await supabase.from("signals").update({
+        metaapi_execution_status: "retrying",
+        metaapi_execution_error: null,
+        paper_status: "watching",
+      }).eq("id", signal_id);
     }
 
     const c: any = cfg ?? {};
