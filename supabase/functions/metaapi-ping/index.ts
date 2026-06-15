@@ -78,6 +78,8 @@ Deno.serve(async (req) => {
 
     const keepalive: { pair: string; symbol: string; ok: boolean; bid?: number; attempt: number }[] = [];
 
+
+
     // Pass 1 — force fresh subscription for all pairs
     for (const pair of activePairs) {
       const symbol = pairToSymbol(pair, effectiveSuffix);
