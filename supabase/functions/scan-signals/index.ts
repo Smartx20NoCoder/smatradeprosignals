@@ -19,7 +19,8 @@ const PAIRS = [
   "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
 ];
 // Disabled setups — kept in code but filtered out of signal generation.
-const DISABLED_SETUPS = new Set(["OB+FVG", "Order Block", "CHOCH"]);
+// Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
+const DISABLED_SETUPS = new Set<string>();
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
