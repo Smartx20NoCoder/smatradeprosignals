@@ -1025,6 +1025,31 @@ function SignalRow({
               </span>
             );
           })()}
+          {retryEligible && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={retryState.kind === "loading" || retryState.kind === "sent"}
+              title="Retry auto-execution. Only available within 3 hours of signal. All risk gates still apply."
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded border uppercase tracking-wider transition-colors ${
+                retryState.kind === "sent"
+                  ? "border-bull/60 text-bull bg-bull/10"
+                  : retryState.kind === "error"
+                  ? "border-destructive/60 text-destructive bg-destructive/10"
+                  : "border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50"
+              }`}
+            >
+              {retryState.kind === "loading" ? "⟳ …"
+                : retryState.kind === "sent" ? "✓ Sent"
+                : retryState.kind === "error" ? "✗ Failed"
+                : "↺ Retry"}
+            </button>
+          )}
+          {retryState.kind === "error" && (
+            <span className="text-[10px] text-destructive truncate max-w-[240px]" title={retryState.msg}>
+              ↳ {retryState.msg}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-xs">
           {s.mfi_score != null && (<><span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
