@@ -6,6 +6,7 @@ import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
   checkSubscriptionFn,
   checkSymbolsMetaApiFn,
+  forceSubscribeMetaApiFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
@@ -2154,10 +2155,12 @@ function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
     [appSettings.pair_auto_execute],
   );
 
-  type Entry = { ok: boolean; bid?: number; loading: boolean; symbol?: string };
+  type Entry = { ok: boolean; bid?: number; loading: boolean; symbol?: string; recovered?: boolean };
   const [subResults, setSubResults] = useState<Record<string, Entry>>({});
   const [checkedAt, setCheckedAt] = useState<number | undefined>();
   const [running, setRunning] = useState(false);
+  const [forceSubscribeLoading, setForceSubscribeLoading] = useState(false);
+  const [forceSummary, setForceSummary] = useState<{ recovered: number; total: number } | undefined>();
   const runIdRef = useRef(0);
 
   async function refresh() {
@@ -2188,6 +2191,35 @@ function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
     }
   }
 
+  async function handleForceSubscribe() {
+    if (forceSubscribeLoading) return;
+    setForceSubscribeLoading(true);
+    setForceSummary(undefined);
+    // Cancel any in-flight refresh by bumping the run id, then seed pulsing state.
+    runIdRef.current += 1;
+    const pulsing: Record<string, Entry> = {};
+    for (const p of activePairs) pulsing[p] = { ok: false, loading: true };
+    setSubResults(pulsing);
+    try {
+      const res = await forceSubscribeMetaApiFn();
+      const next: Record<string, Entry> = {};
+      for (const p of activePairs) next[p] = { ok: false, loading: false };
+      for (const r of res.keepalive ?? []) {
+        next[r.pair] = { ok: r.ok, bid: r.bid, loading: false, symbol: r.symbol, recovered: r.recovered };
+      }
+      setSubResults(next);
+      setForceSummary({ recovered: res.recovered, total: res.total });
+      setCheckedAt(Date.now());
+    } catch {
+      const next: Record<string, Entry> = {};
+      for (const p of activePairs) next[p] = { ok: false, loading: false };
+      setSubResults(next);
+      setForceSummary({ recovered: 0, total: activePairs.length });
+    } finally {
+      setForceSubscribeLoading(false);
+    }
+  }
+
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, 60_000);
@@ -2205,25 +2237,41 @@ function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
           </span>
           <button
             onClick={refresh}
-            disabled={running}
+            disabled={running || forceSubscribeLoading}
             className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
             {running ? "…" : "Refresh"}
           </button>
+          <button
+            onClick={handleForceSubscribe}
+            disabled={forceSubscribeLoading}
+            title="Retry hard recovery. Use when pairs show ❌ after a normal ping. Takes ~30–45 seconds."
+            className="text-xs px-2 py-1 border border-amber-500 text-amber-400 rounded hover:bg-amber-500/10 disabled:opacity-50">
+            {forceSubscribeLoading ? "⚡ Subscribing..." : "⚡ FORCE SUBSCRIBE"}
+          </button>
         </div>
       </div>
+      {forceSubscribeLoading && (
+        <div className="mt-2 text-[11px] text-amber-400 animate-pulse">
+          Re-deploying terminal and re-subscribing all pairs… this may take up to 45 seconds.
+        </div>
+      )}
       <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
         {activePairs.length === 0 && (
           <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
         )}
         {activePairs.map((pair) => {
           const k = subResults[pair] ?? { ok: false, loading: true };
+          const pulse = k.loading && forceSubscribeLoading ? "animate-pulse" : "";
           return (
-            <div key={pair} className="bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2">
+            <div key={pair} className={`bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2 ${pulse}`}>
               <span className="flex items-center gap-1.5">
                 <span className={k.loading ? "text-muted-foreground" : k.ok ? "text-bull" : "text-bear"}>
                   {k.loading ? "⏳" : k.ok ? "✅" : "❌"}
                 </span>
                 <span className="font-semibold">{pair}</span>
+                {k.recovered && !k.loading && k.ok && (
+                  <span className="text-[10px] text-amber-400" title="Recovered via force subscribe">↺</span>
+                )}
                 {k.symbol && <span className="text-[10px] text-muted-foreground">{k.symbol}</span>}
               </span>
               <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
@@ -2233,10 +2281,17 @@ function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
           );
         })}
       </div>
+      {forceSummary && (
+        <div className={`mt-2 text-[11px] font-semibold ${forceSummary.recovered === forceSummary.total ? "text-bull" : forceSummary.recovered === 0 ? "text-bear" : "text-amber-400"}`}>
+          Recovered {forceSummary.recovered} / {forceSummary.total} pairs
+        </div>
+      )}
       <div className="text-[10px] text-muted-foreground mt-2">Probes one pair at a time. Background keepalive runs on the cron cycle.</div>
+      <div className="text-[10px] text-amber-400/70 mt-1">Forces terminal redeploy + reconnect. Use when pairs show ❌ after normal ping. Takes ~30–45 seconds.</div>
     </div>
   );
 }
+
 
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {

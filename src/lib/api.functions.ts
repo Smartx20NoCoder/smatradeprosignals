@@ -67,6 +67,30 @@ export const pingMetaApiFn = createServerFn({ method: "POST" })
     };
   });
 
+// MetaApi force-subscribe — manual aggressive recovery: redeploy + reconnect + per-pair retries.
+// Takes ~30–45s. Do not call automatically.
+export const forceSubscribeMetaApiFn = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { status, data: resp } = await callEdge("metaapi-ping", { mode: "force_subscribe" });
+    if (status >= 500) {
+      return {
+        ok: false as boolean,
+        keepalive: [] as Array<{ pair: string; symbol: string; ok: boolean; bid?: number; recovered: boolean }>,
+        recovered: 0,
+        total: 0,
+      };
+    }
+    const d = (resp ?? {}) as any;
+    return {
+      ok: !!d.ok,
+      keepalive: Array.isArray(d.keepalive)
+        ? (d.keepalive as Array<{ pair: string; symbol: string; ok: boolean; bid?: number; recovered: boolean }>)
+        : [],
+      recovered: Number(d.recovered ?? 0),
+      total: Number(d.total ?? 0),
+    };
+  });
+
 // MetaApi subscription probe — single-pair, fast, no retries.
 export const checkSubscriptionFn = createServerFn({ method: "POST" })
   .inputValidator((input: { pair: string }) =>
