@@ -752,7 +752,8 @@ function ScalpEdge() {
               maxTrades={appSettings.metaapi_max_trades ?? 3}
             />
             <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
-              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck} />
+              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck}
+              appSettings={appSettings} onRefresh={loadSignals} />
           </>
         )}
         {tab === "edge" && <EdgePanel stats={stats} />}
