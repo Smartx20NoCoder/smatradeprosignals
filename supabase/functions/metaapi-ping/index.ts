@@ -9,7 +9,6 @@ Deno.serve(async (req) => {
 
   const reqBody = await req.json().catch(() => ({}));
   const isConnectionOnly = reqBody?.mode === "connection";
-  const isForceSubscribe = reqBody?.mode === "force_subscribe";
 
   try {
     const supabase = createClient(
