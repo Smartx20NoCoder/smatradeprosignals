@@ -1335,9 +1335,10 @@ async function runScanJob(
     const day = new Date().toISOString().slice(0, 10);
     // Atomic per-key increments — safe under concurrent scan runs.
     let newCalls = 0;
-    const perKey: Array<{ key: 1 | 2; delta: number }> = [
-      { key: 1, delta: apiCallsKey1 },
-      { key: 2, delta: apiCallsKey2 },
+    const perKey: Array<{ key: KeyIdx; delta: number }> = [
+      { key: 1, delta: apiCallsByKey[1] },
+      { key: 2, delta: apiCallsByKey[2] },
+      { key: 3, delta: apiCallsByKey[3] },
     ];
     let rpcFailed = false;
     for (const { key, delta } of perKey) {
@@ -1354,14 +1355,15 @@ async function runScanJob(
     if (rpcFailed) {
       // Fallback to read-modify-write if RPC unavailable.
       const { data: usage } = await supabase.from("api_usage")
-        .select("calls, calls_key1, calls_key2").eq("day", day).maybeSingle();
-      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0 };
+        .select("calls, calls_key1, calls_key2, calls_key3").eq("day", day).maybeSingle();
+      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0, calls_key3: 0 };
       newCalls = (prev.calls ?? 0) + apiCalls;
       await supabase.from("api_usage").upsert({
         day,
         calls: newCalls,
-        calls_key1: (prev.calls_key1 ?? 0) + apiCallsKey1,
-        calls_key2: (prev.calls_key2 ?? 0) + apiCallsKey2,
+        calls_key1: (prev.calls_key1 ?? 0) + apiCallsByKey[1],
+        calls_key2: (prev.calls_key2 ?? 0) + apiCallsByKey[2],
+        calls_key3: (prev.calls_key3 ?? 0) + apiCallsByKey[3],
         updated_at: new Date().toISOString(),
       }, { onConflict: "day" });
     } else if (newCalls === 0) {
@@ -1375,7 +1377,7 @@ async function runScanJob(
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
-      active_td_key: activeKeyRef.idx, skipped_pairs: skippedPairs,
+      active_td_key: keyState.active, skipped_pairs: skippedPairs,
       news_events_loaded: events.length,
     };
 }
