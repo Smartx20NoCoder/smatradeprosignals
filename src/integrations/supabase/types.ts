@@ -19,6 +19,7 @@ export type Database = {
           calls: number
           calls_key1: number
           calls_key2: number
+          calls_key3: number
           day: string
           updated_at: string
         }
@@ -26,6 +27,7 @@ export type Database = {
           calls?: number
           calls_key1?: number
           calls_key2?: number
+          calls_key3?: number
           day: string
           updated_at?: string
         }
@@ -33,6 +35,7 @@ export type Database = {
           calls?: number
           calls_key1?: number
           calls_key2?: number
+          calls_key3?: number
           day?: string
           updated_at?: string
         }
@@ -43,6 +46,8 @@ export type Database = {
           active_td_key: number
           id: string
           key1_exhausted_at: string | null
+          key2_exhausted_at: string | null
+          key3_exhausted_at: string | null
           metaapi_account_id: string | null
           metaapi_account_id_live: string | null
           metaapi_active_mode: string | null
@@ -81,6 +86,8 @@ export type Database = {
           active_td_key?: number
           id?: string
           key1_exhausted_at?: string | null
+          key2_exhausted_at?: string | null
+          key3_exhausted_at?: string | null
           metaapi_account_id?: string | null
           metaapi_account_id_live?: string | null
           metaapi_active_mode?: string | null
@@ -119,6 +126,8 @@ export type Database = {
           active_td_key?: number
           id?: string
           key1_exhausted_at?: string | null
+          key2_exhausted_at?: string | null
+          key3_exhausted_at?: string | null
           metaapi_account_id?: string | null
           metaapi_account_id_live?: string | null
           metaapi_active_mode?: string | null
@@ -391,6 +400,8 @@ export type Database = {
           active_td_key: number
           id: string
           key1_exhausted_at: string
+          key2_exhausted_at: string
+          key3_exhausted_at: string
           metaapi_active_mode: string
           metaapi_auto_trade: boolean
           metaapi_configured: boolean
