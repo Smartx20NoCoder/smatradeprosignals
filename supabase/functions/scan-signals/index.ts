@@ -197,19 +197,37 @@ async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, con
   return next;
 }
 
-type KeySet = { primary: string; secondary?: string };
+type KeyIdx = 1 | 2 | 3;
+type KeySet = Partial<Record<KeyIdx, string>>;
+type KeyState = {
+  active: KeyIdx;
+  configured: KeyIdx[];   // ids of keys with a configured secret, sorted ascending
+  exhausted: Set<KeyIdx>; // keys that hit a rate limit this cycle
+};
+
+function nextAvailableKey(state: KeyState): KeyIdx | null {
+  // Find next non-exhausted configured key, starting after the current active one.
+  const order = state.configured;
+  if (order.length === 0) return null;
+  const startIdx = order.indexOf(state.active);
+  for (let i = 1; i <= order.length; i++) {
+    const cand = order[(startIdx + i) % order.length];
+    if (!state.exhausted.has(cand)) return cand;
+  }
+  return null;
+}
 
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
   keys: KeySet,
-  activeKeyRef: { idx: 1 | 2 },
+  state: KeyState,
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
   emit?: ProgressEmitter,
   source: string = "manual",
-): Promise<{ candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }> {
-  const keyIdx: 1 | 2 = activeKeyRef.idx;
+): Promise<{ candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }> {
+  const keyIdx: KeyIdx = state.active;
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
@@ -221,25 +239,32 @@ async function fetchCandles(
       return { candles: cached.candles as Candle[], usedApi: 0, usedKey: keyIdx, cached: true };
     }
   }
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${state.active})` });
 
-  // No retries within a single execution. On 429, skip the pair entirely.
-  const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
-  const fetchKey: 1 | 2 = activeKeyRef.idx;
+  // No retries within a single execution. On 429, mark key exhausted, rotate, and skip pair.
+  const fetchKey: KeyIdx = state.active;
+  const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
   let usedApi = 1;
 
   if (r.status === 429) {
+    // Mark current key as exhausted for this cycle and rotate to next available.
+    state.exhausted.add(fetchKey);
+    const nxt = nextAvailableKey(state);
+    if (nxt && nxt !== fetchKey) {
+      state.active = nxt;
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — rotating to Key ${nxt}` });
+    } else {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — no other keys available` });
+    }
     const msg = `TwelveData 429 — using stale cache for ${pair}`;
     console.log(msg);
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
       // The HTTP request was sent (and counted by TwelveData), so count it locally too.
       return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
     }
     // No cache available — skip this pair this cycle. Still counts as an API call.
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
     const err = new Error(`429 no cache: ${pair}`);
     (err as any).usedApi = 1;
     (err as any).usedKey = fetchKey;
@@ -286,7 +311,7 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${state.active})` });
   return { candles: fresh, usedApi, usedKey: fetchKey, cached: false };
 }
 
@@ -888,9 +913,11 @@ type ActiveSettings = {
   paused: boolean;
   trading_hours_start_utc: number;
   trading_hours_end_utc: number;
-  active_td_key: 1 | 2;
+  active_td_key: KeyIdx;
   session_config: SessionConfig;
   key1_exhausted_at: string | null;
+  key2_exhausted_at: string | null;
+  key3_exhausted_at: string | null;
   pair_auto_execute: Record<string, boolean>;
   scan_interval_minutes: number;
 };
@@ -917,31 +944,43 @@ function isSameUtcDay(a: Date, b: Date): boolean {
     && a.getUTCDate() === b.getUTCDate();
 }
 
-async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
+async function loadSettings(supabase: ReturnType<typeof createClient>, configured: KeyIdx[]): Promise<ActiveSettings> {
   const { data } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-  const persistedKey: 1 | 2 = ((data?.active_td_key ?? 1) === 2 ? 2 : 1);
-  const exhaustedRaw = (data?.key1_exhausted_at as string | null) ?? null;
-  let key1ExhaustedAt: string | null = exhaustedRaw;
-  let effectiveKey: 1 | 2 = persistedKey;
+  const rawActive = Number(data?.active_td_key ?? 1);
+  const persistedKey: KeyIdx = (rawActive === 2 ? 2 : rawActive === 3 ? 3 : 1);
+  const now = new Date();
 
-  if (exhaustedRaw) {
-    const exhaustedDate = new Date(exhaustedRaw);
-    if (isSameUtcDay(exhaustedDate, new Date())) {
-      // Key 1 was rate-limited today — start directly on Key 2.
-      effectiveKey = 2;
-    } else {
-      // Prior UTC day — clear the flag AND reset active_td_key back to 1
-      // so Key 1 is brought back into rotation each UTC day.
-      key1ExhaustedAt = null;
-      effectiveKey = 1;
-      try {
-        await supabase.from("app_settings").update({
-          key1_exhausted_at: null,
-          active_td_key: 1,
-          updated_at: new Date().toISOString(),
-        }).eq("id", "singleton");
-      } catch (_) { /* ignore */ }
+  // Reset any exhausted_at from a prior UTC day.
+  const raw: Record<KeyIdx, string | null> = {
+    1: (data?.key1_exhausted_at as string | null) ?? null,
+    2: (data?.key2_exhausted_at as string | null) ?? null,
+    3: (data?.key3_exhausted_at as string | null) ?? null,
+  };
+  const stillExhausted: Record<KeyIdx, string | null> = { 1: null, 2: null, 3: null };
+  const resetPatch: Record<string, unknown> = {};
+  for (const k of [1, 2, 3] as KeyIdx[]) {
+    if (raw[k] && isSameUtcDay(new Date(raw[k]!), now)) {
+      stillExhausted[k] = raw[k];
+    } else if (raw[k]) {
+      resetPatch[`key${k}_exhausted_at`] = null;
     }
+  }
+
+  // Determine effective active key: prefer persisted, else first non-exhausted configured.
+  const candidateOrder: KeyIdx[] = [persistedKey, ...configured.filter(k => k !== persistedKey)];
+  let effectiveKey: KeyIdx = persistedKey;
+  for (const k of candidateOrder) {
+    if (configured.includes(k) && !stillExhausted[k]) { effectiveKey = k; break; }
+  }
+
+  if (Object.keys(resetPatch).length > 0 || effectiveKey !== persistedKey) {
+    try {
+      await supabase.from("app_settings").update({
+        ...resetPatch,
+        active_td_key: effectiveKey,
+        updated_at: new Date().toISOString(),
+      }).eq("id", "singleton");
+    } catch (_) { /* ignore */ }
   }
 
   return {
@@ -950,7 +989,9 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
     trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
     active_td_key: effectiveKey,
     session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
-    key1_exhausted_at: key1ExhaustedAt,
+    key1_exhausted_at: stillExhausted[1],
+    key2_exhausted_at: stillExhausted[2],
+    key3_exhausted_at: stillExhausted[3],
     pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
     scan_interval_minutes: Number(data?.scan_interval_minutes ?? 15) === 30 ? 30 : 15,
   };
@@ -1003,7 +1044,16 @@ async function runScanJob(
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = TFS;
-    const activeKeyRef: { idx: 1 | 2 } = { idx: settings.active_td_key };
+    const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
+    const initialExhausted = new Set<KeyIdx>();
+    if (settings.key1_exhausted_at) initialExhausted.add(1);
+    if (settings.key2_exhausted_at) initialExhausted.add(2);
+    if (settings.key3_exhausted_at) initialExhausted.add(3);
+    const keyState: KeyState = {
+      active: settings.active_td_key,
+      configured,
+      exhausted: initialExhausted,
+    };
 
     const nowDate = new Date();
     // Filter pair list for weekend / Friday-late: only BTC trades.
@@ -1024,13 +1074,11 @@ async function runScanJob(
     const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
-    let apiCallsKey1 = 0;
-    let apiCallsKey2 = 0;
-    const accumulateCall = (usedApi: number, usedKey: 1 | 2) => {
+    const apiCallsByKey: Record<KeyIdx, number> = { 1: 0, 2: 0, 3: 0 };
+    const accumulateCall = (usedApi: number, usedKey: KeyIdx) => {
       if (usedApi <= 0) return;
       apiCalls += usedApi;
-      if (usedKey === 1) apiCallsKey1 += usedApi;
-      else apiCallsKey2 += usedApi;
+      apiCallsByKey[usedKey] = (apiCallsByKey[usedKey] ?? 0) + usedApi;
     };
     const signals: Signal[] = [];
     const errors: string[] = [];
@@ -1054,16 +1102,16 @@ async function runScanJob(
       // Secondary pairs: silently skip on any fetch failure (429, 500, timeout)
       if (SECONDARY_PAIRS.has(pair)) {
         try {
-          const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
+          const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
           for (const tf of tfsToFetch) {
-            const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
+            const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
             fetches.push(f);
             accumulateCall(f.usedApi, f.usedKey);
           }
           pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
-          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
+          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
           console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
           pairData[pair] = null;
           emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
@@ -1072,9 +1120,9 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
+          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
           fetches.push(f);
           accumulateCall(f.usedApi, f.usedKey);
         }
@@ -1083,26 +1131,36 @@ async function runScanJob(
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
-        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
+        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
       }
     }
 
-    // Persist whichever key we ended on (in case a failover happened).
-    if (activeKeyRef.idx !== settings.active_td_key) {
-      try {
-        const update: Record<string, unknown> = {
-          active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
-        };
-        // If we failed over away from Key 1, mark Key 1 as exhausted for today
-        // so the next scan starts directly on Key 2 (cleared at next UTC day).
-        if (settings.active_td_key === 1 && activeKeyRef.idx === 2) {
-          update.key1_exhausted_at = new Date().toISOString();
+    // Persist active key + any newly-exhausted keys (in case a failover happened).
+    {
+      const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      let changed = false;
+      if (keyState.active !== settings.active_td_key) {
+        update.active_td_key = keyState.active;
+        changed = true;
+      }
+      const wasExhausted: Record<KeyIdx, boolean> = {
+        1: !!settings.key1_exhausted_at,
+        2: !!settings.key2_exhausted_at,
+        3: !!settings.key3_exhausted_at,
+      };
+      const nowIso = new Date().toISOString();
+      for (const k of [1, 2, 3] as KeyIdx[]) {
+        if (keyState.exhausted.has(k) && !wasExhausted[k]) {
+          update[`key${k}_exhausted_at`] = nowIso;
+          changed = true;
         }
-        await supabase.from("app_settings").update(update).eq("id", "singleton");
-      } catch (_) { /* ignore */ }
+      }
+      if (changed) {
+        try { await supabase.from("app_settings").update(update).eq("id", "singleton"); } catch (_) { /* ignore */ }
+      }
     }
 
     // Build candidate signals (may contain multiple per pair+direction)
@@ -1277,9 +1335,10 @@ async function runScanJob(
     const day = new Date().toISOString().slice(0, 10);
     // Atomic per-key increments — safe under concurrent scan runs.
     let newCalls = 0;
-    const perKey: Array<{ key: 1 | 2; delta: number }> = [
-      { key: 1, delta: apiCallsKey1 },
-      { key: 2, delta: apiCallsKey2 },
+    const perKey: Array<{ key: KeyIdx; delta: number }> = [
+      { key: 1, delta: apiCallsByKey[1] },
+      { key: 2, delta: apiCallsByKey[2] },
+      { key: 3, delta: apiCallsByKey[3] },
     ];
     let rpcFailed = false;
     for (const { key, delta } of perKey) {
@@ -1296,14 +1355,15 @@ async function runScanJob(
     if (rpcFailed) {
       // Fallback to read-modify-write if RPC unavailable.
       const { data: usage } = await supabase.from("api_usage")
-        .select("calls, calls_key1, calls_key2").eq("day", day).maybeSingle();
-      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0 };
+        .select("calls, calls_key1, calls_key2, calls_key3").eq("day", day).maybeSingle();
+      const prev = (usage as any) ?? { calls: 0, calls_key1: 0, calls_key2: 0, calls_key3: 0 };
       newCalls = (prev.calls ?? 0) + apiCalls;
       await supabase.from("api_usage").upsert({
         day,
         calls: newCalls,
-        calls_key1: (prev.calls_key1 ?? 0) + apiCallsKey1,
-        calls_key2: (prev.calls_key2 ?? 0) + apiCallsKey2,
+        calls_key1: (prev.calls_key1 ?? 0) + apiCallsByKey[1],
+        calls_key2: (prev.calls_key2 ?? 0) + apiCallsByKey[2],
+        calls_key3: (prev.calls_key3 ?? 0) + apiCallsByKey[3],
         updated_at: new Date().toISOString(),
       }, { onConflict: "day" });
     } else if (newCalls === 0) {
@@ -1317,7 +1377,7 @@ async function runScanJob(
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
-      active_td_key: activeKeyRef.idx, skipped_pairs: skippedPairs,
+      active_td_key: keyState.active, skipped_pairs: skippedPairs,
       news_events_loaded: events.length,
     };
 }
@@ -1372,12 +1432,17 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY");
-    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") || undefined;
+    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY") ?? "";
+    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") ?? "";
+    const tdKey3 = Deno.env.get("TWELVEDATA_API_KEY_3") ?? "";
     if (!tdKey1) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const keys: KeySet = { primary: tdKey1, secondary: tdKey2 };
+    const keys: KeySet = {};
+    if (tdKey1) keys[1] = tdKey1;
+    if (tdKey2) keys[2] = tdKey2;
+    if (tdKey3) keys[3] = tdKey3;
+    const configuredKeys: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
 
-    const settings = await loadSettings(supabase);
+    const settings = await loadSettings(supabase, configuredKeys);
 
     // Pause + trading-hours short-circuit (cron only — manual scans always run).
     if (source === "cron") {

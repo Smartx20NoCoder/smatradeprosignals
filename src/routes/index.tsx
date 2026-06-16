@@ -7,6 +7,7 @@ import {
   checkSubscriptionFn,
   checkSymbolsMetaApiFn,
   forceSubscribeMetaApiFn,
+  getTdKeysConfiguredFn,
   healthCheckMetaApiFn,
   pingMetaApiFn,
   refreshNewsCalendarFn,
@@ -221,6 +222,9 @@ function ScalpEdge() {
   const [budgetToday, setBudgetToday] = useState(0);
   const [budgetTodayKey1, setBudgetTodayKey1] = useState(0);
   const [budgetTodayKey2, setBudgetTodayKey2] = useState(0);
+  const [budgetTodayKey3, setBudgetTodayKey3] = useState(0);
+  const [tdKeysConfigured, setTdKeysConfigured] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: true, k2: true, k3: false });
+  const [tdKeysExhausted, setTdKeysExhausted] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: false, k2: false, k3: false });
   const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
   const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
@@ -306,10 +310,11 @@ function ScalpEdge() {
     setSignals(next);
     const today = new Date().toISOString().slice(0, 10);
     const { data: u } = await supabase.from("api_usage")
-      .select("calls, calls_key1, calls_key2").eq("day", today).maybeSingle();
+      .select("calls, calls_key1, calls_key2, calls_key3").eq("day", today).maybeSingle();
     setBudgetToday(((u as any)?.calls as number) ?? 0);
     setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
     setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
+    setBudgetTodayKey3(((u as any)?.calls_key3 as number) ?? 0);
   }
 
   async function loadHealth() {
@@ -322,6 +327,18 @@ function ScalpEdge() {
     // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
     const { data: cfgRows } = await (supabase as any).rpc("get_app_settings_public");
     const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
+    if (cfg) {
+      const sameUtcDay = (iso?: string | null) => {
+        if (!iso) return false;
+        const d = new Date(iso), n = new Date();
+        return d.getUTCFullYear()===n.getUTCFullYear() && d.getUTCMonth()===n.getUTCMonth() && d.getUTCDate()===n.getUTCDate();
+      };
+      setTdKeysExhausted({
+        k1: sameUtcDay(cfg.key1_exhausted_at),
+        k2: sameUtcDay(cfg.key2_exhausted_at),
+        k3: sameUtcDay(cfg.key3_exhausted_at),
+      });
+    }
     if (cfg) setAppSettings({
       paused: !!cfg.paused,
       trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
@@ -424,6 +441,12 @@ function ScalpEdge() {
   useEffect(() => {
     loadSignals();
     loadHealth();
+    (async () => {
+      try {
+        const r = await getTdKeysConfiguredFn();
+        setTdKeysConfigured({ k1: !!r.k1, k2: !!r.k2, k3: !!r.k3 });
+      } catch { /* ignore */ }
+    })();
     // Poll the database every 30s for cron-created signals and health stats
     const t = setInterval(() => { loadSignals(); loadHealth(); }, 30000);
     return () => clearInterval(t);
@@ -779,6 +802,7 @@ function ScalpEdge() {
             budgetToday={budgetToday}
             budgetTodayKey1={budgetTodayKey1}
             budgetTodayKey2={budgetTodayKey2}
+            budgetTodayKey3={budgetTodayKey3}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
@@ -794,6 +818,8 @@ function ScalpEdge() {
             saveAppSettings={saveAppSettings}
             refreshNewsCalendar={refreshNewsCalendar}
             todaysEvents={todaysEvents}
+            tdKeysConfigured={tdKeysConfigured}
+            tdKeysExhausted={tdKeysExhausted}
           />
         )}
 
@@ -1165,6 +1191,7 @@ function Cell({ label, value, color }: { label: string; value: string; color?: "
 function SettingsPanel({
   soundOn, setSoundOn, projectedDaily,
   appSettings, saveAppSettings, refreshNewsCalendar, todaysEvents,
+  tdKeysConfigured, tdKeysExhausted,
 }: {
   soundOn: boolean; setSoundOn: (v: boolean) => void;
   projectedDaily: number;
@@ -1172,6 +1199,8 @@ function SettingsPanel({
   saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
   refreshNewsCalendar: () => Promise<void>;
   todaysEvents: EconomicEvent[];
+  tdKeysConfigured: { k1: boolean; k2: boolean; k3: boolean };
+  tdKeysExhausted: { k1: boolean; k2: boolean; k3: boolean };
 }) {
   void refreshNewsCalendar; void todaysEvents;
   return (
@@ -1221,22 +1250,32 @@ function SettingsPanel({
             </div>
           </div>
           <div className="flex gap-1 border border-border rounded overflow-hidden">
-            {[1, 2].map((k) => {
+            {[1, 2, 3].map((k) => {
               const active = appSettings.active_td_key === k;
+              const configured = k === 1 ? tdKeysConfigured.k1 : k === 2 ? tdKeysConfigured.k2 : tdKeysConfigured.k3;
+              const exhausted = k === 1 ? tdKeysExhausted.k1 : k === 2 ? tdKeysExhausted.k2 : tdKeysExhausted.k3;
+              const disabled = !configured;
               return (
                 <button
                   key={k}
+                  disabled={disabled}
+                  title={!configured ? "TWELVEDATA_API_KEY_" + k + " not set in secrets" : exhausted ? "Rate-limited today" : ""}
                   onClick={() => {
+                    if (disabled) return;
                     try { localStorage.setItem("active_td_key", String(k)); } catch { /* ignore */ }
                     saveAppSettings({ active_td_key: k });
                   }}
                   className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
+                    !configured
+                      ? "bg-transparent text-muted-foreground/40 cursor-not-allowed"
+                      : active
+                        ? "bg-primary text-primary-foreground"
+                        : exhausted
+                          ? "bg-transparent text-muted-foreground/60 hover:bg-muted"
+                          : "bg-transparent text-muted-foreground hover:bg-muted"
                   }`}
                 >
-                  Key {k}{active ? " ●" : ""}
+                  Key {k}{!configured ? " · NOT CONFIGURED" : active ? " ●" : exhausted ? " ◌" : ""}
                 </button>
               );
             })}
@@ -1889,7 +1928,7 @@ function RiskExposureWidget({
 }
 
 function HealthPanel({
-  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, lastCron, nextCronAt,
+  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
   appSettings, saveAppSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
@@ -1897,6 +1936,7 @@ function HealthPanel({
   budgetToday: number;
   budgetTodayKey1: number;
   budgetTodayKey2: number;
+  budgetTodayKey3: number;
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
   appSettings: AppSettings;
