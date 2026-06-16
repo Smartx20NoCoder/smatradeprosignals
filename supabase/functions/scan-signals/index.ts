@@ -913,9 +913,11 @@ type ActiveSettings = {
   paused: boolean;
   trading_hours_start_utc: number;
   trading_hours_end_utc: number;
-  active_td_key: 1 | 2;
+  active_td_key: KeyIdx;
   session_config: SessionConfig;
   key1_exhausted_at: string | null;
+  key2_exhausted_at: string | null;
+  key3_exhausted_at: string | null;
   pair_auto_execute: Record<string, boolean>;
   scan_interval_minutes: number;
 };
@@ -942,31 +944,43 @@ function isSameUtcDay(a: Date, b: Date): boolean {
     && a.getUTCDate() === b.getUTCDate();
 }
 
-async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<ActiveSettings> {
+async function loadSettings(supabase: ReturnType<typeof createClient>, configured: KeyIdx[]): Promise<ActiveSettings> {
   const { data } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-  const persistedKey: 1 | 2 = ((data?.active_td_key ?? 1) === 2 ? 2 : 1);
-  const exhaustedRaw = (data?.key1_exhausted_at as string | null) ?? null;
-  let key1ExhaustedAt: string | null = exhaustedRaw;
-  let effectiveKey: 1 | 2 = persistedKey;
+  const rawActive = Number(data?.active_td_key ?? 1);
+  const persistedKey: KeyIdx = (rawActive === 2 ? 2 : rawActive === 3 ? 3 : 1);
+  const now = new Date();
 
-  if (exhaustedRaw) {
-    const exhaustedDate = new Date(exhaustedRaw);
-    if (isSameUtcDay(exhaustedDate, new Date())) {
-      // Key 1 was rate-limited today — start directly on Key 2.
-      effectiveKey = 2;
-    } else {
-      // Prior UTC day — clear the flag AND reset active_td_key back to 1
-      // so Key 1 is brought back into rotation each UTC day.
-      key1ExhaustedAt = null;
-      effectiveKey = 1;
-      try {
-        await supabase.from("app_settings").update({
-          key1_exhausted_at: null,
-          active_td_key: 1,
-          updated_at: new Date().toISOString(),
-        }).eq("id", "singleton");
-      } catch (_) { /* ignore */ }
+  // Reset any exhausted_at from a prior UTC day.
+  const raw: Record<KeyIdx, string | null> = {
+    1: (data?.key1_exhausted_at as string | null) ?? null,
+    2: (data?.key2_exhausted_at as string | null) ?? null,
+    3: (data?.key3_exhausted_at as string | null) ?? null,
+  };
+  const stillExhausted: Record<KeyIdx, string | null> = { 1: null, 2: null, 3: null };
+  const resetPatch: Record<string, unknown> = {};
+  for (const k of [1, 2, 3] as KeyIdx[]) {
+    if (raw[k] && isSameUtcDay(new Date(raw[k]!), now)) {
+      stillExhausted[k] = raw[k];
+    } else if (raw[k]) {
+      resetPatch[`key${k}_exhausted_at`] = null;
     }
+  }
+
+  // Determine effective active key: prefer persisted, else first non-exhausted configured.
+  const candidateOrder: KeyIdx[] = [persistedKey, ...configured.filter(k => k !== persistedKey)];
+  let effectiveKey: KeyIdx = persistedKey;
+  for (const k of candidateOrder) {
+    if (configured.includes(k) && !stillExhausted[k]) { effectiveKey = k; break; }
+  }
+
+  if (Object.keys(resetPatch).length > 0 || effectiveKey !== persistedKey) {
+    try {
+      await supabase.from("app_settings").update({
+        ...resetPatch,
+        active_td_key: effectiveKey,
+        updated_at: new Date().toISOString(),
+      }).eq("id", "singleton");
+    } catch (_) { /* ignore */ }
   }
 
   return {
@@ -975,7 +989,9 @@ async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<
     trading_hours_end_utc: Number(data?.trading_hours_end_utc ?? 20),
     active_td_key: effectiveKey,
     session_config: (data?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
-    key1_exhausted_at: key1ExhaustedAt,
+    key1_exhausted_at: stillExhausted[1],
+    key2_exhausted_at: stillExhausted[2],
+    key3_exhausted_at: stillExhausted[3],
     pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
     scan_interval_minutes: Number(data?.scan_interval_minutes ?? 15) === 30 ? 30 : 15,
   };
