@@ -817,6 +817,8 @@ function ScalpEdge() {
             saveAppSettings={saveAppSettings}
             refreshNewsCalendar={refreshNewsCalendar}
             todaysEvents={todaysEvents}
+            tdKeysConfigured={tdKeysConfigured}
+            tdKeysExhausted={tdKeysExhausted}
           />
         )}
 
