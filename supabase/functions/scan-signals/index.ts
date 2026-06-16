@@ -1432,12 +1432,17 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY");
-    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") || undefined;
+    const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY") ?? "";
+    const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") ?? "";
+    const tdKey3 = Deno.env.get("TWELVEDATA_API_KEY_3") ?? "";
     if (!tdKey1) throw new Error("TWELVE_DATA_API_KEY not configured");
-    const keys: KeySet = { primary: tdKey1, secondary: tdKey2 };
+    const keys: KeySet = {};
+    if (tdKey1) keys[1] = tdKey1;
+    if (tdKey2) keys[2] = tdKey2;
+    if (tdKey3) keys[3] = tdKey3;
+    const configuredKeys: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
 
-    const settings = await loadSettings(supabase);
+    const settings = await loadSettings(supabase, configuredKeys);
 
     // Pause + trading-hours short-circuit (cron only — manual scans always run).
     if (source === "cron") {
