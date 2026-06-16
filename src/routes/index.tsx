@@ -327,6 +327,18 @@ function ScalpEdge() {
     // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
     const { data: cfgRows } = await (supabase as any).rpc("get_app_settings_public");
     const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
+    if (cfg) {
+      const sameUtcDay = (iso?: string | null) => {
+        if (!iso) return false;
+        const d = new Date(iso), n = new Date();
+        return d.getUTCFullYear()===n.getUTCFullYear() && d.getUTCMonth()===n.getUTCMonth() && d.getUTCDate()===n.getUTCDate();
+      };
+      setTdKeysExhausted({
+        k1: sameUtcDay(cfg.key1_exhausted_at),
+        k2: sameUtcDay(cfg.key2_exhausted_at),
+        k3: sameUtcDay(cfg.key3_exhausted_at),
+      });
+    }
     if (cfg) setAppSettings({
       paused: !!cfg.paused,
       trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
