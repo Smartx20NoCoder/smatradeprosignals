@@ -197,19 +197,37 @@ async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, con
   return next;
 }
 
-type KeySet = { primary: string; secondary?: string };
+type KeyIdx = 1 | 2 | 3;
+type KeySet = Partial<Record<KeyIdx, string>>;
+type KeyState = {
+  active: KeyIdx;
+  configured: KeyIdx[];   // ids of keys with a configured secret, sorted ascending
+  exhausted: Set<KeyIdx>; // keys that hit a rate limit this cycle
+};
+
+function nextAvailableKey(state: KeyState): KeyIdx | null {
+  // Find next non-exhausted configured key, starting after the current active one.
+  const order = state.configured;
+  if (order.length === 0) return null;
+  const startIdx = order.indexOf(state.active);
+  for (let i = 1; i <= order.length; i++) {
+    const cand = order[(startIdx + i) % order.length];
+    if (!state.exhausted.has(cand)) return cand;
+  }
+  return null;
+}
 
 async function fetchCandles(
   supabase: ReturnType<typeof createClient>,
   keys: KeySet,
-  activeKeyRef: { idx: 1 | 2 },
+  state: KeyState,
   pair: string,
   tf: { label: string; td: string },
   outputSize: number,
   emit?: ProgressEmitter,
   source: string = "manual",
-): Promise<{ candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }> {
-  const keyIdx: 1 | 2 = activeKeyRef.idx;
+): Promise<{ candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }> {
+  const keyIdx: KeyIdx = state.active;
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
@@ -221,25 +239,32 @@ async function fetchCandles(
       return { candles: cached.candles as Candle[], usedApi: 0, usedKey: keyIdx, cached: true };
     }
   }
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${activeKeyRef.idx})` });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${state.active})` });
 
-  // No retries within a single execution. On 429, skip the pair entirely.
-  const primaryKey = activeKeyRef.idx === 1 ? keys.primary : (keys.secondary ?? keys.primary);
-  const fetchKey: 1 | 2 = activeKeyRef.idx;
+  // No retries within a single execution. On 429, mark key exhausted, rotate, and skip pair.
+  const fetchKey: KeyIdx = state.active;
+  const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
   let usedApi = 1;
 
   if (r.status === 429) {
+    // Mark current key as exhausted for this cycle and rotate to next available.
+    state.exhausted.add(fetchKey);
+    const nxt = nextAvailableKey(state);
+    if (nxt && nxt !== fetchKey) {
+      state.active = nxt;
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — rotating to Key ${nxt}` });
+    } else {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — no other keys available` });
+    }
     const msg = `TwelveData 429 — using stale cache for ${pair}`;
     console.log(msg);
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: msg });
     if (cached) {
       // The HTTP request was sent (and counted by TwelveData), so count it locally too.
       return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
     }
     // No cache available — skip this pair this cycle. Still counts as an API call.
-    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `TwelveData 429 — no cache, skipping ${pair}` });
     const err = new Error(`429 no cache: ${pair}`);
     (err as any).usedApi = 1;
     (err as any).usedKey = fetchKey;
