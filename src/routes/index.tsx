@@ -802,6 +802,7 @@ function ScalpEdge() {
             budgetToday={budgetToday}
             budgetTodayKey1={budgetTodayKey1}
             budgetTodayKey2={budgetTodayKey2}
+            budgetTodayKey3={budgetTodayKey3}
             lastCron={lastCron ?? null}
             nextCronAt={nextCronAt}
             appSettings={appSettings}
