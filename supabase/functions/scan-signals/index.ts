@@ -311,7 +311,7 @@ async function fetchCandles(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
-  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${activeKeyRef.idx})` });
+  emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${state.active})` });
   return { candles: fresh, usedApi, usedKey: fetchKey, cached: false };
 }
 
