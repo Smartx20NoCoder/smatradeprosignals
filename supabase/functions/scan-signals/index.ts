@@ -1162,8 +1162,6 @@ async function runScanJob(
         try { await supabase.from("app_settings").update(update).eq("id", "singleton"); } catch (_) { /* ignore */ }
       }
     }
-      } catch (_) { /* ignore */ }
-    }
 
     // Build candidate signals (may contain multiple per pair+direction)
     const candidates: Signal[] = [];
