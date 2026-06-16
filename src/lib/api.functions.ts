@@ -210,3 +210,15 @@ export const refreshNewsCalendarFn = createServerFn({ method: "POST" })
     return { ok: true, inserted: Number(b.inserted ?? 0), date: String(b.date ?? "") };
   });
 
+// Reports which TwelveData API keys have a configured secret on the server.
+// Used by the Settings UI to render KEY 1 / KEY 2 / KEY 3 buttons and
+// disable rows whose secret isn't set.
+export const getTdKeysConfiguredFn = createServerFn({ method: "GET" })
+  .handler(async () => {
+    return {
+      k1: !!(process.env.TWELVE_DATA_API_KEY ?? "").trim(),
+      k2: !!(process.env.TWELVEDATA_API_KEY_2 ?? "").trim(),
+      k3: !!(process.env.TWELVEDATA_API_KEY_3 ?? "").trim(),
+    };
+  });
+
