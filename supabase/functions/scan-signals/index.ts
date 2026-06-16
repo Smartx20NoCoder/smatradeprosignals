@@ -1044,7 +1044,16 @@ async function runScanJob(
 ) {
     const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = TFS;
-    const activeKeyRef: { idx: 1 | 2 } = { idx: settings.active_td_key };
+    const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
+    const initialExhausted = new Set<KeyIdx>();
+    if (settings.key1_exhausted_at) initialExhausted.add(1);
+    if (settings.key2_exhausted_at) initialExhausted.add(2);
+    if (settings.key3_exhausted_at) initialExhausted.add(3);
+    const keyState: KeyState = {
+      active: settings.active_td_key,
+      configured,
+      exhausted: initialExhausted,
+    };
 
     const nowDate = new Date();
     // Filter pair list for weekend / Friday-late: only BTC trades.
@@ -1065,13 +1074,11 @@ async function runScanJob(
     const events = (newsRows ?? []) as Array<{ event_time: string; currency: string; title: string }>;
 
     let apiCalls = 0;
-    let apiCallsKey1 = 0;
-    let apiCallsKey2 = 0;
-    const accumulateCall = (usedApi: number, usedKey: 1 | 2) => {
+    const apiCallsByKey: Record<KeyIdx, number> = { 1: 0, 2: 0, 3: 0 };
+    const accumulateCall = (usedApi: number, usedKey: KeyIdx) => {
       if (usedApi <= 0) return;
       apiCalls += usedApi;
-      if (usedKey === 1) apiCallsKey1 += usedApi;
-      else apiCallsKey2 += usedApi;
+      apiCallsByKey[usedKey] = (apiCallsByKey[usedKey] ?? 0) + usedApi;
     };
     const signals: Signal[] = [];
     const errors: string[] = [];
@@ -1095,16 +1102,16 @@ async function runScanJob(
       // Secondary pairs: silently skip on any fetch failure (429, 500, timeout)
       if (SECONDARY_PAIRS.has(pair)) {
         try {
-          const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
+          const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
           for (const tf of tfsToFetch) {
-            const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
+            const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
             fetches.push(f);
             accumulateCall(f.usedApi, f.usedKey);
           }
           pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
-          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
+          accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
           console.log(`Secondary pair ${pair} skipped this cycle: ${(e as Error).message}`);
           pairData[pair] = null;
           emit?.({ type: "pair_done", pair, status: "done", message: `Secondary pair — skipped this cycle` });
@@ -1113,9 +1120,9 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; usedKey: 1 | 2; cached: boolean }[] = [];
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
         for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, keys, activeKeyRef, pair, tf, sizeFor(tf.label), emit, source);
+          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
           fetches.push(f);
           accumulateCall(f.usedApi, f.usedKey);
         }
@@ -1124,25 +1131,37 @@ async function runScanJob(
         pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
-        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? activeKeyRef.idx));
+        accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
         errors.push(`${pair}: ${(e as Error).message}`);
         pairData[pair] = null;
         emit?.({ type: "pair_done", pair, status: "error", message: (e as Error).message });
       }
     }
 
-    // Persist whichever key we ended on (in case a failover happened).
-    if (activeKeyRef.idx !== settings.active_td_key) {
-      try {
-        const update: Record<string, unknown> = {
-          active_td_key: activeKeyRef.idx, updated_at: new Date().toISOString(),
-        };
-        // If we failed over away from Key 1, mark Key 1 as exhausted for today
-        // so the next scan starts directly on Key 2 (cleared at next UTC day).
-        if (settings.active_td_key === 1 && activeKeyRef.idx === 2) {
-          update.key1_exhausted_at = new Date().toISOString();
+    // Persist active key + any newly-exhausted keys (in case a failover happened).
+    {
+      const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      let changed = false;
+      if (keyState.active !== settings.active_td_key) {
+        update.active_td_key = keyState.active;
+        changed = true;
+      }
+      const wasExhausted: Record<KeyIdx, boolean> = {
+        1: !!settings.key1_exhausted_at,
+        2: !!settings.key2_exhausted_at,
+        3: !!settings.key3_exhausted_at,
+      };
+      const nowIso = new Date().toISOString();
+      for (const k of [1, 2, 3] as KeyIdx[]) {
+        if (keyState.exhausted.has(k) && !wasExhausted[k]) {
+          update[`key${k}_exhausted_at`] = nowIso;
+          changed = true;
         }
-        await supabase.from("app_settings").update(update).eq("id", "singleton");
+      }
+      if (changed) {
+        try { await supabase.from("app_settings").update(update).eq("id", "singleton"); } catch (_) { /* ignore */ }
+      }
+    }
       } catch (_) { /* ignore */ }
     }
 
