@@ -310,10 +310,11 @@ function ScalpEdge() {
     setSignals(next);
     const today = new Date().toISOString().slice(0, 10);
     const { data: u } = await supabase.from("api_usage")
-      .select("calls, calls_key1, calls_key2").eq("day", today).maybeSingle();
+      .select("calls, calls_key1, calls_key2, calls_key3").eq("day", today).maybeSingle();
     setBudgetToday(((u as any)?.calls as number) ?? 0);
     setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
     setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
+    setBudgetTodayKey3(((u as any)?.calls_key3 as number) ?? 0);
   }
 
   async function loadHealth() {
