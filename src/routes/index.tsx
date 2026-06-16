@@ -1928,7 +1928,7 @@ function RiskExposureWidget({
 }
 
 function HealthPanel({
-  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, lastCron, nextCronAt,
+  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
   appSettings, saveAppSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
@@ -1936,6 +1936,7 @@ function HealthPanel({
   budgetToday: number;
   budgetTodayKey1: number;
   budgetTodayKey2: number;
+  budgetTodayKey3: number;
   lastCron: ScanRun | null;
   nextCronAt: Date | null;
   appSettings: AppSettings;
