@@ -1190,6 +1190,7 @@ function Cell({ label, value, color }: { label: string; value: string; color?: "
 function SettingsPanel({
   soundOn, setSoundOn, projectedDaily,
   appSettings, saveAppSettings, refreshNewsCalendar, todaysEvents,
+  tdKeysConfigured, tdKeysExhausted,
 }: {
   soundOn: boolean; setSoundOn: (v: boolean) => void;
   projectedDaily: number;
@@ -1197,6 +1198,8 @@ function SettingsPanel({
   saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
   refreshNewsCalendar: () => Promise<void>;
   todaysEvents: EconomicEvent[];
+  tdKeysConfigured: { k1: boolean; k2: boolean; k3: boolean };
+  tdKeysExhausted: { k1: boolean; k2: boolean; k3: boolean };
 }) {
   void refreshNewsCalendar; void todaysEvents;
   return (
