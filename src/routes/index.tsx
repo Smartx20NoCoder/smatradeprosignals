@@ -1244,22 +1244,32 @@ function SettingsPanel({
             </div>
           </div>
           <div className="flex gap-1 border border-border rounded overflow-hidden">
-            {[1, 2].map((k) => {
+            {[1, 2, 3].map((k) => {
               const active = appSettings.active_td_key === k;
+              const configured = k === 1 ? tdKeysConfigured.k1 : k === 2 ? tdKeysConfigured.k2 : tdKeysConfigured.k3;
+              const exhausted = k === 1 ? tdKeysExhausted.k1 : k === 2 ? tdKeysExhausted.k2 : tdKeysExhausted.k3;
+              const disabled = !configured;
               return (
                 <button
                   key={k}
+                  disabled={disabled}
+                  title={!configured ? "TWELVEDATA_API_KEY_" + k + " not set in secrets" : exhausted ? "Rate-limited today" : ""}
                   onClick={() => {
+                    if (disabled) return;
                     try { localStorage.setItem("active_td_key", String(k)); } catch { /* ignore */ }
                     saveAppSettings({ active_td_key: k });
                   }}
                   className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
+                    !configured
+                      ? "bg-transparent text-muted-foreground/40 cursor-not-allowed"
+                      : active
+                        ? "bg-primary text-primary-foreground"
+                        : exhausted
+                          ? "bg-transparent text-muted-foreground/60 hover:bg-muted"
+                          : "bg-transparent text-muted-foreground hover:bg-muted"
                   }`}
                 >
-                  Key {k}{active ? " ●" : ""}
+                  Key {k}{!configured ? " · NOT CONFIGURED" : active ? " ●" : exhausted ? " ◌" : ""}
                 </button>
               );
             })}
