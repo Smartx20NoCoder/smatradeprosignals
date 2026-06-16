@@ -441,6 +441,12 @@ function ScalpEdge() {
   useEffect(() => {
     loadSignals();
     loadHealth();
+    (async () => {
+      try {
+        const r = await getTdKeysConfiguredFn();
+        setTdKeysConfigured({ k1: !!r.k1, k2: !!r.k2, k3: !!r.k3 });
+      } catch { /* ignore */ }
+    })();
     // Poll the database every 30s for cron-created signals and health stats
     const t = setInterval(() => { loadSignals(); loadHealth(); }, 30000);
     return () => clearInterval(t);
