@@ -221,6 +221,9 @@ function ScalpEdge() {
   const [budgetToday, setBudgetToday] = useState(0);
   const [budgetTodayKey1, setBudgetTodayKey1] = useState(0);
   const [budgetTodayKey2, setBudgetTodayKey2] = useState(0);
+  const [budgetTodayKey3, setBudgetTodayKey3] = useState(0);
+  const [tdKeysConfigured, setTdKeysConfigured] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: true, k2: true, k3: false });
+  const [tdKeysExhausted, setTdKeysExhausted] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: false, k2: false, k3: false });
   const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
   const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
