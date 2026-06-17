@@ -1529,7 +1529,22 @@ async function runScanJob(
         }
       }
 
+      // QSS — Quantum Scalping System; scored internally, bypasses qualifyAndScore.
+      {
+        const ssNow = sessionScore(pair, nowDate);
+        const qss = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
+        if (!qss) {
+          pairReport.checks.push({ setup: "QSS", status: "none", reason: "No qualifying void" });
+        } else if (hits.length > 0) {
+          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction, reason: `News blackout` });
+        } else {
+          pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
+          candidates.push(qss);
+        }
+      }
+
       report.push(pairReport);
+
     }
 
 
