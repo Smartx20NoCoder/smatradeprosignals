@@ -1619,12 +1619,13 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH"].map((name) => {
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH","QSS"].map((name) => {
             const defaults: Record<string, boolean> = {
               "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
-              "OB+FVG": false, "Order Block": false, "CHOCH": false,
+              "OB+FVG": false, "Order Block": false, "CHOCH": false, "QSS": false,
             };
             const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
+            const isNew = name === "QSS";
             const cfg = appSettings.setup_auto_execute ?? {};
             const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
             return (
@@ -1637,11 +1638,18 @@ function MetaApiPanel({
                       title="Low sample size — unproven setup. Enable at your own risk."
                     >⚠ Low</span>
                   )}
+                  {isNew && (
+                    <span
+                      className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-2/20 text-chart-2 uppercase tracking-wider shrink-0"
+                      title="New setup — paper track first before enabling auto-execute."
+                    >⚠ New — paper first</span>
+                  )}
                 </span>
                 <Toggle on={on} onChange={(v) => saveAppSettings({ setup_auto_execute: { ...cfg, [name]: v } } as any)} />
               </label>
             );
           })}
+
         </div>
       </div>
 

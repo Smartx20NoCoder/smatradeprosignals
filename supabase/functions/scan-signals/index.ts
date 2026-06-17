@@ -723,6 +723,310 @@ function veritasSetup(
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// QUANTUM SCALPING SYSTEM (QSS) v1.0
+// AVRD + LVIM + VWSA + DRAE
+// ═══════════════════════════════════════════════════════════════
+function qssATR(candles: Candle[], period = 14): number[] {
+  const tr: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].h, l = candles[i].l, pc = candles[i - 1].c;
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  const out: number[] = [];
+  if (tr.length < period) return out;
+  let sum = tr.slice(0, period).reduce((a, b) => a + b, 0);
+  out.push(sum / period);
+  for (let i = period; i < tr.length; i++) {
+    out.push((out[out.length - 1] * (period - 1) + tr[i]) / period);
+  }
+  return out;
+}
+
+function qssPercentile(arr: number[], pct: number): number {
+  if (arr.length === 0) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const idx = (pct / 100) * (s.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
+
+type QSSRegime = "COMPRESSION" | "EXPANSION_BULL" | "EXPANSION_BEAR" | "TRANSITION";
+
+function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {
+  const atr5 = qssATR(c5, 14);
+  const atrHtf = qssATR(cHtf, 14);
+  if (atr5.length < 3 || atrHtf.length < 10) return "TRANSITION";
+  const currentAtr5 = atr5[atr5.length - 1];
+  const p20 = qssPercentile(atrHtf, 20);
+  const p60 = qssPercentile(atrHtf, 60);
+
+  if (currentAtr5 < p20) {
+    const last5 = c5.slice(-5);
+    const last20 = c5.slice(-20);
+    const maxRange5 = Math.max(...last5.map(c => c.h - c.l));
+    const avgRange20 = last20.reduce((a, c) => a + (c.h - c.l), 0) / last20.length;
+    if (maxRange5 < 1.2 * avgRange20) return "COMPRESSION";
+  }
+
+  if (currentAtr5 > p60) {
+    const last5 = c5.slice(-5);
+    const bullishCloses = last5.filter(c => c.c > c.o).length;
+    const vwapSlice = c5.slice(-20);
+    const totalVol = vwapSlice.reduce((a, c) => a + (c.v ?? (c.h - c.l)), 0);
+    const vwap = vwapSlice.reduce((a, c) => {
+      const tp = (c.h + c.l + c.c) / 3;
+      const vol = c.v ?? (c.h - c.l);
+      return a + tp * vol;
+    }, 0) / (totalVol || 1);
+    const lastClose = c5[c5.length - 1].c;
+    if (bullishCloses >= 3 && lastClose > vwap) return "EXPANSION_BULL";
+    if (bullishCloses <= 2 && lastClose < vwap) return "EXPANSION_BEAR";
+  }
+
+  return "TRANSITION";
+}
+
+interface QSSLiquidityVoid {
+  top: number; bottom: number; ce: number; width: number;
+  isLong: boolean; consolidationBars: number;
+  displacementVolRatio: number; hasWickOverlap: boolean;
+  avgConsolidationVol: number; displacementVol: number;
+}
+
+function qssLVIM(c5: Candle[], isCrypto: boolean): QSSLiquidityVoid | null {
+  const minConsolBars = isCrypto ? 6 : 8;
+  const minDisplBars = isCrypto ? 2 : 3;
+  const n = c5.length;
+  if (n < minConsolBars + minDisplBars + 5) return null;
+
+  for (let startIdx = Math.max(0, n - 40); startIdx < n - minConsolBars - minDisplBars; startIdx++) {
+    for (let consolLen = minConsolBars; consolLen <= minConsolBars + 6; consolLen++) {
+      if (startIdx + consolLen + minDisplBars >= n) break;
+      const consolSlice = c5.slice(startIdx, startIdx + consolLen);
+      const consolRanges = consolSlice.map(c => c.h - c.l);
+      const avgConsolRange = consolRanges.reduce((a, b) => a + b, 0) / consolRanges.length;
+      const avgConsolVol = consolSlice.reduce((a, c) => a + (c.v ?? (c.h - c.l)), 0) / consolSlice.length;
+      const isValidConsol = consolRanges.every(r => r < 1.5 * avgConsolRange);
+      const consolHigh = Math.max(...consolSlice.map(c => c.h));
+      const consolLow = Math.min(...consolSlice.map(c => c.l));
+      const consolWidth = consolHigh - consolLow;
+      const atrEst = avgConsolRange;
+      if (!isValidConsol || consolWidth > 2.5 * atrEst * consolLen) continue;
+
+      for (let displLen = minDisplBars; displLen <= minDisplBars + 2; displLen++) {
+        const displStart = startIdx + consolLen;
+        if (displStart + displLen > n) break;
+        const displSlice = c5.slice(displStart, displStart + displLen);
+        const displVol = displSlice.reduce((a, c) => a + (c.v ?? (c.h - c.l)), 0);
+        const strongBars = displSlice.filter(c => {
+          const body = Math.abs(c.c - c.o);
+          const range = c.h - c.l;
+          return range > 0 && body / range >= 0.7;
+        }).length;
+        const displHigh = Math.max(...displSlice.map(c => c.h));
+        const displLow = Math.min(...displSlice.map(c => c.l));
+        const displMove = displHigh - displLow;
+        const volRatio = avgConsolVol > 0 ? displVol / (avgConsolVol * displLen) : 0;
+
+        if (strongBars < Math.ceil(displLen * 0.67)) continue;
+        if (displMove < 1.8 * consolWidth) continue;
+
+        const lastDisplClose = displSlice[displSlice.length - 1].c;
+        const bullishDispl = lastDisplClose > consolHigh;
+        const bearishDispl = lastDisplClose < consolLow;
+        if (!bullishDispl && !bearishDispl) continue;
+
+        const isLong = bullishDispl;
+        const voidTop = isLong
+          ? Math.min(...displSlice.map(c => c.h))
+          : Math.max(...displSlice.map(c => c.l));
+        const voidBottom = isLong
+          ? Math.max(...displSlice.map(c => c.l))
+          : Math.min(...displSlice.map(c => c.h));
+        if (isLong && voidTop <= voidBottom) continue;
+        if (!isLong && voidBottom >= voidTop) continue;
+
+        const voidHigh = isLong ? voidTop : voidBottom;
+        const voidLow = isLong ? voidBottom : voidTop;
+        const voidWidth = Math.abs(voidHigh - voidLow);
+        if (voidWidth <= 0) continue;
+        const ce = (voidHigh + voidLow) / 2;
+
+        let hasWickOverlap = false;
+        for (let i = 1; i < displSlice.length; i++) {
+          const prevLow = displSlice[i - 1].l;
+          const prevHigh = displSlice[i - 1].h;
+          const currLow = displSlice[i].l;
+          const currHigh = displSlice[i].h;
+          if (isLong && currLow <= prevHigh) { hasWickOverlap = true; break; }
+          if (!isLong && currHigh >= prevLow) { hasWickOverlap = true; break; }
+        }
+
+        const currentPrice = c5[n - 1].c;
+        const voidEntry30pct = isLong
+          ? voidHigh - 0.3 * voidWidth
+          : voidLow + 0.3 * voidWidth;
+        const priceInVoid = isLong
+          ? (currentPrice <= voidHigh && currentPrice >= voidEntry30pct)
+          : (currentPrice >= voidLow && currentPrice <= voidEntry30pct);
+        const ceNotBreached = isLong ? currentPrice >= ce : currentPrice <= ce;
+        if (!priceInVoid || !ceNotBreached) continue;
+
+        const confCandle = c5[n - 1];
+        const confBody = confCandle.c - confCandle.o;
+        const confRange = confCandle.h - confCandle.l;
+        const confVol = confCandle.v ?? confRange;
+        const isBullishConf = isLong && (confBody > 0 && confBody / confRange >= 0.6);
+        const isBearishConf = !isLong && (confBody < 0 && Math.abs(confBody) / confRange >= 0.6);
+        if (!isBullishConf && !isBearishConf) continue;
+        if (confVol > 0.8 * (displVol / displLen)) continue;
+
+        return {
+          top: voidHigh, bottom: voidLow, ce, width: voidWidth,
+          isLong, consolidationBars: consolLen,
+          displacementVolRatio: volRatio, hasWickOverlap,
+          avgConsolidationVol: avgConsolVol, displacementVol: displVol,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function qssVWSA(c5: Candle[], lv: QSSLiquidityVoid): number {
+  let score = 0;
+  const pocWindow = c5.slice(-30);
+  const priceBuckets = new Map<number, number>();
+  for (const c of pocWindow) {
+    const tp = Math.round(((c.h + c.l + c.c) / 3) * 100) / 100;
+    const vol = c.v ?? (c.h - c.l);
+    priceBuckets.set(tp, (priceBuckets.get(tp) ?? 0) + vol);
+  }
+  let pocPrice = 0, pocVol = 0;
+  for (const [price, vol] of priceBuckets) {
+    if (vol > pocVol) { pocVol = vol; pocPrice = price; }
+  }
+  if (pocPrice >= lv.bottom && pocPrice <= lv.top) score += 25;
+
+  const sorted = [...priceBuckets.entries()].sort((a, b) => a[0] - b[0]);
+  const totalVol = sorted.reduce((a, [, v]) => a + v, 0);
+  let cumVol = 0, valPrice = 0, vahPrice = 0;
+  for (const [price, vol] of sorted) {
+    cumVol += vol;
+    if (cumVol / totalVol >= 0.15 && valPrice === 0) valPrice = price;
+    if (cumVol / totalVol >= 0.85 && vahPrice === 0) vahPrice = price;
+  }
+  const ceAlignTolerance = lv.width * 0.1;
+  if (Math.abs(lv.ce - valPrice) < ceAlignTolerance || Math.abs(lv.ce - vahPrice) < ceAlignTolerance) score += 20;
+
+  if (lv.displacementVolRatio > 2.5) score += 15;
+  else if (lv.displacementVolRatio > 1.5) score += 8;
+
+  if (!lv.hasWickOverlap) score += 15;
+
+  if (lv.consolidationBars >= 12) score += 10;
+  else if (lv.consolidationBars >= 8) score += 5;
+
+  return Math.min(100, score);
+}
+
+function qssSetup(
+  pair: string, c5: Candle[], c15: Candle[], c1h: Candle[], sessionScoreVal: number
+): Signal | null {
+  const isCrypto = pair.includes("BTC") || pair.includes("ETH");
+  const sym = pair.toUpperCase();
+  const cHtf = isCrypto ? c15 : c1h;
+  if (c5.length < 50 || cHtf.length < 20) return null;
+
+  const regime = qssAVRD(c5, cHtf);
+  if (regime === "COMPRESSION" || regime === "TRANSITION") return null;
+
+  const lv = qssLVIM(c5, isCrypto);
+  if (!lv) return null;
+
+  if (regime === "EXPANSION_BULL" && !lv.isLong) return null;
+  if (regime === "EXPANSION_BEAR" && lv.isLong) return null;
+
+  const htfHighs = cHtf.slice(-10).map(c => c.h);
+  const htfLows = cHtf.slice(-10).map(c => c.l);
+  const htfBull = htfHighs[htfHighs.length - 1] > htfHighs[0] && htfLows[htfLows.length - 1] > htfLows[0];
+  const htfBear = htfHighs[htfHighs.length - 1] < htfHighs[0] && htfLows[htfLows.length - 1] < htfLows[0];
+  const htfAligns = lv.isLong ? htfBull : htfBear;
+  if (!htfAligns) return null;
+
+  if (!isCrypto && sessionScoreVal < 65) return null;
+
+  let vwsaScore = qssVWSA(c5, lv);
+  if (htfAligns) vwsaScore += 15;
+  vwsaScore = Math.min(100, vwsaScore);
+  if (vwsaScore < 60) return null;
+
+  const atr5arr = qssATR(c5, 14);
+  const atr5 = atr5arr[atr5arr.length - 1] ?? 0;
+  if (atr5 <= 0) return null;
+
+  const entry = lv.ce;
+  const regimeMult = 1.5;
+  const slFromAtr = atr5 * regimeMult;
+  const slFromVoid = lv.width * 1.2;
+  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr5 * 3.0);
+  const sl = lv.isLong ? entry - slDist : entry + slDist;
+
+  const rrTarget = vwsaScore >= 90 ? 2.5
+    : vwsaScore >= 80 ? 2.25
+    : vwsaScore >= 70 ? 2.0
+    : 1.85;
+
+  const tpDist = slDist * rrTarget;
+  const tp1Dist = tpDist * 0.4;
+  const tp1 = lv.isLong ? entry + tp1Dist : entry - tp1Dist;
+  const tp2 = lv.isLong ? entry + tpDist : entry - tpDist;
+
+  const lastC = c5[c5.length - 1];
+  const spread = lastC.h - lastC.l;
+  if (sym.includes("XAU") && spread > 0.35) return null;
+  if (!isCrypto && !sym.includes("XAU") && spread > 0.0020) return null;
+
+  const regimeScore = regime === "EXPANSION_BULL" || regime === "EXPANSION_BEAR" ? 30 : 15;
+  const vwsaNorm = Math.round((vwsaScore / 100) * 40);
+  const sessBonus = sessionScoreVal > 80 ? 10 : sessionScoreVal > 65 ? 5 : 0;
+  const volBonus = lv.displacementVolRatio > 2.5 ? 10 : lv.displacementVolRatio > 1.5 ? 5 : 0;
+  const confidence = Math.min(99, regimeScore + vwsaNorm + sessBonus + volBonus);
+
+  if (confidence < 65 || rrTarget < 1.85) return null;
+
+  const orderType = lv.isLong ? "Buy Limit" : "Sell Limit";
+  const regimeLabel = regime === "EXPANSION_BULL" ? "ExpBull" : "ExpBear";
+  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
+
+  return {
+    pair,
+    timeframe: "5m",
+    setup: `QSS (${regimeLabel} VWSA=${vwsaScore})`,
+    direction: lv.isLong ? "Long" : "Short",
+    entry: +entry.toFixed(5),
+    stop_loss: +sl.toFixed(5),
+    tp1: +tp1.toFixed(5),
+    tp2: +tp2.toFixed(5),
+    rr: +rrTarget.toFixed(2),
+    atr: atr5,
+    candle_time: candleTime,
+    session_score: sessionScoreVal,
+    confidence,
+    news_flag: false,
+    order_type: orderType,
+    spread_pips: spreadDisplay(pair),
+    htf_bias: lv.isLong ? "1H BULL" : "1H BEAR",
+    mfi_score: +vwsaScore.toFixed(0),
+    mfi_divergence: false,
+  };
+}
+
+
+
+
+
 
 function mfiBoost(c5: Candle[], dir: "Long" | "Short"): { value: number; div: boolean; boost: number } {
   const m = mfi(c5);
@@ -1225,7 +1529,22 @@ async function runScanJob(
         }
       }
 
+      // QSS — Quantum Scalping System; scored internally, bypasses qualifyAndScore.
+      {
+        const ssNow = sessionScore(pair, nowDate);
+        const qss = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
+        if (!qss) {
+          pairReport.checks.push({ setup: "QSS", status: "none", reason: "No qualifying void" });
+        } else if (hits.length > 0) {
+          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction, reason: `News blackout` });
+        } else {
+          pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
+          candidates.push(qss);
+        }
+      }
+
       report.push(pairReport);
+
     }
 
 
