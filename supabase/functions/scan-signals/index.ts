@@ -860,9 +860,11 @@ function qssLVIM(c5: Candle[], isCrypto: boolean): QSSLiquidityVoid | null {
         }
 
         const currentPrice = c5[n - 1].c;
+        // For long: price retraces DOWN into void — must be in top 30% (near upper boundary)
+        // For short: price retraces UP into void — must be in bottom 30% (near lower boundary)
         const voidEntry30pct = isLong
-          ? voidHigh - 0.3 * voidWidth
-          : voidLow + 0.3 * voidWidth;
+          ? voidHigh - 0.3 * voidWidth  // top 30%: from (voidHigh - 0.3*width) to voidHigh
+          : voidLow + 0.3 * voidWidth;  // bottom 30%: from voidLow to (voidLow + 0.3*width)
         const priceInVoid = isLong
           ? (currentPrice <= voidHigh && currentPrice >= voidEntry30pct)
           : (currentPrice >= voidLow && currentPrice <= voidEntry30pct);
