@@ -19,6 +19,7 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: ScalpEdge });
 
@@ -832,45 +833,75 @@ function ScalpEdge() {
 }
 
 function ScanReport({ report }: { report: PairReport[] }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (pair: string) => {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(pair)) next.delete(pair);
+      else next.add(pair);
+      return next;
+    });
+  };
+
   return (
     <div className="mt-3 border border-border rounded bg-card/60 p-3 animate-fade-in">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
         Scan Report · {report.length} pairs
       </div>
       <div className="space-y-2 text-xs">
-        {report.map((p) => (
-          <div key={p.pair} className="border-b border-border/40 pb-2 last:border-b-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold">{p.pair}</span>
-              {p.cached && <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-secondary/60 text-muted-foreground">cached</span>}
-              {p.htf_bias && (
-                <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
-                  p.htf_bias === "bull" ? "bg-bull/20 text-bull" :
-                  p.htf_bias === "bear" ? "bg-bear/20 text-bear" : "bg-secondary/60 text-muted-foreground"
-                }`}>
-                  1H {p.htf_bias}
-                </span>
-              )}
-              {p.candle_time && (
-                <span className="text-[10px] text-muted-foreground">
-                  last 5m: {new Date(p.candle_time).toISOString().slice(11, 16)} UTC
-                </span>
-              )}
-            </div>
-            <div className="mt-1 space-y-0.5 pl-2">
-              {p.checks.map((c, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className={c.status === "qualified" ? "text-bull" : c.status === "filtered" ? "text-chart-4" : "text-muted-foreground/60"}>
-                    {c.status === "qualified" ? "✓" : c.status === "filtered" ? "⊘" : "—"}
+        {report.map((p) => {
+          const isOpen = open.has(p.pair);
+          return (
+            <div key={p.pair} className="border-b border-border/40 pb-2 last:border-b-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold">{p.pair}</span>
+                {p.cached && <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-secondary/60 text-muted-foreground">cached</span>}
+                {p.htf_bias && (
+                  <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
+                    p.htf_bias === "bull" ? "bg-bull/20 text-bull" :
+                    p.htf_bias === "bear" ? "bg-bear/20 text-bear" : "bg-secondary/60 text-muted-foreground"
+                  }`}>
+                    1H {p.htf_bias}
                   </span>
-                  <span className="text-foreground/80">{c.setup}</span>
-                  {c.direction && <span className="text-muted-foreground">({c.direction})</span>}
-                  {c.reason && <span className="text-muted-foreground italic">— {c.reason}</span>}
+                )}
+                {p.candle_time && (
+                  <span className="text-[10px] text-muted-foreground">
+                    last 5m: {new Date(p.candle_time).toISOString().slice(11, 16)} UTC
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => toggle(p.pair)}
+                className="mt-1.5 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                Strategy Breakdown
+              </button>
+              {isOpen && (
+                <div className="mt-1.5 space-y-1 pl-2">
+                  {p.checks.map((c, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span
+                        className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
+                          c.status === "qualified"
+                            ? "bg-bull/20 text-bull"
+                            : c.status === "filtered"
+                            ? "bg-chart-4/20 text-chart-4"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                      <span className="text-foreground/80">{c.setup}</span>
+                      {c.direction && <span className="text-muted-foreground">({c.direction})</span>}
+                      {c.reason && <span className="text-muted-foreground italic">— {c.reason}</span>}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
