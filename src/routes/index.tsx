@@ -19,6 +19,7 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: ScalpEdge });
 
