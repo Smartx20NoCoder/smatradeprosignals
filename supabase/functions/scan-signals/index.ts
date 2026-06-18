@@ -838,17 +838,13 @@ function qssLVIM(c5: Candle[], isCrypto: boolean): QSSLiquidityVoid | null {
         if (!bullishDispl && !bearishDispl) continue;
 
         const isLong = bullishDispl;
-        const voidTop = isLong
-          ? Math.min(...displSlice.map(c => c.h))
-          : Math.max(...displSlice.map(c => c.l));
-        const voidBottom = isLong
-          ? Math.max(...displSlice.map(c => c.l))
-          : Math.min(...displSlice.map(c => c.h));
-        if (isLong && voidTop <= voidBottom) continue;
-        if (!isLong && voidBottom >= voidTop) continue;
+        // For both long and short: void spans from min(highs) [lower] to max(lows) [upper]
+        const voidLower = Math.min(...displSlice.map(c => c.h)); // lower boundary of void
+        const voidUpper = Math.max(...displSlice.map(c => c.l)); // upper boundary of void
+        if (voidUpper <= voidLower) continue; // no gap exists — skip
 
-        const voidHigh = isLong ? voidTop : voidBottom;
-        const voidLow = isLong ? voidBottom : voidTop;
+        const voidHigh = voidUpper; // upper boundary (always max of lows)
+        const voidLow = voidLower;  // lower boundary (always min of highs)
         const voidWidth = Math.abs(voidHigh - voidLow);
         if (voidWidth <= 0) continue;
         const ce = (voidHigh + voidLow) / 2;
