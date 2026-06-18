@@ -838,17 +838,13 @@ function qssLVIM(c5: Candle[], isCrypto: boolean): QSSLiquidityVoid | null {
         if (!bullishDispl && !bearishDispl) continue;
 
         const isLong = bullishDispl;
-        const voidTop = isLong
-          ? Math.min(...displSlice.map(c => c.h))
-          : Math.max(...displSlice.map(c => c.l));
-        const voidBottom = isLong
-          ? Math.max(...displSlice.map(c => c.l))
-          : Math.min(...displSlice.map(c => c.h));
-        if (isLong && voidTop <= voidBottom) continue;
-        if (!isLong && voidBottom >= voidTop) continue;
+        // For both long and short: void spans from min(highs) [lower] to max(lows) [upper]
+        const voidLower = Math.min(...displSlice.map(c => c.h)); // lower boundary of void
+        const voidUpper = Math.max(...displSlice.map(c => c.l)); // upper boundary of void
+        if (voidUpper <= voidLower) continue; // no gap exists — skip
 
-        const voidHigh = isLong ? voidTop : voidBottom;
-        const voidLow = isLong ? voidBottom : voidTop;
+        const voidHigh = voidUpper; // upper boundary (always max of lows)
+        const voidLow = voidLower;  // lower boundary (always min of highs)
         const voidWidth = Math.abs(voidHigh - voidLow);
         if (voidWidth <= 0) continue;
         const ce = (voidHigh + voidLow) / 2;
@@ -864,9 +860,11 @@ function qssLVIM(c5: Candle[], isCrypto: boolean): QSSLiquidityVoid | null {
         }
 
         const currentPrice = c5[n - 1].c;
+        // For long: price retraces DOWN into void — must be in top 30% (near upper boundary)
+        // For short: price retraces UP into void — must be in bottom 30% (near lower boundary)
         const voidEntry30pct = isLong
-          ? voidHigh - 0.3 * voidWidth
-          : voidLow + 0.3 * voidWidth;
+          ? voidHigh - 0.3 * voidWidth  // top 30%: from (voidHigh - 0.3*width) to voidHigh
+          : voidLow + 0.3 * voidWidth;  // bottom 30%: from voidLow to (voidLow + 0.3*width)
         const priceInVoid = isLong
           ? (currentPrice <= voidHigh && currentPrice >= voidEntry30pct)
           : (currentPrice >= voidLow && currentPrice <= voidEntry30pct);
