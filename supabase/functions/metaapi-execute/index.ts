@@ -130,12 +130,16 @@ Deno.serve(async (req) => {
 
     // Setup auto-execute gate
     const setupConfig = (c?.setup_auto_execute ?? {}) as Record<string, boolean>;
-    const signalSetupBase = String(s.setup ?? "").split("(")[0].trim(); // strip VERITAS params
-    const setupEnabled = setupConfig[signalSetupBase] !== false;
+    // Split combined setups like "BOS Retest + Session Range Break" and check each part
+    const setupComponents = String(s.setup ?? "")
+      .split("+")
+      .map(c => c.split("(")[0].trim())
+      .filter(Boolean);
+    const setupEnabled = setupComponents.every(comp => setupConfig[comp] !== false);
     if (!setupEnabled) {
       await supabase.from("signals").update({
         metaapi_execution_status: "skipped",
-        metaapi_execution_error: `${signalSetupBase} auto-execution is disabled in Settings. Paper-tracked only.`,
+        metaapi_execution_error: `${String(s.setup ?? "").split("(")[0].trim()} auto-execution is disabled in Settings. Paper-tracked only.`,
         paper_status: "watching",
       }).eq("id", signal_id);
       return new Response(JSON.stringify({ ok: false, reason: "setup_disabled" }), {
