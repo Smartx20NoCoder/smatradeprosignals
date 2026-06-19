@@ -158,7 +158,7 @@ function sessionScore(pair: string, dUTC: Date): number {
   const isLondon = h >= 7 && h < 12;
   const isNY = h >= 16 && h < 21;
   const isAsian = h >= 0 && h < 7;
-  if (isBTC(pair)) return 70; // crypto 24/7
+  if (isBTC(pair) || isCryptoAlt(pair)) return 70; // all crypto 24/7
   if (isOverlap) return 95;
   if (isGold(pair) && (isLondon || isNY)) return 90;
   if (isGold(pair) && isAsian) return 30;
