@@ -12,11 +12,10 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD", "XRP/USD", "ETH/USD", // top priority — always scan first
-  "GBP/USD", "GBP/JPY",           // core FX
-  "EUR/USD", "USD/JPY",           // secondary FX
-  "EUR/JPY",                       // tracked only
-  "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
+  "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", // crypto + gold — always scan first
+  "GBP/USD", "GBP/JPY", // core FX
+  "EUR/USD", "USD/JPY", // secondary FX
+  "AUD/JPY", "AUD/USD" // secondary pairs
 ];
 // Disabled setups — kept in code but filtered out of signal generation.
 // Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
@@ -63,8 +62,8 @@ const SPREAD_PIPS: Record<string, number> = {
 };
 const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
-const XRP_SPREAD = 0.0005;
-const ETH_SPREAD = 0.50;
+const ETH_SPREAD = 1.00; // USD
+const XRP_SPREAD = 0.001; // USD
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
 type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
@@ -82,23 +81,28 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isGold = (p: string) => p === "XAU/USD";
 const isBTC = (p: string) => p === "BTC/USD";
-const isXRP = (p: string) => p === "XRP/USD";
 const isETH = (p: string) => p === "ETH/USD";
+const isXRP = (p: string) => p === "XRP/USD";
+const isCryptoAlt = (p: string) => isETH(p) || isXRP(p);
 function pipSize(pair: string): number {
   if (isGold(pair)) return 0.01;
   if (isBTC(pair)) return 1.0;
+  if (isETH(pair)) return 0.1;
+  if (isXRP(pair)) return 0.0001;
   return pair.includes("JPY") ? 0.01 : 0.0001;
 }
 function spreadPrice(pair: string): number {
   if (isGold(pair)) return XAU_SPREAD;
   if (isBTC(pair)) return BTC_SPREAD;
-  if (isXRP(pair)) return XRP_SPREAD;
   if (isETH(pair)) return ETH_SPREAD;
+  if (isXRP(pair)) return XRP_SPREAD;
   return (SPREAD_PIPS[pair] ?? 1.5) * pipSize(pair);
 }
 function spreadDisplay(pair: string): number {
   if (isGold(pair)) return 40;
   if (isBTC(pair)) return 200; // $2.00 = 200 cents
+  if (isETH(pair)) return 100;
+  if (isXRP(pair)) return 10;
   return SPREAD_PIPS[pair] ?? 1.5;
 }
 
@@ -154,7 +158,7 @@ function sessionScore(pair: string, dUTC: Date): number {
   const isLondon = h >= 7 && h < 12;
   const isNY = h >= 16 && h < 21;
   const isAsian = h >= 0 && h < 7;
-  if (isBTC(pair)) return 70; // crypto 24/7
+  if (isBTC(pair) || isCryptoAlt(pair)) return 70; // all crypto 24/7
   if (isOverlap) return 95;
   if (isGold(pair) && (isLondon || isNY)) return 90;
   if (isGold(pair) && isAsian) return 30;
@@ -938,7 +942,7 @@ function qssVWSA(c5: Candle[], lv: QSSLiquidityVoid): number {
 function qssSetup(
   pair: string, c5: Candle[], c15: Candle[], c1h: Candle[], sessionScoreVal: number
 ): Signal | null {
-  const isCrypto = pair.includes("BTC") || pair.includes("ETH");
+  const isCrypto = pair.includes("BTC") || pair.includes("ETH") || pair.includes("XRP");
   const sym = pair.toUpperCase();
   const cHtf = isCrypto ? c15 : c1h;
   if (c5.length < 50 || cHtf.length < 20) return null;
@@ -1085,7 +1089,7 @@ function qualifyAndScore(
 ): { signal: Signal | null; reason?: string } {
   const pair = raw.pair, ps = pipSize(pair), a = raw.atr;
   const atrPips = a / ps;
-  const minAtrPips = isGold(pair) ? 80 : isBTC(pair) ? 20 : 4;
+  const minAtrPips = isGold(pair) ? 80 : isBTC(pair) ? 20 : isCryptoAlt(pair) ? 50 : 4;
   if (atrPips < minAtrPips) return { signal: null, reason: `ATR too flat (${atrPips.toFixed(1)})` };
 
   if (bias === "bull" && raw.direction === "Short") return { signal: null, reason: "Against 1H bias (1H bull)" };
@@ -1103,6 +1107,13 @@ function qualifyAndScore(
   if (risk <= 0) return { signal: null, reason: "Risk collapsed after spread" };
   const rr = Math.abs(tp2 - entry) / risk;
   if (rr < 1.2) return { signal: null, reason: `R:R too low after spread (${rr.toFixed(2)})` };
+
+  // Broker minimum stop distance floor (RoboForex MT4 stop levels with safety buffer).
+  const brokerMinSL = isGold(pair) ? 1.5
+    : isBTC(pair) ? 150
+    : isCryptoAlt(pair) ? 0.05
+    : 0.0005;
+  if (risk < brokerMinSL) return { signal: null, reason: `SL too tight for broker (${risk.toFixed(5)} < min ${brokerMinSL})` };
 
   const now = new Date();
   const ss = sessionScore(pair, now);
@@ -1231,9 +1242,9 @@ type ActiveSettings = {
 };
 
 // Core pairs always scanned regardless of pair_auto_execute setting.
-const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
+const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
-const SECONDARY_PAIRS = new Set(["EUR/GBP", "AUD/JPY", "AUD/USD"]);
+const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,

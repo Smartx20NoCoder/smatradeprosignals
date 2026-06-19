@@ -19,6 +19,9 @@ function mapBrokerError(err: string): string {
   if (err && err.includes("10016")) {
     return "Signal skipped — price moved too far before execution, stops now invalid. Wait for next signal.";
   }
+  if (err && err.includes("broker error code 130")) {
+    return "Broker rejected order (Error 130 — Invalid Stops): RoboForex stop level was wider than the signal's SL at execution time. Signal skipped — the next scan will generate a fresh signal with updated prices.";
+  }
   return err;
 }
 
@@ -246,9 +249,13 @@ Deno.serve(async (req) => {
       ? picked.openPrice
       : mid;
     const slDistance = Math.abs(referencePrice - Number(s.stop_loss));
-    const minDistance = referencePrice * 0.0003;
-    if (slDistance < minDistance) {
-      const msg = `SL too close to market (${slDistance.toFixed(5)} < min ${minDistance.toFixed(5)}) — signal stale`;
+    const slSym = pairToSymbol(s.pair, "");
+    const brokerMinSL = slSym.includes("XAU") ? 1.5
+      : slSym.includes("BTC") ? 150
+      : slSym.includes("ETH") || slSym.includes("XRP") ? 0.05
+      : referencePrice * 0.0003;
+    if (slDistance < brokerMinSL) {
+      const msg = `SL too close to entry for broker (${slDistance.toFixed(5)} < min ${brokerMinSL}) — signal skipped. Next scan will generate a fresh signal.`;
       await markFailed(supabase, signal_id, msg);
       return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -289,9 +296,10 @@ Deno.serve(async (req) => {
       : fallbackLot / 2;
 
 // Broker lot step rules — round DOWN to nearest valid step (never round up, never over-risk)
-const isBTC = sym.includes("BTC") || sym.includes("ETH");
-const lotStep = isBTC ? 0.1 : 0.01;   // BTC: 0.1 step only. XAU/FX: 0.01 step.
-const lotMin  = isBTC ? 0.1 : 0.10;   // Both have 0.10 minimum but BTC enforces 0.1 step
+const isBTCGroup = sym.includes("BTC") || sym.includes("ETH");
+const isXRPGroup = sym.includes("XRP");
+const lotStep = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.01;
+const lotMin  = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.10;
 
 // Round DOWN to nearest step, then clamp between min and half of maxLot
 let halfLot = Math.floor(rawLot / lotStep) * lotStep;

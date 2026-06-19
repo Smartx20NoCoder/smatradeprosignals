@@ -138,7 +138,7 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 };
 
 const DAILY_BUDGET = 800;
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY", "XAU/USD", "BTC/USD"];
+const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
@@ -256,8 +256,9 @@ function ScalpEdge() {
     metaapi_is_cent_account: false,
     metaapi_is_cent_account_live: false,
     pair_auto_execute: {
-      "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
-      "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+      "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
+      "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+      "AUD/JPY": false, "AUD/USD": false,
     },
     setup_auto_execute: {
       "EMA Pullback": true,
@@ -365,8 +366,9 @@ function ScalpEdge() {
       metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
       metaapi_is_cent_account_live: !!(cfg as any).metaapi_is_cent_account_live,
       pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
-        "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
-        "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+        "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
+        "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+        "AUD/JPY": false, "AUD/USD": false,
       },
       setup_auto_execute: ((cfg as any).setup_auto_execute as Record<string, boolean>) ?? {
         "EMA Pullback": true,
@@ -1630,7 +1632,7 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["XAU/USD","BTC/USD","GBP/USD","GBP/JPY","EUR/USD","EUR/JPY","USD/JPY","EUR/GBP","AUD/JPY","AUD/USD"].map((p) => {
+          {["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"].map((p) => {
             const cfg = appSettings.pair_auto_execute ?? {};
             const on = cfg[p] !== false;
             return (
@@ -1782,7 +1784,7 @@ function MetaApiPanel({
             disabled={testTrading}
             className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
           >
-            {["BTC/USD","XAU/USD","EUR/USD","GBP/USD","GBP/JPY","EUR/JPY","USD/JPY","AUD/USD","AUD/JPY","EUR/GBP"].map((p) => (
+            {["BTC/USD","XAU/USD","ETH/USD","XRP/USD","EUR/USD","GBP/USD","GBP/JPY","USD/JPY","AUD/USD","AUD/JPY"].map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
