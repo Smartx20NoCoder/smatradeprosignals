@@ -256,8 +256,9 @@ function ScalpEdge() {
     metaapi_is_cent_account: false,
     metaapi_is_cent_account_live: false,
     pair_auto_execute: {
-      "XAU/USD": true, "BTC/USD": true, "GBP/USD": true,
-      "GBP/JPY": true, "EUR/USD": false, "EUR/JPY": false, "USD/JPY": true,
+      "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
+      "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+      "AUD/JPY": false, "AUD/USD": false,
     },
     setup_auto_execute: {
       "EMA Pullback": true,
