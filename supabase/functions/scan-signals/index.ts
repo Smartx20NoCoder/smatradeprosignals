@@ -87,8 +87,6 @@ const isETH = (p: string) => p === "ETH/USD";
 function pipSize(pair: string): number {
   if (isGold(pair)) return 0.01;
   if (isBTC(pair)) return 1.0;
-  if (isXRP(pair)) return 0.0001;
-  if (isETH(pair)) return 0.01;
   return pair.includes("JPY") ? 0.01 : 0.0001;
 }
 function spreadPrice(pair: string): number {
@@ -101,8 +99,6 @@ function spreadPrice(pair: string): number {
 function spreadDisplay(pair: string): number {
   if (isGold(pair)) return 40;
   if (isBTC(pair)) return 200; // $2.00 = 200 cents
-  if (isXRP(pair)) return 5;
-  if (isETH(pair)) return 50;
   return SPREAD_PIPS[pair] ?? 1.5;
 }
 
