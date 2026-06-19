@@ -19,6 +19,9 @@ function mapBrokerError(err: string): string {
   if (err && err.includes("10016")) {
     return "Signal skipped — price moved too far before execution, stops now invalid. Wait for next signal.";
   }
+  if (err && err.includes("broker error code 130")) {
+    return "Broker rejected order (Error 130 — Invalid Stops): RoboForex stop level was wider than the signal's SL at execution time. Signal skipped — the next scan will generate a fresh signal with updated prices.";
+  }
   return err;
 }
 
