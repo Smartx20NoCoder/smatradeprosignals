@@ -81,23 +81,28 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isGold = (p: string) => p === "XAU/USD";
 const isBTC = (p: string) => p === "BTC/USD";
-const isXRP = (p: string) => p === "XRP/USD";
 const isETH = (p: string) => p === "ETH/USD";
+const isXRP = (p: string) => p === "XRP/USD";
+const isCryptoAlt = (p: string) => isETH(p) || isXRP(p);
 function pipSize(pair: string): number {
   if (isGold(pair)) return 0.01;
   if (isBTC(pair)) return 1.0;
+  if (isETH(pair)) return 0.1;
+  if (isXRP(pair)) return 0.0001;
   return pair.includes("JPY") ? 0.01 : 0.0001;
 }
 function spreadPrice(pair: string): number {
   if (isGold(pair)) return XAU_SPREAD;
   if (isBTC(pair)) return BTC_SPREAD;
-  if (isXRP(pair)) return XRP_SPREAD;
   if (isETH(pair)) return ETH_SPREAD;
+  if (isXRP(pair)) return XRP_SPREAD;
   return (SPREAD_PIPS[pair] ?? 1.5) * pipSize(pair);
 }
 function spreadDisplay(pair: string): number {
   if (isGold(pair)) return 40;
   if (isBTC(pair)) return 200; // $2.00 = 200 cents
+  if (isETH(pair)) return 100;
+  if (isXRP(pair)) return 10;
   return SPREAD_PIPS[pair] ?? 1.5;
 }
 
