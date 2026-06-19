@@ -1242,9 +1242,9 @@ type ActiveSettings = {
 };
 
 // Core pairs always scanned regardless of pair_auto_execute setting.
-const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
+const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
-const SECONDARY_PAIRS = new Set(["EUR/GBP", "AUD/JPY", "AUD/USD"]);
+const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,
