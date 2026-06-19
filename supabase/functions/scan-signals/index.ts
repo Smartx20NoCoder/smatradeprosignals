@@ -12,7 +12,7 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD",           // top priority — always scan first
+  "XAU/USD", "BTC/USD", "XRP/USD", "ETH/USD", // top priority — always scan first
   "GBP/USD", "GBP/JPY",           // core FX
   "EUR/USD", "USD/JPY",           // secondary FX
   "EUR/JPY",                       // tracked only
@@ -46,7 +46,7 @@ function pairCurrencies(pair: string): string[] {
 // Weekend / Friday-late filter: forex + gold pause from Fri 22:00 UTC to Sun 22:00 UTC.
 // Only BTC/USD trades in that window.
 function isPairAllowedNow(pair: string, d: Date): boolean {
-  if (pair === "BTC/USD") return true;
+  if (pair === "BTC/USD" || pair === "XRP/USD" || pair === "ETH/USD") return true;
   const day = d.getUTCDay(); // 0 Sun, 5 Fri, 6 Sat
   const h = d.getUTCHours();
   if (day === 6) return false;                  // Saturday: closed
@@ -63,6 +63,8 @@ const SPREAD_PIPS: Record<string, number> = {
 };
 const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
+const XRP_SPREAD = 0.0005;
+const ETH_SPREAD = 0.50;
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
 type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
@@ -80,6 +82,8 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isGold = (p: string) => p === "XAU/USD";
 const isBTC = (p: string) => p === "BTC/USD";
+const isXRP = (p: string) => p === "XRP/USD";
+const isETH = (p: string) => p === "ETH/USD";
 function pipSize(pair: string): number {
   if (isGold(pair)) return 0.01;
   if (isBTC(pair)) return 1.0;
@@ -88,6 +92,8 @@ function pipSize(pair: string): number {
 function spreadPrice(pair: string): number {
   if (isGold(pair)) return XAU_SPREAD;
   if (isBTC(pair)) return BTC_SPREAD;
+  if (isXRP(pair)) return XRP_SPREAD;
+  if (isETH(pair)) return ETH_SPREAD;
   return (SPREAD_PIPS[pair] ?? 1.5) * pipSize(pair);
 }
 function spreadDisplay(pair: string): number {
