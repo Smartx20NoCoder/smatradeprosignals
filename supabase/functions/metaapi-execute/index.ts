@@ -296,9 +296,10 @@ Deno.serve(async (req) => {
       : fallbackLot / 2;
 
 // Broker lot step rules — round DOWN to nearest valid step (never round up, never over-risk)
-const isBTC = sym.includes("BTC") || sym.includes("ETH");
-const lotStep = isBTC ? 0.1 : 0.01;   // BTC: 0.1 step only. XAU/FX: 0.01 step.
-const lotMin  = isBTC ? 0.1 : 0.10;   // Both have 0.10 minimum but BTC enforces 0.1 step
+const isBTCGroup = sym.includes("BTC") || sym.includes("ETH");
+const isXRPGroup = sym.includes("XRP");
+const lotStep = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.01;
+const lotMin  = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.10;
 
 // Round DOWN to nearest step, then clamp between min and half of maxLot
 let halfLot = Math.floor(rawLot / lotStep) * lotStep;
