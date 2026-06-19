@@ -12,11 +12,10 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD", "XRP/USD", "ETH/USD", // top priority — always scan first
-  "GBP/USD", "GBP/JPY",           // core FX
-  "EUR/USD", "USD/JPY",           // secondary FX
-  "EUR/JPY",                       // tracked only
-  "EUR/GBP", "AUD/JPY", "AUD/USD" // secondary pairs
+  "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", // crypto + gold — always scan first
+  "GBP/USD", "GBP/JPY", // core FX
+  "EUR/USD", "USD/JPY", // secondary FX
+  "AUD/JPY", "AUD/USD" // secondary pairs
 ];
 // Disabled setups — kept in code but filtered out of signal generation.
 // Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
