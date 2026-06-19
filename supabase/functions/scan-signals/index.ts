@@ -942,7 +942,7 @@ function qssVWSA(c5: Candle[], lv: QSSLiquidityVoid): number {
 function qssSetup(
   pair: string, c5: Candle[], c15: Candle[], c1h: Candle[], sessionScoreVal: number
 ): Signal | null {
-  const isCrypto = pair.includes("BTC") || pair.includes("ETH");
+  const isCrypto = pair.includes("BTC") || pair.includes("ETH") || pair.includes("XRP");
   const sym = pair.toUpperCase();
   const cHtf = isCrypto ? c15 : c1h;
   if (c5.length < 50 || cHtf.length < 20) return null;
