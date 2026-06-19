@@ -1089,7 +1089,7 @@ function qualifyAndScore(
 ): { signal: Signal | null; reason?: string } {
   const pair = raw.pair, ps = pipSize(pair), a = raw.atr;
   const atrPips = a / ps;
-  const minAtrPips = isGold(pair) ? 80 : isBTC(pair) ? 20 : 4;
+  const minAtrPips = isGold(pair) ? 80 : isBTC(pair) ? 20 : isCryptoAlt(pair) ? 50 : 4;
   if (atrPips < minAtrPips) return { signal: null, reason: `ATR too flat (${atrPips.toFixed(1)})` };
 
   if (bias === "bull" && raw.direction === "Short") return { signal: null, reason: "Against 1H bias (1H bull)" };
@@ -1107,6 +1107,13 @@ function qualifyAndScore(
   if (risk <= 0) return { signal: null, reason: "Risk collapsed after spread" };
   const rr = Math.abs(tp2 - entry) / risk;
   if (rr < 1.2) return { signal: null, reason: `R:R too low after spread (${rr.toFixed(2)})` };
+
+  // Broker minimum stop distance floor (RoboForex MT4 stop levels with safety buffer).
+  const brokerMinSL = isGold(pair) ? 1.5
+    : isBTC(pair) ? 150
+    : isCryptoAlt(pair) ? 0.05
+    : 0.0005;
+  if (risk < brokerMinSL) return { signal: null, reason: `SL too tight for broker (${risk.toFixed(5)} < min ${brokerMinSL})` };
 
   const now = new Date();
   const ss = sessionScore(pair, now);
