@@ -62,8 +62,8 @@ const SPREAD_PIPS: Record<string, number> = {
 };
 const XAU_SPREAD = 0.40; // USD
 const BTC_SPREAD = 2.00; // USD
-const XRP_SPREAD = 0.0005;
-const ETH_SPREAD = 0.50;
+const ETH_SPREAD = 1.00; // USD
+const XRP_SPREAD = 0.001; // USD
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
 type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
