@@ -242,8 +242,11 @@ Deno.serve(async (req) => {
     const orderBStopLoss = Number(s.stop_loss);
 
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
-    const slDistance = Math.abs(mid - Number(s.stop_loss));
-    const minDistance = mid * 0.0005;
+    const referencePrice = (picked.kind !== "market" && picked.openPrice != null)
+      ? picked.openPrice
+      : mid;
+    const slDistance = Math.abs(referencePrice - Number(s.stop_loss));
+    const minDistance = referencePrice * 0.0003;
     if (slDistance < minDistance) {
       const msg = `SL too close to market (${slDistance.toFixed(5)} < min ${minDistance.toFixed(5)}) — signal stale`;
       await markFailed(supabase, signal_id, msg);
