@@ -273,7 +273,7 @@ Deno.serve(async (req) => {
       ? Boolean(c?.metaapi_is_cent_account_live)
       : Boolean(c?.metaapi_is_cent_account);
     const isMetalOrCrypto = sym.includes("XAU") || sym.includes("XAG")
-      || sym.includes("BTC") || sym.includes("ETH");
+      || sym.includes("BTC") || sym.includes("ETH") || sym.includes("XRP");
     // Only FX pairs scale with the cent multiplier — metals/crypto are USD-quoted at broker level.
     const centMultiplier = (isCentAccount && !isMetalOrCrypto) ? 100 : 1;
     const pointValuePer001Lot = (isMetalOrCrypto && (sym.includes("XAU") || sym.includes("XAG")) ? 1.0
