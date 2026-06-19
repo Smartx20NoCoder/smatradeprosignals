@@ -46,7 +46,7 @@ function pairCurrencies(pair: string): string[] {
 // Weekend / Friday-late filter: forex + gold pause from Fri 22:00 UTC to Sun 22:00 UTC.
 // Only BTC/USD trades in that window.
 function isPairAllowedNow(pair: string, d: Date): boolean {
-  if (pair === "BTC/USD") return true;
+  if (pair === "BTC/USD" || pair === "XRP/USD" || pair === "ETH/USD") return true;
   const day = d.getUTCDay(); // 0 Sun, 5 Fri, 6 Sat
   const h = d.getUTCHours();
   if (day === 6) return false;                  // Saturday: closed
