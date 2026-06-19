@@ -227,15 +227,59 @@ Deno.serve(async (req) => {
     const orderTypeMap: Record<string, { action: MarketOrderAction | PendingOrderAction; openPrice?: number; kind: "market" | "limit" | "stop" }> = {
       "Buy Limit":  { action: "ORDER_TYPE_BUY_LIMIT",  openPrice: Number(s.entry), kind: "limit" },
       "Buy Stop":   { action: "ORDER_TYPE_BUY_STOP",   openPrice: Number(s.entry), kind: "stop" },
-      "Buy Market": { action: "ORDER_TYPE_BUY",        openPrice: undefined,        kind: "market" },
-      "Sell Limit": { action: "ORDER_TYPE_SELL_LIMIT", openPrice: Number(s.entry), kind: "limit" },
-      "Sell Stop":  { action: "ORDER_TYPE_SELL_STOP",  openPrice: Number(s.entry), kind: "stop" },
-      "Sell Market":{ action: "ORDER_TYPE_SELL",       openPrice: undefined,        kind: "market" },
+      "Buy Market": { action: "ORDER_TYPE_BUY",         openPrice: undefined,       kind: "market" },
+      "Sell Limit": { action: "ORDER_TYPE_SELL_LIMIT",  openPrice: Number(s.entry), kind: "limit" },
+      "Sell Stop":  { action: "ORDER_TYPE_SELL_STOP",   openPrice: Number(s.entry), kind: "stop" },
+      "Sell Market":{ action: "ORDER_TYPE_SELL",        openPrice: undefined,       kind: "market" },
     };
-    const orderTypeKey = String(s.order_type ?? "");
-    const picked = orderTypeMap[orderTypeKey];
+
+    // Re-evaluate order type against live price at execution time.
+    // The scanner assigns order_type based on price at scan time. By execution time
+    // (up to 15+ min later) price may have moved, making the original order type wrong.
+    //
+    // Rules:
+    // Sell Stop:  valid only if live price is ABOVE entry (price still needs to fall to entry)
+    //             if price already below entry → signal is stale, skip it
+    // Sell Limit: valid only if live price is BELOW entry (waiting for retrace up)
+    //             if price already above entry → reclassify to Sell Stop
+    // Buy Stop:   valid only if live price is BELOW entry (price still needs to rise to entry)
+    //             if price already above entry → signal is stale, skip it
+    // Buy Limit:  valid only if live price is ABOVE entry (waiting for retrace down)
+    //             if price already below entry → reclassify to Buy Stop
+    const liveMidForTypeCheck = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
+    const entryPrice = Number(s.entry);
+
+    let resolvedOrderTypeKey = String(s.order_type ?? "");
+
+    if (resolvedOrderTypeKey === "Sell Stop" && liveMidForTypeCheck <= entryPrice) {
+      const msg = `Signal stale: order was "Sell Stop" at entry ${entryPrice.toFixed(5)} but live price ${liveMidForTypeCheck.toFixed(5)} is already below entry. Duplicate signal skipped.`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (resolvedOrderTypeKey === "Buy Stop" && liveMidForTypeCheck >= entryPrice) {
+      const msg = `Signal stale: order was "Buy Stop" at entry ${entryPrice.toFixed(5)} but live price ${liveMidForTypeCheck.toFixed(5)} is already above entry. Duplicate signal skipped.`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (resolvedOrderTypeKey === "Sell Limit" && liveMidForTypeCheck >= entryPrice) {
+      console.log(`[execute] Reclassifying Sell Limit → Sell Stop (live ${liveMidForTypeCheck.toFixed(5)} >= entry ${entryPrice.toFixed(5)})`);
+      resolvedOrderTypeKey = "Sell Stop";
+    }
+
+    if (resolvedOrderTypeKey === "Buy Limit" && liveMidForTypeCheck <= entryPrice) {
+      console.log(`[execute] Reclassifying Buy Limit → Buy Stop (live ${liveMidForTypeCheck.toFixed(5)} <= entry ${entryPrice.toFixed(5)})`);
+      resolvedOrderTypeKey = "Buy Stop";
+    }
+
+    const picked = orderTypeMap[resolvedOrderTypeKey];
     if (!picked) {
-      const msg = `Unknown order_type: "${orderTypeKey}" — cannot execute`;
+      const msg = `Unknown order_type: "${resolvedOrderTypeKey}" — cannot execute`;
       await markFailed(supabase, signal_id, msg);
       return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

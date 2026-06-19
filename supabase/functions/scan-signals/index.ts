@@ -1615,14 +1615,30 @@ async function runScanJob(
       },
     }));
 
-    // Dedupe vs last 60min same pair+direction (any setup)
-    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    // Dedupe vs last 90min same pair+direction (any setup).
+    // Include "tp1" in the active-signal filter: a partially-closed trade is still
+    // in-flight (runner B is still open) and must block a re-fire of the same setup.
+    // Also block by candle_time: if the exact same pair+direction+candle_time already
+    // exists in the DB (any status), this is structurally the same signal and must not
+    // be duplicated regardless of how the original resolved.
+    const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
     const { data: recent } = await supabase.from("signals")
-      .select("pair, direction, status").gte("created_at", since);
+      .select("pair, direction, status, candle_time").gte("created_at", since);
+
+    // Block same pair+direction if any signal is still active (pending, in-trade, or partial tp1)
     const seen = new Set((recent ?? [])
-      .filter((r: any) => r.status === "pending" || r.status === "executed")
+      .filter((r: any) => r.status === "pending" || r.status === "executed" || r.status === "tp1")
       .map((r: any) => `${r.pair}|${r.direction}`));
-    const dedupedInsert = merged.filter(s => !seen.has(`${s.pair}|${s.direction}`));
+
+    // Also block by exact candle_time fingerprint — same candle = same structural signal
+    const seenCandle = new Set((recent ?? [])
+      .filter((r: any) => r.candle_time != null)
+      .map((r: any) => `${r.pair}|${r.direction}|${r.candle_time}`));
+
+    const dedupedInsert = merged.filter(s =>
+      !seen.has(`${s.pair}|${s.direction}`) &&
+      !seenCandle.has(`${s.pair}|${s.direction}|${s.candle_time}`)
+    );
     // Apply manual-trading threshold gate: signals below min_confidence or min_rr
     // are NOT saved and NOT alerted (keeps signals tab + Telegram aligned with what
     // you'd trade manually). Only gates NEW signals; previously-saved paper-tracked
