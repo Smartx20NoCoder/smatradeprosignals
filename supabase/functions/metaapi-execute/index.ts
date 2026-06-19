@@ -249,10 +249,10 @@ Deno.serve(async (req) => {
       ? picked.openPrice
       : mid;
     const slDistance = Math.abs(referencePrice - Number(s.stop_loss));
-    const sym = pairToSymbol(s.pair, "");
-    const brokerMinSL = sym.includes("XAU") ? 1.5
-      : sym.includes("BTC") ? 150
-      : sym.includes("ETH") || sym.includes("XRP") ? 0.05
+    const slSym = pairToSymbol(s.pair, "");
+    const brokerMinSL = slSym.includes("XAU") ? 1.5
+      : slSym.includes("BTC") ? 150
+      : slSym.includes("ETH") || slSym.includes("XRP") ? 0.05
       : referencePrice * 0.0003;
     if (slDistance < brokerMinSL) {
       const msg = `SL too close to entry for broker (${slDistance.toFixed(5)} < min ${brokerMinSL}) — signal skipped. Next scan will generate a fresh signal.`;
