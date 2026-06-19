@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
     }
 
     // Extended retry for slow-to-initialise feeds (crypto + gold on MT4)
-    for (const targetPair of ["BTC/USD", "XAU/USD"]) {
+    for (const targetPair of ["BTC/USD", "ETH/USD", "XRP/USD", "XAU/USD"]) {
       const entry = keepalive.find(k => k.pair === targetPair && !k.ok);
       if (!entry) continue;
       console.log(`${targetPair} still dead after reconnect — starting extended retry (3 attempts × 4s)`);
