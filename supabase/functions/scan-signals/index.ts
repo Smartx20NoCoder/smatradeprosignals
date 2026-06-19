@@ -12,7 +12,7 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD",           // top priority — always scan first
+  "XAU/USD", "BTC/USD", "XRP/USD", "ETH/USD", // top priority — always scan first
   "GBP/USD", "GBP/JPY",           // core FX
   "EUR/USD", "USD/JPY",           // secondary FX
   "EUR/JPY",                       // tracked only
