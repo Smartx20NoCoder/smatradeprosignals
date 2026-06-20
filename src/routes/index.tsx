@@ -992,7 +992,8 @@ function SignalRow({
   >({ kind: "idle" });
   const execStatus = s.metaapi_execution_status ?? null;
   const retryStatusEligible =
-    execStatus === "failed" || execStatus === "skipped" || execStatus === null || execStatus === "none";
+    ["failed", "skipped", "retrying"].includes(execStatus ?? "") || execStatus === null || execStatus === "none";
+  const isRetrying = execStatus === "retrying";
   const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
   const retryEligible =
     retryStatusEligible &&
