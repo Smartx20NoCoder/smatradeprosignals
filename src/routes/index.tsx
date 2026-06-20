@@ -265,6 +265,7 @@ function ScalpEdge() {
       "BOS Retest": true,
       "Session Range Break": true,
       "VERITAS": false,
+      "PRISM": false,
     },
     metaapi_active_mode: "demo",
     metaapi_region_live: "london",
@@ -375,6 +376,7 @@ function ScalpEdge() {
         "BOS Retest": true,
         "Session Range Break": true,
         "VERITAS": false,
+        "PRISM": false,
       },
       metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live" : "demo"),
       metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
@@ -1652,13 +1654,13 @@ function MetaApiPanel({
           <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH","QSS"].map((name) => {
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH","QSS","PRISM"].map((name) => {
             const defaults: Record<string, boolean> = {
               "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
-              "OB+FVG": false, "Order Block": false, "CHOCH": false, "QSS": false,
+              "OB+FVG": false, "Order Block": false, "CHOCH": false, "QSS": false, "PRISM": false,
             };
             const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
-            const isNew = name === "QSS";
+            const isNew = name === "QSS" || name === "PRISM";
             const cfg = appSettings.setup_auto_execute ?? {};
             const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
             return (
