@@ -110,7 +110,9 @@ Deno.serve(async (req) => {
     }
     const s: any = signal;
     if (Number(s.confidence) < minConf || Number(s.rr) < minRR) {
-      return new Response(JSON.stringify({ ok: false, reason: "below threshold" }), {
+      const msg = `Signal below threshold: confidence=${s.confidence}% (min=${minConf}%), RR=${s.rr} (min=${minRR}). Raise thresholds in settings or this signal no longer qualifies.`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
