@@ -1434,6 +1434,21 @@ function MetaApiPanel({
     count: number;
   } | null>(null);
 
+  // Test Strategy panel state
+  const TEST_STRAT_PAIRS = ["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"];
+  const TEST_STRAT_SETUPS = ["EMA Pullback","BOS Retest","VERITAS","QSS","PRISM"];
+  const [testStratPair, setTestStratPair] = useState("XAU/USD");
+  const [testStratSetups, setTestStratSetups] = useState<string[]>(["VERITAS","QSS","PRISM"]);
+  const [testStratRunning, setTestStratRunning] = useState(false);
+  const [testStratResult, setTestStratResult] = useState<{
+    scanned_at: string;
+    pair: string;
+    rows: Array<{
+      setup: string; qualified: boolean; reason?: string; debug?: string;
+      signal?: { direction?: string; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; rr?: number; confidence?: number; order_type?: string };
+    }>;
+  } | null>(null);
+
 
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
@@ -1897,6 +1912,110 @@ function MetaApiPanel({
             )}
           </div>
         )}
+
+        {/* ─── TEST STRATEGY ─────────────────────────────────────── */}
+        <div className="mt-4 pt-4 border-t border-border">
+          <div className="text-[11px] uppercase tracking-wider font-bold text-chart-4 mb-1">Test Strategy</div>
+          <div className="text-[10px] text-muted-foreground mb-3">
+            Runs strategy logic on live candle data without saving signals, placing orders, or sending alerts.
+            Use to confirm a strategy is detecting patterns correctly before enabling auto-execute.
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={testStratPair}
+              onChange={(e) => setTestStratPair(e.target.value)}
+              disabled={testStratRunning}
+              className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
+            >
+              {TEST_STRAT_PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <div className="flex items-center gap-3 flex-wrap text-xs">
+              {TEST_STRAT_SETUPS.map((s) => {
+                const checked = testStratSetups.includes(s);
+                return (
+                  <label key={s} className="inline-flex items-center gap-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={testStratRunning}
+                      onChange={(e) => {
+                        setTestStratSetups((prev) =>
+                          e.target.checked ? [...prev, s] : prev.filter((x) => x !== s)
+                        );
+                      }}
+                    />
+                    <span className="uppercase tracking-wider text-[11px]">{s}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <button
+              onClick={async () => {
+                if (testStratSetups.length === 0) return;
+                setTestStratRunning(true);
+                setTestStratResult(null);
+                try {
+                  const { data, error } = await supabase.functions.invoke("scan-signals", {
+                    body: { mode: "test_strategy", pairs: [testStratPair], setups: testStratSetups },
+                  });
+                  if (error) throw error;
+                  const pairResults = (data?.results?.[testStratPair] ?? {}) as Record<string, any>;
+                  const rows = testStratSetups.map((s) => pairResults[s] ?? { setup: s, qualified: false, reason: "No result returned" });
+                  setTestStratResult({
+                    scanned_at: data?.scanned_at ?? new Date().toISOString(),
+                    pair: testStratPair,
+                    rows,
+                  });
+                } catch (e) {
+                  setTestStratResult({
+                    scanned_at: new Date().toISOString(),
+                    pair: testStratPair,
+                    rows: [{ setup: "ERROR", qualified: false, reason: (e as Error).message }],
+                  });
+                } finally {
+                  setTestStratRunning(false);
+                }
+              }}
+              disabled={testStratRunning || testStratSetups.length === 0}
+              className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border-2 border-chart-4 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {testStratRunning && (
+                <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              )}
+              {testStratRunning ? "Running…" : "Run Strategy Test"}
+            </button>
+          </div>
+
+          {testStratResult && (
+            <div className="mt-3 border border-border rounded bg-background/50 p-3 space-y-1.5 text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground pb-1.5 border-b border-border">
+                Tested at {new Date(testStratResult.scanned_at).toISOString().slice(11, 19)} UTC on {testStratResult.pair}
+              </div>
+              {testStratResult.rows.map((r, i) => (
+                <div key={i} className="font-mono text-[11px]">
+                  {r.qualified && r.signal ? (
+                    <span className="text-bull">
+                      ✅ <span className="font-bold">{r.setup}</span> — {r.signal.direction}
+                      {" | Entry: "}{r.signal.entry}
+                      {" | SL: "}{r.signal.stop_loss}
+                      {" | TP1: "}{r.signal.tp1}
+                      {" | TP2: "}{r.signal.tp2}
+                      {r.signal.rr != null && <> {" | R:R "}{r.signal.rr}</>}
+                      {r.signal.confidence != null && <> {" | Confidence: "}{r.signal.confidence}%</>}
+                      {r.signal.order_type && <> {" | Order type: "}{r.signal.order_type}</>}
+                      {r.debug && <span className="text-muted-foreground"> {" | "}{r.debug}</span>}
+                    </span>
+                  ) : (
+                    <span className="text-bear">
+                      ❌ <span className="font-bold">{r.setup}</span>
+                      {" | "}<span className="text-muted-foreground">{r.reason ?? "Not qualified"}</span>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
       </div>
     </div>
