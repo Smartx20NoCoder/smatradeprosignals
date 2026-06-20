@@ -110,7 +110,9 @@ Deno.serve(async (req) => {
     }
     const s: any = signal;
     if (Number(s.confidence) < minConf || Number(s.rr) < minRR) {
-      return new Response(JSON.stringify({ ok: false, reason: "below threshold" }), {
+      const msg = `Signal below threshold: confidence=${s.confidence}% (min=${minConf}%), RR=${s.rr} (min=${minRR}). Raise thresholds in settings or this signal no longer qualifies.`;
+      await markFailed(supabase, signal_id, msg);
+      return new Response(JSON.stringify({ ok: false, reason: msg }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -289,15 +291,16 @@ Deno.serve(async (req) => {
     const orderBStopLoss = Number(s.stop_loss);
 
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
-    const referencePrice = (picked.kind !== "market" && picked.openPrice != null)
-      ? picked.openPrice
-      : mid;
-    const slDistance = Math.abs(referencePrice - Number(s.stop_loss));
+    // For pending orders, broker validates SL from entry price not current market
+    const isPending = picked.kind === "limit" || picked.kind === "stop";
+    const stopReference = isPending ? Number(s.entry) : mid;
+    const referencePrice = stopReference;
+    const slDistance = Math.abs(stopReference - Number(s.stop_loss));
     const slSym = pairToSymbol(s.pair, "");
     const brokerMinSL = slSym.includes("XAU") ? 1.5
       : slSym.includes("BTC") ? 150
       : slSym.includes("ETH") || slSym.includes("XRP") ? 0.05
-      : referencePrice * 0.0003;
+      : stopReference * 0.0003;
     if (slDistance < brokerMinSL) {
       const msg = `SL too close to entry for broker (${slDistance.toFixed(5)} < min ${brokerMinSL}) — signal skipped. Next scan will generate a fresh signal.`;
       await markFailed(supabase, signal_id, msg);
