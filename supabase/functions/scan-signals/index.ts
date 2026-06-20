@@ -1032,7 +1032,289 @@ function qssSetup(
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// P.R.I.S.M. — Pressure, Regime, Imbalance, Structure, Momentum
+// Unique ScalpEdge proprietary setup — not a known public system.
+// Five-layer mechanical filter: regime must confirm, pressure zone
+// must qualify, structure must align, momentum must be igniting NOW.
+// Designed for: FX, Gold, Crypto | 5m entry | 1H macro bias
+// ═══════════════════════════════════════════════════════════════
 
+// DI+/DI- calculation (Directional Index, 14-period)
+function calcDI(candles: Candle[], period = 14): { diPlus: number; diMinus: number; adx: number } {
+  if (candles.length < period + 2) return { diPlus: 0, diMinus: 0, adx: 0 };
+  const trArr: number[] = [];
+  const dpArr: number[] = [];
+  const dmArr: number[] = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].h, l = candles[i].l;
+    const ph = candles[i - 1].h, pl = candles[i - 1].l, pc = candles[i - 1].c;
+    trArr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const upMove = h - ph;
+    const downMove = pl - l;
+    dpArr.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    dmArr.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  function wilderSmooth(arr: number[], p: number): number[] {
+    if (arr.length < p) return [];
+    let sum = arr.slice(0, p).reduce((a, b) => a + b, 0);
+    const out = [sum];
+    for (let i = p; i < arr.length; i++) {
+      sum = sum - sum / p + arr[i];
+      out.push(sum);
+    }
+    return out;
+  }
+
+  const sTR = wilderSmooth(trArr, period);
+  const sDP = wilderSmooth(dpArr, period);
+  const sDM = wilderSmooth(dmArr, period);
+  if (!sTR.length) return { diPlus: 0, diMinus: 0, adx: 0 };
+
+  const diPlusArr = sDP.map((v, i) => sTR[i] !== 0 ? 100 * v / sTR[i] : 0);
+  const diMinusArr = sDM.map((v, i) => sTR[i] !== 0 ? 100 * v / sTR[i] : 0);
+  const dxArr = diPlusArr.map((dp, i) => {
+    const dm = diMinusArr[i];
+    const sum = dp + dm;
+    return sum !== 0 ? 100 * Math.abs(dp - dm) / sum : 0;
+  });
+  const adxArr = wilderSmooth(dxArr, period);
+  const last = adxArr.length - 1;
+  return {
+    diPlus: diPlusArr[diPlusArr.length - 1] ?? 0,
+    diMinus: diMinusArr[diMinusArr.length - 1] ?? 0,
+    adx: adxArr[last] ?? 0,
+  };
+}
+
+interface PressureZone {
+  high: number;
+  low: number;
+  mid: number;
+  width: number;
+  bars: number;
+  avgBodyRatio: number;
+  wickCleanliness: number;
+  direction: "bullish" | "bearish" | "mixed";
+}
+
+function findPressureZone(c5: Candle[]): PressureZone | null {
+  const n = c5.length;
+  if (n < 30) return null;
+  const atrVal = calcATR14(c5);
+  if (atrVal <= 0) return null;
+  const maxRange = atrVal * 0.80;
+
+  for (let endIdx = n - 4; endIdx >= 20; endIdx--) {
+    for (let len = 6; len <= 14; len++) {
+      const startIdx = endIdx - len + 1;
+      if (startIdx < 2) break;
+      const slice = c5.slice(startIdx, endIdx + 1);
+      const allNarrow = slice.every(c => (c.h - c.l) <= maxRange);
+      if (!allNarrow) break;
+
+      const zoneHigh = Math.max(...slice.map(c => c.h));
+      const zoneLow = Math.min(...slice.map(c => c.l));
+      const zoneWidth = zoneHigh - zoneLow;
+
+      if (zoneWidth > atrVal * 2.0 || zoneWidth < atrVal * 0.1) continue;
+
+      const bodyRatios = slice.map(c => {
+        const range = c.h - c.l;
+        return range > 0 ? Math.abs(c.c - c.o) / range : 0;
+      });
+      const avgBodyRatio = bodyRatios.reduce((a, b) => a + b, 0) / bodyRatios.length;
+
+      const bullBodies = slice.filter(c => c.c > c.o).length;
+      const bearBodies = slice.filter(c => c.c < c.o).length;
+      const direction: "bullish" | "bearish" | "mixed" =
+        bullBodies > bearBodies * 1.5 ? "bullish" :
+        bearBodies > bullBodies * 1.5 ? "bearish" : "mixed";
+
+      const wickRatios = slice.map(c => {
+        const body = Math.abs(c.c - c.o);
+        const totalWick = (c.h - c.l) - body;
+        return body > 0 ? 1 - Math.min(1, totalWick / body) : 0;
+      });
+      const wickCleanliness = wickRatios.reduce((a, b) => a + b, 0) / wickRatios.length;
+
+      return { high: zoneHigh, low: zoneLow, mid: (zoneHigh + zoneLow) / 2, width: zoneWidth, bars: len, avgBodyRatio, wickCleanliness, direction };
+    }
+  }
+  return null;
+}
+
+function calcPrismTSI(closes: number[]): { tsi: number; signal: number; crossedWithin3: boolean; accelerating: boolean } {
+  const longP = 25, shortP = 13, sigP = 13;
+  if (closes.length < longP + shortP + sigP + 3) {
+    return { tsi: 0, signal: 0, crossedWithin3: false, accelerating: false };
+  }
+
+  const pc = closes.map((c, i) => i === 0 ? 0 : c - closes[i - 1]);
+  const apc = pc.map(Math.abs);
+
+  function emaSmooth(arr: number[], p: number): number[] {
+    const k = 2 / (p + 1);
+    const out = [arr[0]];
+    for (let i = 1; i < arr.length; i++) out.push(arr[i] * k + out[i - 1] * (1 - k));
+    return out;
+  }
+
+  const ps1 = emaSmooth(pc, longP);
+  const ps2 = emaSmooth(ps1, shortP);
+  const ap1 = emaSmooth(apc, longP);
+  const ap2 = emaSmooth(ap1, shortP);
+
+  const tsiArr = ps2.map((v, i) => ap2[i] !== 0 ? 100 * v / ap2[i] : 0);
+  const sigArr = emaSmooth(tsiArr, sigP);
+
+  const last = tsiArr.length - 1;
+  const tsi = tsiArr[last], signal = sigArr[last];
+
+  let crossedWithin3 = false;
+  for (let i = Math.max(1, last - 2); i <= last; i++) {
+    const prevAbove = tsiArr[i - 1] > sigArr[i - 1];
+    const currAbove = tsiArr[i] > sigArr[i];
+    if (prevAbove !== currAbove) { crossedWithin3 = true; break; }
+  }
+
+  const slope1 = tsiArr[last] - tsiArr[last - 1];
+  const slope2 = tsiArr[last - 1] - tsiArr[last - 2];
+  const accelerating = Math.abs(slope1) > Math.abs(slope2) && Math.sign(slope1) === Math.sign(slope2);
+
+  return { tsi, signal, crossedWithin3, accelerating };
+}
+
+function prismStructureAligned(c1h: Candle[], c15: Candle[], isLong: boolean): { htfAligned: boolean; swingAligned: boolean } {
+  const htfAligned = (() => {
+    if (c1h.length < 55) return false;
+    const closes = c1h.map(c => c.c);
+    const e21 = veritasEMA(closes, 21);
+    const e50 = veritasEMA(closes, 50);
+    const last = closes[closes.length - 1];
+    const e21v = e21[e21.length - 1], e50v = e50[e50.length - 1];
+    return isLong ? (last > e21v && e21v > e50v) : (last < e21v && e21v < e50v);
+  })();
+
+  const swingAligned = (() => {
+    if (c15.length < 20) return false;
+    const win = c15.slice(-20);
+    const highs: number[] = [], lows: number[] = [];
+    for (let i = 2; i < win.length - 2; i++) {
+      if (win[i].h > win[i-1].h && win[i].h > win[i+1].h) highs.push(win[i].h);
+      if (win[i].l < win[i-1].l && win[i].l < win[i+1].l) lows.push(win[i].l);
+    }
+    if (highs.length < 2 || lows.length < 2) return false;
+    const [h1, h2] = [highs[highs.length - 2], highs[highs.length - 1]];
+    const [l1, l2] = [lows[lows.length - 2], lows[lows.length - 1]];
+    return isLong ? (h2 > h1 && l2 > l1) : (h2 < h1 && l2 < l1);
+  })();
+
+  return { htfAligned, swingAligned };
+}
+
+function prismSetup(
+  pair: string,
+  c5: Candle[],
+  c15: Candle[],
+  c1h: Candle[],
+  sessionScoreVal: number,
+): Signal | null {
+  if (c5.length < 60 || c15.length < 70 || c1h.length < 55) return null;
+  const atr5m = calcATR14(c5);
+  if (atr5m <= 0) return null;
+
+  const { diPlus, diMinus } = calcDI(c5, 14);
+  const diDiff = Math.abs(diPlus - diMinus);
+  const diRatio = diDiff / (atr5m + 1e-10);
+  if (diRatio < 0.15) return null;
+
+  const regimeIsStrong = diRatio >= 0.35;
+  const regimeIsModerate = diRatio >= 0.20;
+  const isLong = diPlus > diMinus;
+  const rcScore = diRatio >= 0.40 ? 30 : diRatio >= 0.30 ? 22 : diRatio >= 0.20 ? 14 : 0;
+
+  const pz = findPressureZone(c5);
+  if (!pz) return null;
+  if (isLong && pz.direction === "bearish") return null;
+  if (!isLong && pz.direction === "bullish") return null;
+
+  const currentPrice = c5[c5.length - 1].c;
+  const zoneBuffer = atr5m * 0.3;
+  const priceInZone = currentPrice >= pz.low - zoneBuffer && currentPrice <= pz.high + zoneBuffer;
+  if (!priceInZone) return null;
+
+  const bodyScore = Math.min(10, Math.round(pz.avgBodyRatio * 10));
+  const wickScore = Math.round(pz.wickCleanliness * 5);
+  const tightnessScore = pz.width < atr5m * 0.5 ? 10 : pz.width < atr5m * 1.0 ? 7 : 4;
+  const pzScore = bodyScore + wickScore + tightnessScore;
+
+  if (pz.avgBodyRatio < 0.45) return null;
+
+  const { htfAligned, swingAligned } = prismStructureAligned(c1h, c15, isLong);
+  if (!htfAligned) return null;
+  const saScore = (htfAligned ? 10 : 0) + (swingAligned ? 10 : 0);
+
+  const closes5 = c5.map(c => Number(c.c));
+  const { tsi, signal: tsiSig, crossedWithin3, accelerating } = calcPrismTSI(closes5);
+  const tsiDirectionCorrect = isLong ? tsi > tsiSig : tsi < tsiSig;
+  if (!tsiDirectionCorrect) return null;
+  const mpScore = (crossedWithin3 ? 8 : 4) + (accelerating ? 7 : 3);
+
+  const sgScore = sessionScoreVal >= 90 ? 10 : sessionScoreVal >= 80 ? 8 : sessionScoreVal >= 65 ? 5 : 2;
+  const isCrypto = pair.includes("BTC") || pair.includes("ETH") || pair.includes("XRP");
+  if (!isCrypto && sessionScoreVal < 65) return null;
+
+  const confidence = Math.min(99, rcScore + pzScore + saScore + mpScore + sgScore);
+  if (confidence < 72) return null;
+
+  const entry = pz.mid;
+  const slMult = regimeIsStrong ? 1.2 : regimeIsModerate ? 1.5 : 1.8;
+  const slRaw = isLong ? entry - atr5m * slMult : entry + atr5m * slMult;
+  const spread = spreadPrice(pair);
+  const entryAdj = isLong ? entry + spread : entry - spread;
+  const slAdj = isLong ? slRaw - spread : slRaw + spread;
+  const risk = Math.abs(entryAdj - slAdj);
+  if (risk <= 0) return null;
+
+  const tp2Mult = pzScore >= 22 ? 3.0 : pzScore >= 18 ? 2.5 : 2.0;
+  const tp1Adj = isLong ? entryAdj + atr5m * 1.0 : entryAdj - atr5m * 1.0;
+  const tp2Adj = isLong ? entryAdj + atr5m * tp2Mult : entryAdj - atr5m * tp2Mult;
+  const rrActual = Math.abs(tp2Adj - entryAdj) / risk;
+  if (rrActual < 1.8) return null;
+
+  const brokerMinSL = isGold(pair) ? 1.5 : isBTC(pair) ? 150 : isCryptoAlt(pair) ? 0.05 : 0.0005;
+  if (risk < brokerMinSL) return null;
+
+  const regimeLabel = regimeIsStrong ? "STR" : "MOD";
+  const pzLabel = pzScore >= 22 ? "PZ++" : pzScore >= 18 ? "PZ+" : "PZ~";
+  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
+  const direction: "Long" | "Short" = isLong ? "Long" : "Short";
+
+  return {
+    pair,
+    timeframe: "5m",
+    setup: `PRISM (${regimeLabel} DI=${diRatio.toFixed(2)} ${pzLabel})`,
+    direction,
+    entry: +entryAdj.toFixed(5),
+    stop_loss: +slAdj.toFixed(5),
+    tp1: +tp1Adj.toFixed(5),
+    tp2: +tp2Adj.toFixed(5),
+    rr: +rrActual.toFixed(2),
+    atr: atr5m,
+    candle_time: candleTime,
+    session_score: sessionScoreVal,
+    confidence,
+    news_flag: false,
+    order_type: isLong ? "Buy Limit" : "Sell Limit",
+    spread_pips: spreadDisplay(pair),
+    htf_bias: isLong ? "1H BULL" : "1H BEAR",
+    mfi_score: +(diRatio * 100).toFixed(1),
+    mfi_divergence: swingAligned,
+  };
+}
 
 
 
@@ -1555,6 +1837,22 @@ async function runScanJob(
         } else {
           pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
           candidates.push(qss);
+        }
+      }
+
+      // PRISM — Pressure, Regime, Imbalance, Structure, Momentum
+      {
+        const ssNow = sessionScore(pair, nowDate);
+        const prism = prismSetup(pair, d.c5, d.c15, d.c1h, ssNow);
+        if (!prism) {
+          pairReport.checks.push({ setup: "PRISM", status: "none", reason: "No qualifying pressure zone + regime" });
+        } else if (hits.length > 0) {
+          const h = hits[0];
+          pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
+            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+        } else {
+          pairReport.checks.push({ setup: "PRISM", status: "qualified", direction: prism.direction });
+          candidates.push(prism);
         }
       }
 
