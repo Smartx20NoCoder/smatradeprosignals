@@ -2040,10 +2040,96 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  let body: { mode?: "full" | "latest"; stream?: boolean; source?: string } = {};
+  let body: { mode?: "full" | "latest" | "test_strategy"; stream?: boolean; source?: string; pairs?: string[]; setups?: string[] } = {};
   try { body = await req.json(); } catch { /* GET ok */ }
-  const mode = body.mode === "full" ? "full" : "latest";
+  const isTestMode = body?.mode === "test_strategy";
+  const testPairs: string[]  = Array.isArray(body?.pairs)  ? body!.pairs!  : [];
+  const testSetups: string[] = Array.isArray(body?.setups) ? body!.setups! : [];
+  const mode: "full" | "latest" = body.mode === "full" ? "full" : "latest";
   const source = body.source ?? req.headers.get("x-scan-source") ?? "manual";
+
+  // ─── TEST STRATEGY MODE ──────────────────────────────────────────
+  // Runs strategy logic on live candle data without persisting signals,
+  // placing orders, or sending alerts. Used by the Settings → Test Strategy panel.
+  if (isTestMode) {
+    try {
+      const tdKey1 = Deno.env.get("TWELVE_DATA_API_KEY") ?? "";
+      const tdKey2 = Deno.env.get("TWELVEDATA_API_KEY_2") ?? "";
+      const tdKey3 = Deno.env.get("TWELVEDATA_API_KEY_3") ?? "";
+      if (!tdKey1) throw new Error("TWELVE_DATA_API_KEY not configured");
+      const keys: KeySet = {};
+      if (tdKey1) keys[1] = tdKey1;
+      if (tdKey2) keys[2] = tdKey2;
+      if (tdKey3) keys[3] = tdKey3;
+      const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
+      const activeKeyRef: KeyState = { active: configured[0] ?? 1, configured, exhausted: new Set() };
+
+      const results: Record<string, Record<string, any>> = {};
+      for (const pair of testPairs) {
+        results[pair] = {};
+        let c5Arr: Candle[] = [], c15Arr: Candle[] = [], c1hArr: Candle[] = [];
+        try {
+          const c5  = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "5m",  td: "5min" },  100, undefined, "manual");
+          const c15 = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "15m", td: "15min" }, 100, undefined, "manual");
+          const c1h = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1h",  td: "1h" },    100, undefined, "manual");
+          c5Arr = c5.candles; c15Arr = c15.candles; c1hArr = c1h.candles;
+        } catch (e) {
+          for (const setup of testSetups) {
+            results[pair][setup] = { setup, pair, qualified: false, reason: `Candle fetch failed: ${String((e as Error).message ?? e)}` };
+          }
+          continue;
+        }
+        const ss = sessionScore(pair, new Date());
+
+        for (const setup of testSetups) {
+          let result: any = { setup, pair, qualified: false, reason: "Unknown setup" };
+          try {
+            if (setup === "VERITAS") {
+              const sig = veritasSetup(pair, c5Arr, c15Arr, ss);
+              result = sig
+                ? { setup, pair, qualified: true, signal: sig,
+                    debug: `H=${sig.setup.match(/H=([\d.]+)/)?.[1] ?? "?"} SNR=${sig.mfi_score}` }
+                : { setup, pair, qualified: false, reason: "No VERITAS signal — check Hurst/TSI/SNR/VPT alignment" };
+            } else if (setup === "QSS") {
+              const sig = qssSetup(pair, c5Arr, c15Arr, c1hArr, ss);
+              result = sig
+                ? { setup, pair, qualified: true, signal: sig,
+                    debug: `Regime=${sig.setup.match(/\(([^)]+)\)/)?.[1] ?? "?"} VWSA=${sig.mfi_score}` }
+                : { setup, pair, qualified: false, reason: "No QSS signal — regime not expansion, or no valid liquidity void found" };
+            } else if (setup === "PRISM") {
+              const sig = prismSetup(pair, c5Arr, c15Arr, c1hArr, ss);
+              result = sig
+                ? { setup, pair, qualified: true, signal: sig,
+                    debug: `DI=${(sig.mfi_score / 100).toFixed(2)} PZ=${sig.setup.match(/PZ[+~\-]+/)?.[0] ?? "?"} Conf=${sig.confidence}` }
+                : { setup, pair, qualified: false, reason: "No PRISM signal — check regime DI ratio, pressure zone, 1H structure, or TSI momentum" };
+            } else if (setup === "EMA Pullback") {
+              const sig = emaPullback(pair, c5Arr, c15Arr);
+              result = sig
+                ? { setup, pair, qualified: true, signal: sig }
+                : { setup, pair, qualified: false, reason: "No EMA Pullback signal this cycle" };
+            } else if (setup === "BOS Retest") {
+              const sig = bos(pair, c5Arr, c15Arr);
+              result = sig
+                ? { setup, pair, qualified: true, signal: sig }
+                : { setup, pair, qualified: false, reason: "No BOS Retest signal this cycle" };
+            }
+          } catch (e) {
+            result = { setup, pair, qualified: false, reason: `Error: ${String((e as Error).message ?? e)}` };
+          }
+          results[pair][setup] = result;
+        }
+      }
+
+      return new Response(JSON.stringify({ ok: true, results, scanned_at: new Date().toISOString() }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: (e as Error).message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+  // ─── END TEST STRATEGY MODE ──────────────────────────────────────
 
   // Sweep any prior stalled rows (started >5min ago with no finished_at) so the
   // Health tab does not display STALLED indefinitely after an edge-function timeout.
