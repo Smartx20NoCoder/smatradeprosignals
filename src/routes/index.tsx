@@ -1434,6 +1434,21 @@ function MetaApiPanel({
     count: number;
   } | null>(null);
 
+  // Test Strategy panel state
+  const TEST_STRAT_PAIRS = ["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"];
+  const TEST_STRAT_SETUPS = ["EMA Pullback","BOS Retest","VERITAS","QSS","PRISM"];
+  const [testStratPair, setTestStratPair] = useState("XAU/USD");
+  const [testStratSetups, setTestStratSetups] = useState<string[]>(["VERITAS","QSS","PRISM"]);
+  const [testStratRunning, setTestStratRunning] = useState(false);
+  const [testStratResult, setTestStratResult] = useState<{
+    scanned_at: string;
+    pair: string;
+    rows: Array<{
+      setup: string; qualified: boolean; reason?: string; debug?: string;
+      signal?: { direction?: string; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; rr?: number; confidence?: number; order_type?: string };
+    }>;
+  } | null>(null);
+
 
   useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
   useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
