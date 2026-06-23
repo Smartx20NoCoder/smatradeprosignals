@@ -634,6 +634,11 @@ function veritasSetup(
   c15: Candle[],
   c1m: Candle[] | null,
   ss: number,
+  slMult    = 1.5,
+  tpMult    = 2.5,
+  minHurst  = 0.55,
+  minSnr    = 40,
+  minConf   = 72,
 ): Signal | null {
 
   // ── Instrument guard ─────────────────────────────────────────
@@ -645,9 +650,13 @@ function veritasSetup(
 
   // ── PILLAR I: Hurst Regime (15M, 100-bar) ────────────────────
   const hurst = calcHurst(closes15);
-  const isTrending      = hurst > 0.55;
-  const isMeanReverting = hurst < 0.45;
+  const isTrending      = hurst > minHurst;
+  const isMeanReverting = hurst < (1 - minHurst);
   if (!isTrending && !isMeanReverting) return null;
+  // Dead zone: H=0.65-0.70 shows ambiguous mid-trend deceleration.
+  // This bucket has produced 0% win rate in live data — skip it.
+  if (hurst >= 0.65 && hurst < 0.70) return null;
+
 
   const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
   const regScore = hRegime === "strong" ? 25 : 20;
