@@ -394,6 +394,13 @@ function ScalpEdge() {
       metaapi_live_configured: !!cfg.metaapi_live_configured,
       metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
       scan_interval_minutes: (Number((cfg as any).scan_interval_minutes ?? 15) === 30 ? 30 : 15) as 15 | 30,
+      veritas_sl_mult:   Number((cfg as any).veritas_sl_mult   ?? 1.5),
+      veritas_tp_mult:   Number((cfg as any).veritas_tp_mult   ?? 2.5),
+      veritas_min_hurst: Number((cfg as any).veritas_min_hurst ?? 0.55),
+      veritas_min_snr:   Number((cfg as any).veritas_min_snr   ?? 40),
+      veritas_min_conf:  Number((cfg as any).veritas_min_conf  ?? 72),
+      veritas_min_rr:    Number((cfg as any).veritas_min_rr    ?? 1.60),
+
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
