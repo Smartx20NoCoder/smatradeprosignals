@@ -108,6 +108,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "veritas_min_snr"   && (typeof v !== "number" || v < 20  || v > 80)) continue;
     if (k === "veritas_min_conf"  && (typeof v !== "number" || v < 50  || v > 99)) continue;
     if (k === "veritas_min_rr"    && (typeof v !== "number" || v < 1   || v > 3)) continue;
+    if (k === "metaapi_min_stop_points" && (typeof v !== "number" || v < 0 || v > 500)) continue;
     out[k] = v;
   }
   return out;
