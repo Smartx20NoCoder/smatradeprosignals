@@ -2110,9 +2110,12 @@ async function runScanJob(
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
     const toInsert = dedupedInsert.filter(s => {
       const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
-      const familyMinRR = SETUP_MIN_RR[setupBase] ?? minRR;
+      // VERITAS uses its own UI-adjustable RR gate; all others use global minRR via SETUP_MIN_RR.
+      const familyMinRR = setupBase === "VERITAS" ? veritasMinRR
+        : (SETUP_MIN_RR[setupBase] ?? minRR);
       return s.confidence >= minConf && s.rr >= familyMinRR;
     });
+
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
