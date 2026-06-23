@@ -1823,66 +1823,7 @@ function MetaApiPanel({
           Controls SL/TP multipliers, Hurst gate, SNR floor and quality threshold specifically for VERITAS signals.
           These override the global MIN R:R for VERITAS only.
         </p>
-        {(() => {
-          const clampSave = (key: keyof AppSettings, raw: string, lo: number, hi: number) => {
-            const n = parseFloat(raw);
-            if (!Number.isFinite(n)) return;
-            const clamped = Math.max(lo, Math.min(hi, n));
-            saveAppSettings({ [key]: clamped } as Partial<AppSettings>);
-          };
-          return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">SL Multiplier (× ATR)</div>
-            <input type="number" step={0.1} min={0.5} max={3}
-              defaultValue={appSettings.veritas_sl_mult ?? 1.5}
-              onBlur={(e) => clampSave("veritas_sl_mult", e.target.value, 0.5, 3)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Default 1.5 (PDF spec)</div>
-          </label>
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">TP Multiplier (× ATR)</div>
-            <input type="number" step={0.1} min={1} max={5}
-              defaultValue={appSettings.veritas_tp_mult ?? 2.5}
-              onBlur={(e) => clampSave("veritas_tp_mult", e.target.value, 1, 5)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Default 2.5 → RR 1.67</div>
-          </label>
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Hurst (Trend)</div>
-            <input type="number" step={0.01} min={0.5} max={0.7}
-              defaultValue={appSettings.veritas_min_hurst ?? 0.55}
-              onBlur={(e) => clampSave("veritas_min_hurst", e.target.value, 0.5, 0.7)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">0.55 = PDF; try 0.57</div>
-          </label>
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min SNR Score</div>
-            <input type="number" step={5} min={20} max={80}
-              defaultValue={appSettings.veritas_min_snr ?? 40}
-              onBlur={(e) => clampSave("veritas_min_snr", e.target.value, 20, 80)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">40 = moderate SNR+</div>
-          </label>
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Confidence</div>
-            <input type="number" step={1} min={65} max={95}
-              defaultValue={appSettings.veritas_min_conf ?? 72}
-              onBlur={(e) => clampSave("veritas_min_conf", e.target.value, 50, 99)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">72 = raised quality floor</div>
-          </label>
-          <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min R:R (VERITAS only)</div>
-            <input type="number" step={0.05} min={1} max={3}
-              defaultValue={appSettings.veritas_min_rr ?? 1.6}
-              onBlur={(e) => clampSave("veritas_min_rr", e.target.value, 1, 3)}
-              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">1.60 keeps 1.67 signals</div>
-          </label>
-        </div>
-          );
-        })()}
+        <VeritasParamsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
       </div>
 
 
