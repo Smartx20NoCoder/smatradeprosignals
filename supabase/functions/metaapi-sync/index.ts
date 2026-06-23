@@ -159,6 +159,51 @@ Deno.serve(async (req) => {
 
     for (const s of (openSignals ?? []) as any[]) {
       try {
+        // Time exit: 2h for crypto, 4h for FX/Gold
+        const isCryptoSignal = ["BTC/USD","ETH/USD","XRP/USD"].includes(s.pair ?? "");
+        const maxAgeMs       = isCryptoSignal ? 2 * 60 * 60 * 1000 : 4 * 60 * 60 * 1000;
+        const signalAgeMs    = Date.now() - new Date(s.created_at).getTime();
+
+        if (signalAgeMs > maxAgeMs && s.metaapi_execution_status === "filled") {
+          try {
+            if (s.metaapi_position_id) {
+              await fetch(
+                `https://mt-client-api-v1.${region}.agiliumtrade.ai` +
+                `/users/current/accounts/${accountId}/trade`,
+                {
+                  method: "POST",
+                  headers: { "auth-token": token, "Content-Type": "application/json" },
+                  body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: s.metaapi_position_id }),
+                }
+              );
+            }
+            if (s.metaapi_position_id_b) {
+              await fetch(
+                `https://mt-client-api-v1.${region}.agiliumtrade.ai` +
+                `/users/current/accounts/${accountId}/trade`,
+                {
+                  method: "POST",
+                  headers: { "auth-token": token, "Content-Type": "application/json" },
+                  body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: s.metaapi_position_id_b }),
+                }
+              );
+            }
+          } catch (e) {
+            console.log(`Time exit close failed for ${s.id}: ${e}`);
+          }
+
+          await supabase.from("signals").update({
+            status:                    "expired",
+            metaapi_execution_status:  "closed",
+            closed_at:                 new Date().toISOString(),
+            notes: `[Time exit: ${isCryptoSignal ? "2h" : "4h"} limit reached]`,
+          }).eq("id", s.id);
+
+          closes++;
+          updated++;
+          continue;
+        }
+
         const pidA = s.metaapi_position_id ? String(s.metaapi_position_id) : null;
         const pidB = s.metaapi_position_id_b ? String(s.metaapi_position_id_b) : null;
         const aOpen = !!pidA && openSet.has(pidA);

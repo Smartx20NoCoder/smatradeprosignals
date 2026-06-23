@@ -632,102 +632,155 @@ function veritasSetup(
   pair: string,
   c5: Candle[],
   c15: Candle[],
+  c1m: Candle[] | null,
   ss: number,
 ): Signal | null {
+
+  // ── Instrument guard ─────────────────────────────────────────
+  if (!VERITAS_PAIRS.has(pair)) return null;
   if (c5.length < 65 || c15.length < 110) return null;
 
-  const closes5 = c5.map((x) => Number(x.c));
+  const closes5  = c5.map((x) => Number(x.c));
   const closes15 = c15.map((x) => Number(x.c));
 
-  // PILLAR 1: Hurst Regime (15M)
+  // ── PILLAR I: Hurst Regime (15M, 100-bar) ────────────────────
   const hurst = calcHurst(closes15);
-  const isTrending = hurst > 0.55;
+  const isTrending      = hurst > 0.55;
   const isMeanReverting = hurst < 0.45;
   if (!isTrending && !isMeanReverting) return null;
 
-  // PILLAR 2: HTF Bias (15M close vs 15-period SMA)
-  const htfRecent = closes15.slice(-16);
-  const htfSMA = htfRecent.slice(0, 15).reduce((a, b) => a + b, 0) / 15;
-  const htfLast = closes15[closes15.length - 1];
-  const htfBull = htfLast > htfSMA;
-  const htfBear = htfLast < htfSMA;
+  const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
+  const regScore = hRegime === "strong" ? 25 : 20;
 
-  // PILLAR 3: TSI Momentum (5M)
+  // ── PILLAR II: HTF Bias (15M close vs 15-period EMA) ─────────
+  const htfEMA15 = veritasEMA(closes15, 15);
+  const htfEMA   = htfEMA15[htfEMA15.length - 1];
+  const htfLast  = closes15[closes15.length - 1];
+  const htfBull  = htfLast > htfEMA;
+  const htfBear  = htfLast < htfEMA;
+  if (!htfBull && !htfBear) return null;
+
+  // ── PILLAR III: TSI Momentum (5M) ────────────────────────────
   const { tsi, signal: tsiSig, prev: tsiPrev } = calcTSI(closes5);
+  let tsiScore  = 0;
+  let tsiAligned = false;
 
-  // PILLAR 4: SNR Directional Conviction (5M)
-  const snr = calcSNR(closes5);
-  if (snr < 20) return null;
-
-  // PILLAR 5: VPT Volume Confirmation (5M)
-  const { vptRoc } = calcVPT(c5);
-  const vptConfirms = (dir: boolean) => dir ? vptRoc > 0.5 : vptRoc < -0.5;
-
-  // Session filter
-  if (ss < 60) return null;
-
-  // ATR
-  const atrVal = calcATR14(c5);
-  if (atrVal <= 0) return null;
-
-  const lastClose = closes5[closes5.length - 1];
-  const atrPct = atrVal / lastClose;
-  if (atrPct < 0.00005) return null;
-
-  // Direction
-  let isLong: boolean | null = null;
   if (isTrending) {
-    if (htfBull && tsi > tsiSig && tsi > 0 && vptConfirms(true)) isLong = true;
-    else if (htfBear && tsi < tsiSig && tsi < 0 && vptConfirms(false)) isLong = false;
+    if      (htfBull && tsi > tsiSig && tsi > 0)  { tsiAligned = true; tsiScore = 25; }
+    else if (htfBear && tsi < tsiSig && tsi < 0)  { tsiAligned = true; tsiScore = 25; }
+    else if (htfBull && tsi > tsiSig)              { tsiAligned = true; tsiScore = 15; }
+    else if (htfBear && tsi < tsiSig)              { tsiAligned = true; tsiScore = 15; }
   } else {
-    if (htfBull && tsi < -20 && tsi > tsiPrev && vptConfirms(true)) isLong = true;
-    else if (htfBear && tsi > 20 && tsi < tsiPrev && vptConfirms(false)) isLong = false;
+    if      (htfBull && tsi < -20 && tsi > tsiPrev) { tsiAligned = true; tsiScore = 25; }
+    else if (htfBear && tsi >  20 && tsi < tsiPrev) { tsiAligned = true; tsiScore = 25; }
+    else if (htfBull && tsi < -20)                   { tsiAligned = true; tsiScore = 15; }
+    else if (htfBear && tsi >  20)                   { tsiAligned = true; tsiScore = 15; }
   }
-  if (isLong === null) return null;
+  if (!tsiAligned) return null;
 
-  // Entry / SL / TPs via ATR
-  const slDist = 1.5 * atrVal;
+  // ── PILLAR IV: SNR Directional Conviction (5M) ───────────────
+  const snr = calcSNR(closes5);
+  if (snr < 40) return null;
+  const snrScore = snr > 60 ? 20 : snr > 40 ? 15 : 0;
+
+  // ── PILLAR V: VPT Volume Confirmation (5M) ───────────────────
+  const { vptRoc } = calcVPT(c5);
+  const isLong = htfBull;
+  const vptConfirmed = isLong ? vptRoc > 0.5 : vptRoc < -0.5;
+  if (!vptConfirmed) return null;
+  const vptScore = Math.abs(vptRoc) > 2 ? 15 : 10;
+
+  // ── PILLAR VI: Session & Timing Filter ───────────────────────
+  const h         = new Date().getUTCHours();
+  const isOverlap = h >= 13 && h < 17;
+  const isLondon  = h >= 8  && h < 13;
+  const isNY      = h >= 17 && h < 22;
+  const isAsian   = h >= 0  && h < 7;
+  let sessScore = 0;
+
+  if (pair === "XAU/USD") {
+    if (isOverlap || isLondon) sessScore = 15;
+    else if (isNY)             sessScore = 10;
+    else if (isAsian)          sessScore = 5;
+  } else if (pair === "BTC/USD" || pair === "ETH/USD") {
+    if (isOverlap)                         sessScore = 15;
+    else if (isLondon || isNY || isAsian)  sessScore = 10;
+  } else {
+    if (isOverlap)             sessScore = 15;
+    else if (isLondon || isNY) sessScore = 10;
+    else return null;
+  }
+  if (sessScore === 0) return null;
+
+  // ── Spread & ATR Range Guards ─────────────────────────────────
+  const last5     = c5[c5.length - 1];
+  const spread5m  = last5.h - last5.l;
+  const maxSpread = VERITAS_MAX_SPREAD[pair] ?? Infinity;
+  if (spread5m > maxSpread) return null;
+
+  const atrVal             = calcATR14(c5);
+  if (atrVal <= 0) return null;
+  const ps                 = pipSize(pair);
+  const [atrMin, atrMax]   = VERITAS_ATR_RANGE[pair] ?? [0, Infinity];
+  const atrPips            = atrVal / ps;
+  if (atrPips < atrMin || atrPips > atrMax) return null;
+
+  // ── 1-Minute Micro-Confirmation ───────────────────────────────
+  if (!c1m || c1m.length < 10) return null;
+  const closes1m  = c1m.map((x) => Number(x.c));
+  const ema5_1m   = veritasEMA(closes1m, 5);
+  const last1m    = c1m[c1m.length - 1];
+  const prev1m    = c1m[c1m.length - 2];
+  const ema5last  = ema5_1m[ema5_1m.length - 1];
+  const ema5prev  = ema5_1m[ema5_1m.length - 2];
+
+  const crossedAbove = Number(prev1m.c) <= ema5prev && Number(last1m.c) > ema5last;
+  const crossedBelow = Number(prev1m.c) >= ema5prev && Number(last1m.c) < ema5last;
+  const within2Pips  = Math.abs(Number(last1m.c) - Number(last5.c)) <= 2 * ps;
+
+  if (isLong  && (!crossedAbove || !within2Pips)) return null;
+  if (!isLong && (!crossedBelow || !within2Pips)) return null;
+
+  // ── Confluence Score ──────────────────────────────────────────
+  const confidence = regScore + snrScore + tsiScore + vptScore + sessScore;
+  if (confidence < 72) return null;
+
+  const signalGrade = confidence >= 80 ? "STRONG" : "MODERATE";
+
+  // ── Entry / SL / TP (ATR-based) ───────────────────────────────
+  const entry   = Number(last1m.c);
+  const slDist  = 1.5 * atrVal;
   const tp2Dist = 2.5 * atrVal;
   const tp1Dist = tp2Dist * 0.4;
-  const entry = lastClose;
-  const sl  = isLong ? entry - slDist  : entry + slDist;
-  const tp1 = isLong ? entry + tp1Dist : entry - tp1Dist;
-  const tp2 = isLong ? entry + tp2Dist : entry - tp2Dist;
-  const rr  = +(tp2Dist / slDist).toFixed(2);
+  const sl      = isLong ? entry - slDist  : entry + slDist;
+  const tp1     = isLong ? entry + tp1Dist : entry - tp1Dist;
+  const tp2     = isLong ? entry + tp2Dist : entry - tp2Dist;
+  const rr      = +(tp2Dist / slDist).toFixed(2);
 
-  // Confluence Score
-  const regScore  = hurst > 0.60 || hurst < 0.40 ? 28 : 18;
-  const snrScore  = snr > 60 ? 28 : snr > 40 ? 20 : 12;
-  const tsiScore  = Math.abs(tsi) > 25 ? 24 : Math.abs(tsi) > 10 ? 16 : 8;
-  const vptScore  = Math.abs(vptRoc) > 2 ? 12 : 7;
-  const sessScore = ss > 80 ? 8 : 5;
-  const confidence = Math.min(99, regScore + snrScore + tsiScore + vptScore + sessScore);
-  if (confidence < 65) return null;
-
-  const regime   = isTrending ? "Trend" : "MeanRev";
-  const snrLabel = snr > 60 ? "SNR++" : snr > 40 ? "SNR+" : "SNR~";
-  const candleTime = new Date(c5.at(-1)!.t).toISOString();
+  const regimeLabel = isTrending ? "Trend" : "MeanRev";
+  const snrLabel    = snr > 60 ? "SNR++" : "SNR+";
+  const candleTime  = new Date(last5.t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
     pair,
-    timeframe: "5m",
-    setup: `VERITAS (H=${hurst.toFixed(2)} ${regime} ${snrLabel})`,
+    timeframe:     "5m",
+    setup:         `VERITAS (${signalGrade} H=${hurst.toFixed(2)} ${regimeLabel} ${snrLabel})`,
     direction,
-    entry: +entry.toFixed(5),
-    stop_loss: +sl.toFixed(5),
-    tp1: +tp1.toFixed(5),
-    tp2: +tp2.toFixed(5),
+    entry:         +entry.toFixed(5),
+    stop_loss:     +sl.toFixed(5),
+    tp1:           +tp1.toFixed(5),
+    tp2:           +tp2.toFixed(5),
     rr,
-    atr: atrVal,
-    candle_time: candleTime,
-    session_score: ss,
+    atr:           atrVal,
+    candle_time:   candleTime,
+    session_score: sessScore * 5,
     confidence,
-    news_flag: false,
-    order_type: isLong ? "Buy Limit" : "Sell Limit",
-    spread_pips: spreadDisplay(pair),
-    htf_bias: isLong ? "1H BULL" : "1H BEAR",
-    mfi_score: +snr.toFixed(1),
+    news_flag:     false,
+    order_type:    isLong ? "Buy Market" : "Sell Market",
+    spread_pips:   spreadDisplay(pair),
+    htf_bias:      isLong ? "1H BULL" : "1H BEAR",
+    mfi_score:     +snr.toFixed(1),
     mfi_divergence: false,
   };
 }
@@ -1528,6 +1581,46 @@ const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
 
+// ═══════════════════════════════════════════════════════════════
+// V.E.R.I.T.A.S. PDF-Approved Instruments
+// ═══════════════════════════════════════════════════════════════
+const VERITAS_PAIRS = new Set([
+  "EUR/USD", "GBP/USD", "USD/JPY",
+  "XAU/USD", "BTC/USD", "ETH/USD",
+]);
+
+// Setup-specific minimum R:R — VERITAS ATR-based TP gives 1.67 by design
+const SETUP_MIN_RR: Record<string, number> = {
+  "VERITAS": 1.60,
+  "QSS":     1.85,
+  "PRISM":   1.85,
+  "EMA":     1.85,
+  "BOS":     1.85,
+  "Session": 1.85,
+  "SMC":     1.85,
+  "CHOCH":   1.85,
+};
+
+// ATR validity ranges per pair (5M, in pips/points)
+const VERITAS_ATR_RANGE: Record<string, [number, number]> = {
+  "EUR/USD": [5,   25],
+  "GBP/USD": [7,   30],
+  "USD/JPY": [5,   25],
+  "XAU/USD": [50,  300],
+  "BTC/USD": [100, 800],
+  "ETH/USD": [10,  80],
+};
+
+// Max spread per pair (in price terms, not pips)
+const VERITAS_MAX_SPREAD: Record<string, number> = {
+  "EUR/USD": 0.00015,
+  "GBP/USD": 0.00025,
+  "USD/JPY": 0.015,
+  "XAU/USD": 0.35,
+  "BTC/USD": 15.0,
+  "ETH/USD": 1.5,
+};
+
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,
   sessions: {
@@ -1693,7 +1786,7 @@ async function runScanJob(
       emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
     }
 
-    type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
+    type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; c1m?: Candle[] | null; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
     // Sequential pair loop; each pair+timeframe fetch is independently throttled.
@@ -1728,8 +1821,30 @@ async function runScanJob(
           accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
+        const c5  = fetches[0].candles;
+        const c15 = fetches[1].candles;
         const c1h = fetches[2].candles;
-        pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
+
+        // Fetch 1M only for VERITAS-approved pairs
+        let c1m: Candle[] | null = null;
+        let c1mCached = true;
+        if (VERITAS_PAIRS.has(pair)) {
+          const tf1m   = { label: "1m", td: "1min" };
+          const size1m = mode === "latest" ? 30 : 60;
+          try {
+            const f1m = await fetchCandles(supabase, keys, keyState, pair, tf1m, size1m, emit, source);
+            c1m       = f1m.candles;
+            c1mCached = f1m.cached;
+            accumulateCall(f1m.usedApi, f1m.usedKey);
+          } catch (e) {
+            console.log(`VERITAS 1m fetch failed for ${pair}: ${(e as Error).message}`);
+          }
+        }
+
+        pairData[pair] = {
+          c5, c15, c1h, c1m,
+          cached: fetches.every(f => f.cached) && c1mCached,
+        };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
         accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
@@ -1764,8 +1879,14 @@ async function runScanJob(
       }
     }
 
-    // Build candidate signals (may contain multiple per pair+direction)
-    const candidates: Signal[] = [];
+    // ═══════════════════════════════════════════════════════════════
+    // Four isolated family buckets — no cross-family merging
+    // ═══════════════════════════════════════════════════════════════
+    const veritasCandidates: Signal[] = [];
+    const qssCandidates:     Signal[] = [];
+    const prismCandidates:   Signal[] = [];
+    const legacyCandidates:  Signal[] = [];
+
     for (const pair of allowedPairs) {
       const d = pairData[pair];
       const pairReport = {
@@ -1778,27 +1899,32 @@ async function runScanJob(
         pairReport.checks.push({ setup: "ALL", status: "filtered", reason: "Failed to fetch candles" });
         report.push(pairReport); continue;
       }
-      const bias = htfBias(d.c1h);
+      const bias         = htfBias(d.c1h);
       const currentPrice = d.c5.at(-1)!.c;
+      const c1m          = d.c1m ?? null;
+      const ccys         = pairCurrencies(pair);
+      const hits         = blackoutHits(events, ccys, nowDate);
+
+      // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
       const setups: Array<[string, RawSignal | null]> = [
-        ["EMA Pullback", emaPullback(pair, d.c5, d.c15)],
-        ["BOS Retest", bos(pair, d.c5, d.c15)],
+        ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
+        ["BOS Retest",          bos(pair, d.c5, d.c15)],
         ["Session Range Break", sessionRangeBreak(pair, d.c5)],
-        ["SMC OB/FVG", smcOrderBlock(pair, d.c5, d.c15)],
-        ["CHOCH", choch(pair, d.c5)],
+        ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
+        ["CHOCH",               choch(pair, d.c5)],
       ];
-      const ccys = pairCurrencies(pair);
-      const hits = blackoutHits(events, ccys, nowDate);
       for (const [name, raw] of setups) {
-        if (!raw) { pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" }); continue; }
+        if (!raw) {
+          pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
+          continue;
+        }
         if (DISABLED_SETUPS.has(raw.setup)) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
         if (hits.length > 0) {
           const h = hits[0];
-          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
         const q = qualifyAndScore(raw, d.c5, bias, currentPrice);
@@ -1806,89 +1932,95 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
           pairReport.checks.push({ setup: name, status: "qualified", direction: q.signal.direction });
-          candidates.push(q.signal);
+          legacyCandidates.push(q.signal);
         }
       }
 
-      // VERITAS — scored internally, bypasses qualifyAndScore. Still respects news blackout.
+      // ── VERITAS (isolated — no merge with legacy) ──
       if (!DISABLED_SETUPS.has("VERITAS")) {
-        const ssNow = sessionScore(pair, nowDate);
-        const veritas = veritasSetup(pair, d.c5, d.c15, ssNow);
+        const ssNow   = sessionScore(pair, nowDate);
+        const veritas = veritasSetup(pair, d.c5, d.c15, c1m, ssNow);
         if (!veritas) {
-          pairReport.checks.push({ setup: "VERITAS", status: "none", reason: "No setup pattern" });
+          pairReport.checks.push({ setup: "VERITAS", status: "none",
+            reason: "No qualifying signal — check Hurst, TSI, SNR≥40, VPT, 1M cross" });
         } else if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
-          candidates.push(veritas);
+          veritasCandidates.push(veritas);
         }
       }
 
-      // QSS — Quantum Scalping System; scored internally, bypasses qualifyAndScore.
+      // ── QSS (isolated) ──
       {
         const ssNow = sessionScore(pair, nowDate);
-        const qss = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
+        const qss   = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
         if (!qss) {
           pairReport.checks.push({ setup: "QSS", status: "none", reason: "No qualifying void" });
         } else if (hits.length > 0) {
-          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction, reason: `News blackout` });
+          const h = hits[0];
+          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
-          candidates.push(qss);
+          qssCandidates.push(qss);
         }
       }
 
-      // PRISM — Pressure, Regime, Imbalance, Structure, Momentum
+      // ── PRISM (isolated) ──
       {
         const ssNow = sessionScore(pair, nowDate);
         const prism = prismSetup(pair, d.c5, d.c15, d.c1h, ssNow);
         if (!prism) {
-          pairReport.checks.push({ setup: "PRISM", status: "none", reason: "No qualifying pressure zone + regime" });
+          pairReport.checks.push({ setup: "PRISM", status: "none",
+            reason: "No qualifying pressure zone + regime" });
         } else if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "PRISM", status: "qualified", direction: prism.direction });
-          candidates.push(prism);
+          prismCandidates.push(prism);
         }
       }
 
       report.push(pairReport);
-
     }
 
-
-    // One signal per pair per direction → merge setup names.
-    // Non-market setups (Buy/Sell Limit|Stop) always own the order_type + entry;
-    // VERITAS market orders are treated as a confluence confirmation only.
-    const isNonMarket = (ot?: string) => !!ot && /\b(Limit|Stop)\b/i.test(ot);
-    const byKey = new Map<string, Signal>();
-    for (const s of candidates) {
-      const key = `${s.pair}|${s.direction}`;
-      const existing = byKey.get(key);
-      if (!existing) { byKey.set(key, s); continue; }
-
-      // Pick which signal's order_type + entry to keep:
-      // prefer non-market over market; otherwise keep higher confidence.
-      const sNon = isNonMarket(s.order_type);
-      const eNon = isNonMarket(existing.order_type);
-      let base: Signal, other: Signal;
-      if (sNon && !eNon)       { base = s;        other = existing; }
-      else if (eNon && !sNon)  { base = existing; other = s;        }
-      else                     { base = s.confidence > existing.confidence ? s : existing;
-                                 other = base === s ? existing : s; }
-
-      const merged: Signal = {
-        ...base,
-        setup: `${base.setup} + ${other.setup}`,
-        confidence: Math.min(100, Math.max(base.confidence, other.confidence) + 5),
-      };
-      byKey.set(key, merged);
+    // ═══════════════════════════════════════════════════════════════
+    // Merge ONLY within the same family (highest confidence wins)
+    // ═══════════════════════════════════════════════════════════════
+    function mergeFamily(cands: Signal[]): Signal[] {
+      const byKey = new Map<string, Signal>();
+      for (const s of cands) {
+        const key      = `${s.pair}|${s.direction}`;
+        const existing = byKey.get(key);
+        if (!existing) { byKey.set(key, s); continue; }
+        const base   = s.confidence > existing.confidence ? s : existing;
+        const other  = base === s ? existing : s;
+        const merged: Signal = {
+          ...base,
+          setup:      `${base.setup} + ${other.setup}`,
+          confidence: Math.min(100, Math.max(base.confidence, other.confidence) + 3),
+        };
+        byKey.set(key, merged);
+      }
+      return Array.from(byKey.values());
     }
-    const merged = Array.from(byKey.values());
+
+    const mergedLegacy  = mergeFamily(legacyCandidates);
+    const mergedVeritas = mergeFamily(veritasCandidates);
+    const mergedQss     = mergeFamily(qssCandidates);
+    const mergedPrism   = mergeFamily(prismCandidates);
+
+    const merged: Signal[] = [
+      ...mergedLegacy,
+      ...mergedVeritas,
+      ...mergedQss,
+      ...mergedPrism,
+    ];
     signals.push(...merged);
 
     // Diagnostic: tally outcomes across all setups so we can confirm from logs
@@ -1945,7 +2077,11 @@ async function runScanJob(
     let cfg: any = cfgRowPre ?? null;
     const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 70);
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
-    const toInsert = dedupedInsert.filter(s => s.confidence >= minConf && s.rr >= minRR);
+    const toInsert = dedupedInsert.filter(s => {
+      const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
+      const familyMinRR = SETUP_MIN_RR[setupBase] ?? minRR;
+      return s.confidence >= minConf && s.rr >= familyMinRR;
+    });
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
