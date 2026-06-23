@@ -25,12 +25,13 @@ const ALLOWED_KEYS = new Set([
   "metaapi_region_live", "metaapi_symbol_suffix_live",
   "veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",
   "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
+  "metaapi_min_stop_points",
 ]);
 
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
@@ -107,6 +108,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "veritas_min_snr"   && (typeof v !== "number" || v < 20  || v > 80)) continue;
     if (k === "veritas_min_conf"  && (typeof v !== "number" || v < 50  || v > 99)) continue;
     if (k === "veritas_min_rr"    && (typeof v !== "number" || v < 1   || v > 3)) continue;
+    if (k === "metaapi_min_stop_points" && (typeof v !== "number" || v < 0 || v > 500)) continue;
     out[k] = v;
   }
   return out;
@@ -124,6 +126,7 @@ Deno.serve(async (req) => {
   try {
     const raw = await req.json().catch(() => ({}));
     const patch = sanitize(raw ?? {});
+    console.log("update-settings patch:", JSON.stringify(patch));
     if (Object.keys(patch).length === 0) {
       return new Response(JSON.stringify({ error: "No valid fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
