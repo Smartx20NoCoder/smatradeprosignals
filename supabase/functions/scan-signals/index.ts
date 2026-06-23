@@ -1528,6 +1528,46 @@ const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
 
+// ═══════════════════════════════════════════════════════════════
+// V.E.R.I.T.A.S. PDF-Approved Instruments
+// ═══════════════════════════════════════════════════════════════
+const VERITAS_PAIRS = new Set([
+  "EUR/USD", "GBP/USD", "USD/JPY",
+  "XAU/USD", "BTC/USD", "ETH/USD",
+]);
+
+// Setup-specific minimum R:R — VERITAS ATR-based TP gives 1.67 by design
+const SETUP_MIN_RR: Record<string, number> = {
+  "VERITAS": 1.60,
+  "QSS":     1.85,
+  "PRISM":   1.85,
+  "EMA":     1.85,
+  "BOS":     1.85,
+  "Session": 1.85,
+  "SMC":     1.85,
+  "CHOCH":   1.85,
+};
+
+// ATR validity ranges per pair (5M, in pips/points)
+const VERITAS_ATR_RANGE: Record<string, [number, number]> = {
+  "EUR/USD": [5,   25],
+  "GBP/USD": [7,   30],
+  "USD/JPY": [5,   25],
+  "XAU/USD": [50,  300],
+  "BTC/USD": [100, 800],
+  "ETH/USD": [10,  80],
+};
+
+// Max spread per pair (in price terms, not pips)
+const VERITAS_MAX_SPREAD: Record<string, number> = {
+  "EUR/USD": 0.00015,
+  "GBP/USD": 0.00025,
+  "USD/JPY": 0.015,
+  "XAU/USD": 0.35,
+  "BTC/USD": 15.0,
+  "ETH/USD": 1.5,
+};
+
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
   scan_active_sessions_only: false,
   sessions: {
