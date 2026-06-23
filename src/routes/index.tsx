@@ -280,6 +280,9 @@ function ScalpEdge() {
     metaapi_live_configured: false,
     metaapi_live_token_configured: false,
     scan_interval_minutes: 15,
+    veritas_sl_mult: 1.5, veritas_tp_mult: 2.5, veritas_min_hurst: 0.55,
+    veritas_min_snr: 40, veritas_min_conf: 72, veritas_min_rr: 1.60,
+
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
