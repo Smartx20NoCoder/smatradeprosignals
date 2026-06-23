@@ -1813,6 +1813,69 @@ function MetaApiPanel({
         </label>
       </div>
 
+      {/* ── VERITAS TUNING ─────────────────────────────────── */}
+      <div className="mt-2 border border-border rounded-lg p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+          VERITAS Parameters
+        </p>
+        <p className="text-[11px] text-muted-foreground mb-3">
+          Controls SL/TP multipliers, Hurst gate, SNR floor and quality threshold specifically for VERITAS signals.
+          These override the global MIN R:R for VERITAS only.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">SL Multiplier (× ATR)</div>
+            <input type="number" step={0.1} min={0.5} max={3}
+              value={appSettings.veritas_sl_mult ?? 1.5}
+              onChange={(e) => saveAppSettings({ veritas_sl_mult: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Default 1.5 (PDF spec)</div>
+          </label>
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">TP Multiplier (× ATR)</div>
+            <input type="number" step={0.1} min={1} max={5}
+              value={appSettings.veritas_tp_mult ?? 2.5}
+              onChange={(e) => saveAppSettings({ veritas_tp_mult: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Default 2.5 → RR 1.67</div>
+          </label>
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Hurst (Trend)</div>
+            <input type="number" step={0.01} min={0.5} max={0.7}
+              value={appSettings.veritas_min_hurst ?? 0.55}
+              onChange={(e) => saveAppSettings({ veritas_min_hurst: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">0.55 = PDF; try 0.57</div>
+          </label>
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min SNR Score</div>
+            <input type="number" step={5} min={20} max={80}
+              value={appSettings.veritas_min_snr ?? 40}
+              onChange={(e) => saveAppSettings({ veritas_min_snr: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">40 = moderate SNR+</div>
+          </label>
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Confidence</div>
+            <input type="number" step={1} min={65} max={95}
+              value={appSettings.veritas_min_conf ?? 72}
+              onChange={(e) => saveAppSettings({ veritas_min_conf: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">72 = raised quality floor</div>
+          </label>
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min R:R (VERITAS only)</div>
+            <input type="number" step={0.05} min={1} max={3}
+              value={appSettings.veritas_min_rr ?? 1.6}
+              onChange={(e) => saveAppSettings({ veritas_min_rr: parseFloat(e.target.value) })}
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">1.60 keeps 1.67 signals</div>
+          </label>
+        </div>
+      </div>
+
+
+
       <label className="flex items-start gap-2 text-xs cursor-pointer">
         <input
           type="checkbox"
