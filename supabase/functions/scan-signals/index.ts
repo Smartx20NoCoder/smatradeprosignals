@@ -2077,7 +2077,11 @@ async function runScanJob(
     let cfg: any = cfgRowPre ?? null;
     const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 70);
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
-    const toInsert = dedupedInsert.filter(s => s.confidence >= minConf && s.rr >= minRR);
+    const toInsert = dedupedInsert.filter(s => {
+      const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
+      const familyMinRR = SETUP_MIN_RR[setupBase] ?? minRR;
+      return s.confidence >= minConf && s.rr >= familyMinRR;
+    });
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
