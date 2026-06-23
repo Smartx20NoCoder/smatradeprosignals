@@ -1853,18 +1853,7 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
-        for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
-          fetches.push(f);
-          accumulateCall(f.usedApi, f.usedKey);
-        }
-        // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
-        const c5  = fetches[0].candles;
-        const c15 = fetches[1].candles;
-        const c1h = fetches[2].candles;
-
-        // Fetch 1M only for VERITAS-approved pairs
+        // Step 1: Fetch 1m first for VERITAS pairs
         let c1m: Candle[] | null = null;
         let c1mCached = true;
         if (VERITAS_PAIRS.has(pair)) {
@@ -1879,6 +1868,18 @@ async function runScanJob(
             console.log(`VERITAS 1m fetch failed for ${pair}: ${(e as Error).message}`);
           }
         }
+
+        // Step 2: Fetch 5m, 15m, 1h in standard order
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
+        for (const tf of tfsToFetch) {
+          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
+          fetches.push(f);
+          accumulateCall(f.usedApi, f.usedKey);
+        }
+        // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
+        const c5  = fetches[0].candles;
+        const c15 = fetches[1].candles;
+        const c1h = fetches[2].candles;
 
         pairData[pair] = {
           c5, c15, c1h, c1m,
