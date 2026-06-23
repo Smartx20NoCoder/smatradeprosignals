@@ -450,6 +450,12 @@ export type Database = {
           trading_hours_end_utc: number
           trading_hours_start_utc: number
           updated_at: string
+          veritas_min_conf: number
+          veritas_min_hurst: number
+          veritas_min_rr: number
+          veritas_min_snr: number
+          veritas_sl_mult: number
+          veritas_tp_mult: number
         }[]
       }
       increment_api_usage:
