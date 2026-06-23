@@ -12,10 +12,18 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", // crypto + gold — always scan first
-  "GBP/USD", "GBP/JPY", // core FX
-  "EUR/USD", "USD/JPY", // secondary FX
-  "AUD/JPY", "AUD/USD" // secondary pairs
+  // ── VERITAS Priority Pairs (scanned first — need 1m+5m+15m fresh) ──
+  "XAU/USD",   // VERITAS + legacy
+  "BTC/USD",   // VERITAS + legacy
+  "EUR/USD",   // VERITAS + legacy
+  "GBP/USD",   // VERITAS + legacy
+  "USD/JPY",   // VERITAS + legacy
+  "ETH/USD",   // VERITAS (when subscribed)
+  // ── Standard Pairs ──
+  "GBP/JPY",
+  "XRP/USD",
+  "AUD/JPY",
+  "AUD/USD",
 ];
 // Disabled setups — kept in code but filtered out of signal generation.
 // Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
@@ -1781,7 +1789,13 @@ async function runScanJob(
     // Scan ALL pairs regardless of pair_auto_execute — that flag only gates
     // whether metaapi-execute is called below. Signals are still generated
     // and paper-tracked for disabled pairs.
-    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    const allowedPairs = PAIRS
+      .filter((p) => isPairAllowedNow(p, nowDate))
+      .sort((a, b) => {
+        const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
+        const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
+        return aIsVeritas - bIsVeritas;
+      });
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
     // Load today's high-impact news once.
@@ -1839,18 +1853,7 @@ async function runScanJob(
       }
 
       try {
-        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
-        for (const tf of tfsToFetch) {
-          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
-          fetches.push(f);
-          accumulateCall(f.usedApi, f.usedKey);
-        }
-        // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
-        const c5  = fetches[0].candles;
-        const c15 = fetches[1].candles;
-        const c1h = fetches[2].candles;
-
-        // Fetch 1M only for VERITAS-approved pairs
+        // Step 1: Fetch 1m first for VERITAS pairs
         let c1m: Candle[] | null = null;
         let c1mCached = true;
         if (VERITAS_PAIRS.has(pair)) {
@@ -1865,6 +1868,18 @@ async function runScanJob(
             console.log(`VERITAS 1m fetch failed for ${pair}: ${(e as Error).message}`);
           }
         }
+
+        // Step 2: Fetch 5m, 15m, 1h in standard order
+        const fetches: { candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }[] = [];
+        for (const tf of tfsToFetch) {
+          const f = await fetchCandles(supabase, keys, keyState, pair, tf, sizeFor(tf.label), emit, source);
+          fetches.push(f);
+          accumulateCall(f.usedApi, f.usedKey);
+        }
+        // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
+        const c5  = fetches[0].candles;
+        const c15 = fetches[1].candles;
+        const c1h = fetches[2].candles;
 
         pairData[pair] = {
           c5, c15, c1h, c1m,
