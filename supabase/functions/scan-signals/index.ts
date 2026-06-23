@@ -1786,7 +1786,7 @@ async function runScanJob(
       emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
     }
 
-    type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; cached: boolean };
+    type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; c1m?: Candle[] | null; cached: boolean };
     const pairData: Record<string, PD | null> = {};
 
     // Sequential pair loop; each pair+timeframe fetch is independently throttled.
