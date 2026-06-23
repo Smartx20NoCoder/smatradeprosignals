@@ -1789,7 +1789,13 @@ async function runScanJob(
     // Scan ALL pairs regardless of pair_auto_execute — that flag only gates
     // whether metaapi-execute is called below. Signals are still generated
     // and paper-tracked for disabled pairs.
-    const allowedPairs = PAIRS.filter((p) => isPairAllowedNow(p, nowDate));
+    const allowedPairs = PAIRS
+      .filter((p) => isPairAllowedNow(p, nowDate))
+      .sort((a, b) => {
+        const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
+        const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
+        return aIsVeritas - bIsVeritas;
+      });
     const skippedPairs = PAIRS.filter((p) => !allowedPairs.includes(p));
 
     // Load today's high-impact news once.
