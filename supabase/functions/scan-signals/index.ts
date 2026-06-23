@@ -753,7 +753,8 @@ function veritasSetup(
 
   // ── Confluence Score ──────────────────────────────────────────
   const confidence = regScore + snrScore + tsiScore + vptScore + sessScore;
-  if (confidence < 72) return null;
+  if (confidence < minConf) return null;
+
 
   const signalGrade = confidence >= 80 ? "STRONG" : "MODERATE";
 
