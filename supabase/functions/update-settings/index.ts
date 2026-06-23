@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
   try {
     const raw = await req.json().catch(() => ({}));
     const patch = sanitize(raw ?? {});
+    console.log("update-settings patch:", JSON.stringify(patch));
     if (Object.keys(patch).length === 0) {
       return new Response(JSON.stringify({ error: "No valid fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
