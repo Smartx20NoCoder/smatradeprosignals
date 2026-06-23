@@ -25,6 +25,7 @@ const ALLOWED_KEYS = new Set([
   "metaapi_region_live", "metaapi_symbol_suffix_live",
   "veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",
   "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
+  "metaapi_min_stop_points",
 ]);
 
 
