@@ -23,7 +23,10 @@ const ALLOWED_KEYS = new Set([
   "metaapi_active_mode",
   "metaapi_account_id_live", "metaapi_token_live",
   "metaapi_region_live", "metaapi_symbol_suffix_live",
+  "veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",
+  "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
 ]);
+
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
