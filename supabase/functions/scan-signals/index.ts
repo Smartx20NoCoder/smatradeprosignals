@@ -760,8 +760,9 @@ function veritasSetup(
 
   // ── Entry / SL / TP (ATR-based) ───────────────────────────────
   const entry   = Number(last1m.c);
-  const slDist  = 1.5 * atrVal;
-  const tp2Dist = 2.5 * atrVal;
+  const slDist  = slMult * atrVal;
+  const tp2Dist = tpMult * atrVal;
+
   const tp1Dist = tp2Dist * 0.4;
   const sl      = isLong ? entry - slDist  : entry + slDist;
   const tp1     = isLong ? entry + tp1Dist : entry - tp1Dist;
