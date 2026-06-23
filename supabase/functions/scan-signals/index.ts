@@ -1821,8 +1821,30 @@ async function runScanJob(
           accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
+        const c5  = fetches[0].candles;
+        const c15 = fetches[1].candles;
         const c1h = fetches[2].candles;
-        pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h, cached: fetches.every(f => f.cached) };
+
+        // Fetch 1M only for VERITAS-approved pairs
+        let c1m: Candle[] | null = null;
+        let c1mCached = true;
+        if (VERITAS_PAIRS.has(pair)) {
+          const tf1m   = { label: "1m", td: "1min" };
+          const size1m = mode === "latest" ? 30 : 60;
+          try {
+            const f1m = await fetchCandles(supabase, keys, keyState, pair, tf1m, size1m, emit, source);
+            c1m       = f1m.candles;
+            c1mCached = f1m.cached;
+            accumulateCall(f1m.usedApi, f1m.usedKey);
+          } catch (e) {
+            console.log(`VERITAS 1m fetch failed for ${pair}: ${(e as Error).message}`);
+          }
+        }
+
+        pairData[pair] = {
+          c5, c15, c1h, c1m,
+          cached: fetches.every(f => f.cached) && c1mCached,
+        };
         emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
       } catch (e) {
         accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
