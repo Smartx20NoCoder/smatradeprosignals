@@ -632,102 +632,155 @@ function veritasSetup(
   pair: string,
   c5: Candle[],
   c15: Candle[],
+  c1m: Candle[] | null,
   ss: number,
 ): Signal | null {
+
+  // ── Instrument guard ─────────────────────────────────────────
+  if (!VERITAS_PAIRS.has(pair)) return null;
   if (c5.length < 65 || c15.length < 110) return null;
 
-  const closes5 = c5.map((x) => Number(x.c));
+  const closes5  = c5.map((x) => Number(x.c));
   const closes15 = c15.map((x) => Number(x.c));
 
-  // PILLAR 1: Hurst Regime (15M)
+  // ── PILLAR I: Hurst Regime (15M, 100-bar) ────────────────────
   const hurst = calcHurst(closes15);
-  const isTrending = hurst > 0.55;
+  const isTrending      = hurst > 0.55;
   const isMeanReverting = hurst < 0.45;
   if (!isTrending && !isMeanReverting) return null;
 
-  // PILLAR 2: HTF Bias (15M close vs 15-period SMA)
-  const htfRecent = closes15.slice(-16);
-  const htfSMA = htfRecent.slice(0, 15).reduce((a, b) => a + b, 0) / 15;
-  const htfLast = closes15[closes15.length - 1];
-  const htfBull = htfLast > htfSMA;
-  const htfBear = htfLast < htfSMA;
+  const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
+  const regScore = hRegime === "strong" ? 25 : 20;
 
-  // PILLAR 3: TSI Momentum (5M)
+  // ── PILLAR II: HTF Bias (15M close vs 15-period EMA) ─────────
+  const htfEMA15 = veritasEMA(closes15, 15);
+  const htfEMA   = htfEMA15[htfEMA15.length - 1];
+  const htfLast  = closes15[closes15.length - 1];
+  const htfBull  = htfLast > htfEMA;
+  const htfBear  = htfLast < htfEMA;
+  if (!htfBull && !htfBear) return null;
+
+  // ── PILLAR III: TSI Momentum (5M) ────────────────────────────
   const { tsi, signal: tsiSig, prev: tsiPrev } = calcTSI(closes5);
+  let tsiScore  = 0;
+  let tsiAligned = false;
 
-  // PILLAR 4: SNR Directional Conviction (5M)
-  const snr = calcSNR(closes5);
-  if (snr < 20) return null;
-
-  // PILLAR 5: VPT Volume Confirmation (5M)
-  const { vptRoc } = calcVPT(c5);
-  const vptConfirms = (dir: boolean) => dir ? vptRoc > 0.5 : vptRoc < -0.5;
-
-  // Session filter
-  if (ss < 60) return null;
-
-  // ATR
-  const atrVal = calcATR14(c5);
-  if (atrVal <= 0) return null;
-
-  const lastClose = closes5[closes5.length - 1];
-  const atrPct = atrVal / lastClose;
-  if (atrPct < 0.00005) return null;
-
-  // Direction
-  let isLong: boolean | null = null;
   if (isTrending) {
-    if (htfBull && tsi > tsiSig && tsi > 0 && vptConfirms(true)) isLong = true;
-    else if (htfBear && tsi < tsiSig && tsi < 0 && vptConfirms(false)) isLong = false;
+    if      (htfBull && tsi > tsiSig && tsi > 0)  { tsiAligned = true; tsiScore = 25; }
+    else if (htfBear && tsi < tsiSig && tsi < 0)  { tsiAligned = true; tsiScore = 25; }
+    else if (htfBull && tsi > tsiSig)              { tsiAligned = true; tsiScore = 15; }
+    else if (htfBear && tsi < tsiSig)              { tsiAligned = true; tsiScore = 15; }
   } else {
-    if (htfBull && tsi < -20 && tsi > tsiPrev && vptConfirms(true)) isLong = true;
-    else if (htfBear && tsi > 20 && tsi < tsiPrev && vptConfirms(false)) isLong = false;
+    if      (htfBull && tsi < -20 && tsi > tsiPrev) { tsiAligned = true; tsiScore = 25; }
+    else if (htfBear && tsi >  20 && tsi < tsiPrev) { tsiAligned = true; tsiScore = 25; }
+    else if (htfBull && tsi < -20)                   { tsiAligned = true; tsiScore = 15; }
+    else if (htfBear && tsi >  20)                   { tsiAligned = true; tsiScore = 15; }
   }
-  if (isLong === null) return null;
+  if (!tsiAligned) return null;
 
-  // Entry / SL / TPs via ATR
-  const slDist = 1.5 * atrVal;
+  // ── PILLAR IV: SNR Directional Conviction (5M) ───────────────
+  const snr = calcSNR(closes5);
+  if (snr < 40) return null;
+  const snrScore = snr > 60 ? 20 : snr > 40 ? 15 : 0;
+
+  // ── PILLAR V: VPT Volume Confirmation (5M) ───────────────────
+  const { vptRoc } = calcVPT(c5);
+  const isLong = htfBull;
+  const vptConfirmed = isLong ? vptRoc > 0.5 : vptRoc < -0.5;
+  if (!vptConfirmed) return null;
+  const vptScore = Math.abs(vptRoc) > 2 ? 15 : 10;
+
+  // ── PILLAR VI: Session & Timing Filter ───────────────────────
+  const h         = new Date().getUTCHours();
+  const isOverlap = h >= 13 && h < 17;
+  const isLondon  = h >= 8  && h < 13;
+  const isNY      = h >= 17 && h < 22;
+  const isAsian   = h >= 0  && h < 7;
+  let sessScore = 0;
+
+  if (pair === "XAU/USD") {
+    if (isOverlap || isLondon) sessScore = 15;
+    else if (isNY)             sessScore = 10;
+    else if (isAsian)          sessScore = 5;
+  } else if (pair === "BTC/USD" || pair === "ETH/USD") {
+    if (isOverlap)                         sessScore = 15;
+    else if (isLondon || isNY || isAsian)  sessScore = 10;
+  } else {
+    if (isOverlap)             sessScore = 15;
+    else if (isLondon || isNY) sessScore = 10;
+    else return null;
+  }
+  if (sessScore === 0) return null;
+
+  // ── Spread & ATR Range Guards ─────────────────────────────────
+  const last5     = c5[c5.length - 1];
+  const spread5m  = last5.h - last5.l;
+  const maxSpread = VERITAS_MAX_SPREAD[pair] ?? Infinity;
+  if (spread5m > maxSpread) return null;
+
+  const atrVal             = calcATR14(c5);
+  if (atrVal <= 0) return null;
+  const ps                 = pipSize(pair);
+  const [atrMin, atrMax]   = VERITAS_ATR_RANGE[pair] ?? [0, Infinity];
+  const atrPips            = atrVal / ps;
+  if (atrPips < atrMin || atrPips > atrMax) return null;
+
+  // ── 1-Minute Micro-Confirmation ───────────────────────────────
+  if (!c1m || c1m.length < 10) return null;
+  const closes1m  = c1m.map((x) => Number(x.c));
+  const ema5_1m   = veritasEMA(closes1m, 5);
+  const last1m    = c1m[c1m.length - 1];
+  const prev1m    = c1m[c1m.length - 2];
+  const ema5last  = ema5_1m[ema5_1m.length - 1];
+  const ema5prev  = ema5_1m[ema5_1m.length - 2];
+
+  const crossedAbove = Number(prev1m.c) <= ema5prev && Number(last1m.c) > ema5last;
+  const crossedBelow = Number(prev1m.c) >= ema5prev && Number(last1m.c) < ema5last;
+  const within2Pips  = Math.abs(Number(last1m.c) - Number(last5.c)) <= 2 * ps;
+
+  if (isLong  && (!crossedAbove || !within2Pips)) return null;
+  if (!isLong && (!crossedBelow || !within2Pips)) return null;
+
+  // ── Confluence Score ──────────────────────────────────────────
+  const confidence = regScore + snrScore + tsiScore + vptScore + sessScore;
+  if (confidence < 72) return null;
+
+  const signalGrade = confidence >= 80 ? "STRONG" : "MODERATE";
+
+  // ── Entry / SL / TP (ATR-based) ───────────────────────────────
+  const entry   = Number(last1m.c);
+  const slDist  = 1.5 * atrVal;
   const tp2Dist = 2.5 * atrVal;
   const tp1Dist = tp2Dist * 0.4;
-  const entry = lastClose;
-  const sl  = isLong ? entry - slDist  : entry + slDist;
-  const tp1 = isLong ? entry + tp1Dist : entry - tp1Dist;
-  const tp2 = isLong ? entry + tp2Dist : entry - tp2Dist;
-  const rr  = +(tp2Dist / slDist).toFixed(2);
+  const sl      = isLong ? entry - slDist  : entry + slDist;
+  const tp1     = isLong ? entry + tp1Dist : entry - tp1Dist;
+  const tp2     = isLong ? entry + tp2Dist : entry - tp2Dist;
+  const rr      = +(tp2Dist / slDist).toFixed(2);
 
-  // Confluence Score
-  const regScore  = hurst > 0.60 || hurst < 0.40 ? 28 : 18;
-  const snrScore  = snr > 60 ? 28 : snr > 40 ? 20 : 12;
-  const tsiScore  = Math.abs(tsi) > 25 ? 24 : Math.abs(tsi) > 10 ? 16 : 8;
-  const vptScore  = Math.abs(vptRoc) > 2 ? 12 : 7;
-  const sessScore = ss > 80 ? 8 : 5;
-  const confidence = Math.min(99, regScore + snrScore + tsiScore + vptScore + sessScore);
-  if (confidence < 65) return null;
-
-  const regime   = isTrending ? "Trend" : "MeanRev";
-  const snrLabel = snr > 60 ? "SNR++" : snr > 40 ? "SNR+" : "SNR~";
-  const candleTime = new Date(c5.at(-1)!.t).toISOString();
+  const regimeLabel = isTrending ? "Trend" : "MeanRev";
+  const snrLabel    = snr > 60 ? "SNR++" : "SNR+";
+  const candleTime  = new Date(last5.t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
     pair,
-    timeframe: "5m",
-    setup: `VERITAS (H=${hurst.toFixed(2)} ${regime} ${snrLabel})`,
+    timeframe:     "5m",
+    setup:         `VERITAS (${signalGrade} H=${hurst.toFixed(2)} ${regimeLabel} ${snrLabel})`,
     direction,
-    entry: +entry.toFixed(5),
-    stop_loss: +sl.toFixed(5),
-    tp1: +tp1.toFixed(5),
-    tp2: +tp2.toFixed(5),
+    entry:         +entry.toFixed(5),
+    stop_loss:     +sl.toFixed(5),
+    tp1:           +tp1.toFixed(5),
+    tp2:           +tp2.toFixed(5),
     rr,
-    atr: atrVal,
-    candle_time: candleTime,
-    session_score: ss,
+    atr:           atrVal,
+    candle_time:   candleTime,
+    session_score: sessScore * 5,
     confidence,
-    news_flag: false,
-    order_type: isLong ? "Buy Limit" : "Sell Limit",
-    spread_pips: spreadDisplay(pair),
-    htf_bias: isLong ? "1H BULL" : "1H BEAR",
-    mfi_score: +snr.toFixed(1),
+    news_flag:     false,
+    order_type:    isLong ? "Buy Market" : "Sell Market",
+    spread_pips:   spreadDisplay(pair),
+    htf_bias:      isLong ? "1H BULL" : "1H BEAR",
+    mfi_score:     +snr.toFixed(1),
     mfi_divergence: false,
   };
 }
