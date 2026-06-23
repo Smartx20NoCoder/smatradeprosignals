@@ -123,7 +123,14 @@ type AppSettings = {
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
   scan_interval_minutes: 15 | 30;
+  veritas_sl_mult?: number;
+  veritas_tp_mult?: number;
+  veritas_min_hurst?: number;
+  veritas_min_snr?: number;
+  veritas_min_conf?: number;
+  veritas_min_rr?: number;
 };
+
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
