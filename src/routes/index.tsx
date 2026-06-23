@@ -146,6 +146,7 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
+const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/USD","ETH/USD"]);
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
