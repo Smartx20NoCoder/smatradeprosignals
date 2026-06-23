@@ -634,6 +634,11 @@ function veritasSetup(
   c15: Candle[],
   c1m: Candle[] | null,
   ss: number,
+  slMult    = 1.5,
+  tpMult    = 2.5,
+  minHurst  = 0.55,
+  minSnr    = 40,
+  minConf   = 72,
 ): Signal | null {
 
   // ── Instrument guard ─────────────────────────────────────────
@@ -645,9 +650,13 @@ function veritasSetup(
 
   // ── PILLAR I: Hurst Regime (15M, 100-bar) ────────────────────
   const hurst = calcHurst(closes15);
-  const isTrending      = hurst > 0.55;
-  const isMeanReverting = hurst < 0.45;
+  const isTrending      = hurst > minHurst;
+  const isMeanReverting = hurst < (1 - minHurst);
   if (!isTrending && !isMeanReverting) return null;
+  // Dead zone: H=0.65-0.70 shows ambiguous mid-trend deceleration.
+  // This bucket has produced 0% win rate in live data — skip it.
+  if (hurst >= 0.65 && hurst < 0.70) return null;
+
 
   const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
   const regScore = hRegime === "strong" ? 25 : 20;
@@ -680,8 +689,9 @@ function veritasSetup(
 
   // ── PILLAR IV: SNR Directional Conviction (5M) ───────────────
   const snr = calcSNR(closes5);
-  if (snr < 40) return null;
-  const snrScore = snr > 60 ? 20 : snr > 40 ? 15 : 0;
+  if (snr < minSnr) return null;
+  const snrScore = snr > 60 ? 20 : snr > minSnr ? 15 : 0;
+
 
   // ── PILLAR V: VPT Volume Confirmation (5M) ───────────────────
   const { vptRoc } = calcVPT(c5);
@@ -743,14 +753,16 @@ function veritasSetup(
 
   // ── Confluence Score ──────────────────────────────────────────
   const confidence = regScore + snrScore + tsiScore + vptScore + sessScore;
-  if (confidence < 72) return null;
+  if (confidence < minConf) return null;
+
 
   const signalGrade = confidence >= 80 ? "STRONG" : "MODERATE";
 
   // ── Entry / SL / TP (ATR-based) ───────────────────────────────
   const entry   = Number(last1m.c);
-  const slDist  = 1.5 * atrVal;
-  const tp2Dist = 2.5 * atrVal;
+  const slDist  = slMult * atrVal;
+  const tp2Dist = tpMult * atrVal;
+
   const tp1Dist = tp2Dist * 0.4;
   const sl      = isLong ? entry - slDist  : entry + slDist;
   const tp1     = isLong ? entry + tp1Dist : entry - tp1Dist;
@@ -1750,6 +1762,19 @@ async function runScanJob(
     };
 
     const nowDate = new Date();
+
+    // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
+    // Single read shared by the veritasSetup call and the toInsert RR filter below.
+    const { data: veritasCfgRow } = await supabase.from("app_settings")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr")
+      .eq("id", "singleton").maybeSingle();
+    const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
+    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
+    const veritasMinHurst  = Number((veritasCfgRow as any)?.veritas_min_hurst  ?? 0.55);
+    const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
+    const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
+    const veritasMinRR     = Number((veritasCfgRow as any)?.veritas_min_rr     ?? 1.60);
+
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
@@ -1939,7 +1964,13 @@ async function runScanJob(
       // ── VERITAS (isolated — no merge with legacy) ──
       if (!DISABLED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
-        const veritas = veritasSetup(pair, d.c5, d.c15, c1m, ssNow);
+        const veritas = veritasSetup(
+          pair, d.c5, d.c15, c1m, ssNow,
+          veritasSlMult, veritasTpMult,
+          veritasMinHurst, veritasMinSnr,
+          veritasMinConf,
+        );
+
         if (!veritas) {
           pairReport.checks.push({ setup: "VERITAS", status: "none",
             reason: "No qualifying signal — check Hurst, TSI, SNR≥40, VPT, 1M cross" });
@@ -2079,9 +2110,12 @@ async function runScanJob(
     const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
     const toInsert = dedupedInsert.filter(s => {
       const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
-      const familyMinRR = SETUP_MIN_RR[setupBase] ?? minRR;
+      // VERITAS uses its own UI-adjustable RR gate; all others use global minRR via SETUP_MIN_RR.
+      const familyMinRR = setupBase === "VERITAS" ? veritasMinRR
+        : (SETUP_MIN_RR[setupBase] ?? minRR);
       return s.confidence >= minConf && s.rr >= familyMinRR;
     });
+
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {

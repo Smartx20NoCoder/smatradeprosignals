@@ -23,17 +23,21 @@ const ALLOWED_KEYS = new Set([
   "metaapi_active_mode",
   "metaapi_account_id_live", "metaapi_token_live",
   "metaapi_region_live", "metaapi_symbol_suffix_live",
+  "veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",
+  "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
 ]);
+
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
       if (!isNaN(n)) patch[f] = n;
     }
   }
+
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
     if (!ALLOWED_KEYS.has(k)) continue;
@@ -97,10 +101,17 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     }
     if (k === "metaapi_region_live" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
     if (k === "metaapi_symbol_suffix_live" && (typeof v !== "string" || v.length > 16 || !/^[A-Za-z0-9._-]*$/.test(v))) continue;
+    if (k === "veritas_sl_mult"   && (typeof v !== "number" || v < 0.5 || v > 3)) continue;
+    if (k === "veritas_tp_mult"   && (typeof v !== "number" || v < 1   || v > 5)) continue;
+    if (k === "veritas_min_hurst" && (typeof v !== "number" || v < 0.5 || v > 0.7)) continue;
+    if (k === "veritas_min_snr"   && (typeof v !== "number" || v < 20  || v > 80)) continue;
+    if (k === "veritas_min_conf"  && (typeof v !== "number" || v < 50  || v > 99)) continue;
+    if (k === "veritas_min_rr"    && (typeof v !== "number" || v < 1   || v > 3)) continue;
     out[k] = v;
   }
   return out;
 }
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
