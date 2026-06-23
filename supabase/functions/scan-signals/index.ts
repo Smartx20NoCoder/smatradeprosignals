@@ -12,10 +12,18 @@ const corsHeaders = {
 };
 
 const PAIRS = [
-  "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", // crypto + gold — always scan first
-  "GBP/USD", "GBP/JPY", // core FX
-  "EUR/USD", "USD/JPY", // secondary FX
-  "AUD/JPY", "AUD/USD" // secondary pairs
+  // ── VERITAS Priority Pairs (scanned first — need 1m+5m+15m fresh) ──
+  "XAU/USD",   // VERITAS + legacy
+  "BTC/USD",   // VERITAS + legacy
+  "EUR/USD",   // VERITAS + legacy
+  "GBP/USD",   // VERITAS + legacy
+  "USD/JPY",   // VERITAS + legacy
+  "ETH/USD",   // VERITAS (when subscribed)
+  // ── Standard Pairs ──
+  "GBP/JPY",
+  "XRP/USD",
+  "AUD/JPY",
+  "AUD/USD",
 ];
 // Disabled setups — kept in code but filtered out of signal generation.
 // Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
