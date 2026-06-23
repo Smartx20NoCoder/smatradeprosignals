@@ -2312,8 +2312,10 @@ function HealthPanel({
                 <span className="font-bold w-20">{p}</span>
                 {(["1m", "5m", "15m", "1h"] as const).map((tf) => {
                   const at = cacheByPair[p]?.[tf];
+                  // 1m is only fetched for VERITAS pairs — hide entirely when absent.
+                  if (tf === "1m" && !at) return null;
                   const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
-                  const ttl = tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
+                  const ttl = tf === "1m" ? 3 : tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
                   const fresh = ageMin !== null && ageMin < ttl;
                   return (
                     <span key={tf} className="flex items-center gap-1">
@@ -2324,6 +2326,7 @@ function HealthPanel({
                     </span>
                   );
                 })}
+
               </div>
             ));
           })()}
