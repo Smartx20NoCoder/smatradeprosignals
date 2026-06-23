@@ -622,14 +622,33 @@ function ScalpEdge() {
   }
 
   const stats = useMemo(() => {
+    // Normalise setup name to family so Edge tab groups VERITAS variants etc.
+    const edgeFamily = (setupName: string): string => {
+      if (setupName.startsWith("VERITAS")) return "VERITAS";
+      if (setupName.startsWith("QSS"))     return "QSS";
+      if (setupName.startsWith("PRISM"))   return "PRISM";
+      if (setupName.includes("BOS Retest") && setupName.includes("EMA Pullback"))
+        return "BOS + EMA Pullback";
+      if (setupName.includes("BOS Retest") && setupName.includes("Session"))
+        return "BOS + Session Range";
+      if (setupName.includes("BOS Retest")) return "BOS Retest";
+      if (setupName.includes("EMA Pullback")) return "EMA Pullback";
+      if (setupName.includes("Session Range Break")) return "Session Range Break";
+      if (setupName.includes("OB+FVG") || setupName.includes("Order Block"))
+        return "OB / Order Block";
+      if (setupName.includes("CHOCH")) return "CHOCH";
+      return setupName;
+    };
     const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
     const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
     for (const s of closed) {
-      if (!bySetup[s.setup]) bySetup[s.setup] = { n: 0, wins: 0, rSum: 0 };
-      bySetup[s.setup].n++;
-      bySetup[s.setup].rSum += s.outcome_r ?? 0;
-      if ((s.outcome_r ?? 0) > 0) bySetup[s.setup].wins++;
+      const fam = edgeFamily(s.setup);
+      if (!bySetup[fam]) bySetup[fam] = { n: 0, wins: 0, rSum: 0 };
+      bySetup[fam].n++;
+      bySetup[fam].rSum += s.outcome_r ?? 0;
+      if ((s.outcome_r ?? 0) > 0) bySetup[fam].wins++;
     }
+
     const summary = Object.entries(bySetup).map(([setup, v]) => ({
       setup, n: v.n,
       winRate: v.n ? (v.wins / v.n) * 100 : 0,
