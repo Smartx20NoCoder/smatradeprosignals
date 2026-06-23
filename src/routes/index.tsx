@@ -1446,6 +1446,70 @@ function TokenField({ configured, onSave }: { configured: boolean; onSave: (valu
   );
 }
 
+function VeritasParamsPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const [vSL,   setVSL]   = useState(appSettings?.veritas_sl_mult    ?? 1.5);
+  const [vTP,   setVTP]   = useState(appSettings?.veritas_tp_mult    ?? 2.5);
+  const [vH,    setVH]    = useState(appSettings?.veritas_min_hurst  ?? 0.55);
+  const [vSNR,  setVSNR]  = useState(appSettings?.veritas_min_snr    ?? 40);
+  const [vConf, setVConf] = useState(appSettings?.veritas_min_conf   ?? 72);
+  const [vRR,   setVRR]   = useState(appSettings?.veritas_min_rr     ?? 1.60);
+
+  useEffect(() => {
+    if (!appSettings) return;
+    setVSL(  appSettings.veritas_sl_mult    ?? 1.5);
+    setVTP(  appSettings.veritas_tp_mult    ?? 2.5);
+    setVH(   appSettings.veritas_min_hurst  ?? 0.55);
+    setVSNR( appSettings.veritas_min_snr    ?? 40);
+    setVConf(appSettings.veritas_min_conf   ?? 72);
+    setVRR(  appSettings.veritas_min_rr     ?? 1.60);
+  }, [appSettings]);
+
+  const saveVeritas = (key: string, value: number) => {
+    if (!isFinite(value)) return;
+    saveAppSettings({ [key]: value } as Partial<AppSettings>);
+  };
+
+  const fields: Array<{ label: string; key: string; val: number; set: (n: number) => void; min: number; max: number; step: number; hint: string }> = [
+    { label: "SL MULT (×ATR)",    key: "veritas_sl_mult",   val: vSL,   set: setVSL,   min: 0.5,  max: 3,    step: 0.1,  hint: "Default 1.5" },
+    { label: "TP MULT (×ATR)",    key: "veritas_tp_mult",   val: vTP,   set: setVTP,   min: 1,    max: 5,    step: 0.1,  hint: "3.0 → RR 2.0" },
+    { label: "MIN HURST",         key: "veritas_min_hurst", val: vH,    set: setVH,    min: 0.50, max: 0.70, step: 0.01, hint: "0.57 recommended" },
+    { label: "MIN SNR",           key: "veritas_min_snr",   val: vSNR,  set: setVSNR,  min: 20,   max: 80,   step: 5,    hint: "40–50 ideal" },
+    { label: "MIN CONF",          key: "veritas_min_conf",  val: vConf, set: setVConf, min: 50,   max: 99,   step: 1,    hint: "72 floor" },
+    { label: "MIN R:R (VERITAS)", key: "veritas_min_rr",    val: vRR,   set: setVRR,   min: 1,    max: 3,    step: 0.05, hint: "1.85 with TP=3×" },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {fields.map(({ label, key, val, set, min, max, step, hint }) => (
+        <label key={key} className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+          <input
+            type="number"
+            step={step} min={min} max={max}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            value={val}
+            onChange={e => {
+              const n = parseFloat(e.target.value);
+              if (isFinite(n)) set(n);
+            }}
+            onBlur={e => {
+              const n = Math.min(max, Math.max(min, parseFloat(e.target.value) || min));
+              set(n);
+              saveVeritas(key, n);
+            }}
+          />
+          <div className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</div>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function MetaApiPanel({
   appSettings, saveAppSettings,
 }: {
