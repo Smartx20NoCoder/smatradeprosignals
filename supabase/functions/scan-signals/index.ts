@@ -1879,8 +1879,14 @@ async function runScanJob(
       }
     }
 
-    // Build candidate signals (may contain multiple per pair+direction)
-    const candidates: Signal[] = [];
+    // ═══════════════════════════════════════════════════════════════
+    // Four isolated family buckets — no cross-family merging
+    // ═══════════════════════════════════════════════════════════════
+    const veritasCandidates: Signal[] = [];
+    const qssCandidates:     Signal[] = [];
+    const prismCandidates:   Signal[] = [];
+    const legacyCandidates:  Signal[] = [];
+
     for (const pair of allowedPairs) {
       const d = pairData[pair];
       const pairReport = {
@@ -1893,27 +1899,32 @@ async function runScanJob(
         pairReport.checks.push({ setup: "ALL", status: "filtered", reason: "Failed to fetch candles" });
         report.push(pairReport); continue;
       }
-      const bias = htfBias(d.c1h);
+      const bias         = htfBias(d.c1h);
       const currentPrice = d.c5.at(-1)!.c;
+      const c1m          = d.c1m ?? null;
+      const ccys         = pairCurrencies(pair);
+      const hits         = blackoutHits(events, ccys, nowDate);
+
+      // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
       const setups: Array<[string, RawSignal | null]> = [
-        ["EMA Pullback", emaPullback(pair, d.c5, d.c15)],
-        ["BOS Retest", bos(pair, d.c5, d.c15)],
+        ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
+        ["BOS Retest",          bos(pair, d.c5, d.c15)],
         ["Session Range Break", sessionRangeBreak(pair, d.c5)],
-        ["SMC OB/FVG", smcOrderBlock(pair, d.c5, d.c15)],
-        ["CHOCH", choch(pair, d.c5)],
+        ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
+        ["CHOCH",               choch(pair, d.c5)],
       ];
-      const ccys = pairCurrencies(pair);
-      const hits = blackoutHits(events, ccys, nowDate);
       for (const [name, raw] of setups) {
-        if (!raw) { pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" }); continue; }
+        if (!raw) {
+          pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
+          continue;
+        }
         if (DISABLED_SETUPS.has(raw.setup)) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
         if (hits.length > 0) {
           const h = hits[0];
-          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
         const q = qualifyAndScore(raw, d.c5, bias, currentPrice);
@@ -1921,89 +1932,95 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
           pairReport.checks.push({ setup: name, status: "qualified", direction: q.signal.direction });
-          candidates.push(q.signal);
+          legacyCandidates.push(q.signal);
         }
       }
 
-      // VERITAS — scored internally, bypasses qualifyAndScore. Still respects news blackout.
+      // ── VERITAS (isolated — no merge with legacy) ──
       if (!DISABLED_SETUPS.has("VERITAS")) {
-        const ssNow = sessionScore(pair, nowDate);
-        const veritas = veritasSetup(pair, d.c5, d.c15, ssNow);
+        const ssNow   = sessionScore(pair, nowDate);
+        const veritas = veritasSetup(pair, d.c5, d.c15, c1m, ssNow);
         if (!veritas) {
-          pairReport.checks.push({ setup: "VERITAS", status: "none", reason: "No setup pattern" });
+          pairReport.checks.push({ setup: "VERITAS", status: "none",
+            reason: "No qualifying signal — check Hurst, TSI, SNR≥40, VPT, 1M cross" });
         } else if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
-          candidates.push(veritas);
+          veritasCandidates.push(veritas);
         }
       }
 
-      // QSS — Quantum Scalping System; scored internally, bypasses qualifyAndScore.
+      // ── QSS (isolated) ──
       {
         const ssNow = sessionScore(pair, nowDate);
-        const qss = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
+        const qss   = qssSetup(pair, d.c5, d.c15, d.c1h, ssNow);
         if (!qss) {
           pairReport.checks.push({ setup: "QSS", status: "none", reason: "No qualifying void" });
         } else if (hits.length > 0) {
-          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction, reason: `News blackout` });
+          const h = hits[0];
+          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
-          candidates.push(qss);
+          qssCandidates.push(qss);
         }
       }
 
-      // PRISM — Pressure, Regime, Imbalance, Structure, Momentum
+      // ── PRISM (isolated) ──
       {
         const ssNow = sessionScore(pair, nowDate);
         const prism = prismSetup(pair, d.c5, d.c15, d.c1h, ssNow);
         if (!prism) {
-          pairReport.checks.push({ setup: "PRISM", status: "none", reason: "No qualifying pressure zone + regime" });
+          pairReport.checks.push({ setup: "PRISM", status: "none",
+            reason: "No qualifying pressure zone + regime" });
         } else if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
-            reason: `News blackout: ${h.title} (${h.ccy}) ${h.minsTo >= 0 ? `in ${h.minsTo}m` : `${-h.minsTo}m ago`}` });
+            reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
           pairReport.checks.push({ setup: "PRISM", status: "qualified", direction: prism.direction });
-          candidates.push(prism);
+          prismCandidates.push(prism);
         }
       }
 
       report.push(pairReport);
-
     }
 
-
-    // One signal per pair per direction → merge setup names.
-    // Non-market setups (Buy/Sell Limit|Stop) always own the order_type + entry;
-    // VERITAS market orders are treated as a confluence confirmation only.
-    const isNonMarket = (ot?: string) => !!ot && /\b(Limit|Stop)\b/i.test(ot);
-    const byKey = new Map<string, Signal>();
-    for (const s of candidates) {
-      const key = `${s.pair}|${s.direction}`;
-      const existing = byKey.get(key);
-      if (!existing) { byKey.set(key, s); continue; }
-
-      // Pick which signal's order_type + entry to keep:
-      // prefer non-market over market; otherwise keep higher confidence.
-      const sNon = isNonMarket(s.order_type);
-      const eNon = isNonMarket(existing.order_type);
-      let base: Signal, other: Signal;
-      if (sNon && !eNon)       { base = s;        other = existing; }
-      else if (eNon && !sNon)  { base = existing; other = s;        }
-      else                     { base = s.confidence > existing.confidence ? s : existing;
-                                 other = base === s ? existing : s; }
-
-      const merged: Signal = {
-        ...base,
-        setup: `${base.setup} + ${other.setup}`,
-        confidence: Math.min(100, Math.max(base.confidence, other.confidence) + 5),
-      };
-      byKey.set(key, merged);
+    // ═══════════════════════════════════════════════════════════════
+    // Merge ONLY within the same family (highest confidence wins)
+    // ═══════════════════════════════════════════════════════════════
+    function mergeFamily(cands: Signal[]): Signal[] {
+      const byKey = new Map<string, Signal>();
+      for (const s of cands) {
+        const key      = `${s.pair}|${s.direction}`;
+        const existing = byKey.get(key);
+        if (!existing) { byKey.set(key, s); continue; }
+        const base   = s.confidence > existing.confidence ? s : existing;
+        const other  = base === s ? existing : s;
+        const merged: Signal = {
+          ...base,
+          setup:      `${base.setup} + ${other.setup}`,
+          confidence: Math.min(100, Math.max(base.confidence, other.confidence) + 3),
+        };
+        byKey.set(key, merged);
+      }
+      return Array.from(byKey.values());
     }
-    const merged = Array.from(byKey.values());
+
+    const mergedLegacy  = mergeFamily(legacyCandidates);
+    const mergedVeritas = mergeFamily(veritasCandidates);
+    const mergedQss     = mergeFamily(qssCandidates);
+    const mergedPrism   = mergeFamily(prismCandidates);
+
+    const merged: Signal[] = [
+      ...mergedLegacy,
+      ...mergedVeritas,
+      ...mergedQss,
+      ...mergedPrism,
+    ];
     signals.push(...merged);
 
     // Diagnostic: tally outcomes across all setups so we can confirm from logs
