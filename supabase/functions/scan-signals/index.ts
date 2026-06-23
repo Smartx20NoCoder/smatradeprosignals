@@ -689,8 +689,9 @@ function veritasSetup(
 
   // ── PILLAR IV: SNR Directional Conviction (5M) ───────────────
   const snr = calcSNR(closes5);
-  if (snr < 40) return null;
-  const snrScore = snr > 60 ? 20 : snr > 40 ? 15 : 0;
+  if (snr < minSnr) return null;
+  const snrScore = snr > 60 ? 20 : snr > minSnr ? 15 : 0;
+
 
   // ── PILLAR V: VPT Volume Confirmation (5M) ───────────────────
   const { vptRoc } = calcVPT(c5);
