@@ -1964,7 +1964,13 @@ async function runScanJob(
       // ── VERITAS (isolated — no merge with legacy) ──
       if (!DISABLED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
-        const veritas = veritasSetup(pair, d.c5, d.c15, c1m, ssNow);
+        const veritas = veritasSetup(
+          pair, d.c5, d.c15, c1m, ssNow,
+          veritasSlMult, veritasTpMult,
+          veritasMinHurst, veritasMinSnr,
+          veritasMinConf,
+        );
+
         if (!veritas) {
           pairReport.checks.push({ setup: "VERITAS", status: "none",
             reason: "No qualifying signal — check Hurst, TSI, SNR≥40, VPT, 1M cross" });
