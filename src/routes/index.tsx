@@ -2310,7 +2310,7 @@ function HealthPanel({
             return visiblePairs.map((p) => (
               <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
                 <span className="font-bold w-20">{p}</span>
-                {(["5m", "15m", "1h"] as const).map((tf) => {
+                {(["1m", "5m", "15m", "1h"] as const).map((tf) => {
                   const at = cacheByPair[p]?.[tf];
                   const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
                   const ttl = tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
