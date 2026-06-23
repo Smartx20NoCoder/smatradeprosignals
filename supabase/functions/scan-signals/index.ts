@@ -1762,6 +1762,19 @@ async function runScanJob(
     };
 
     const nowDate = new Date();
+
+    // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
+    // Single read shared by the veritasSetup call and the toInsert RR filter below.
+    const { data: veritasCfgRow } = await supabase.from("app_settings")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr")
+      .eq("id", "singleton").maybeSingle();
+    const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
+    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
+    const veritasMinHurst  = Number((veritasCfgRow as any)?.veritas_min_hurst  ?? 0.55);
+    const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
+    const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
+    const veritasMinRR     = Number((veritasCfgRow as any)?.veritas_min_rr     ?? 1.60);
+
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
