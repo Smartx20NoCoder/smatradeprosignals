@@ -2272,6 +2272,20 @@ async function runScanJob(
       newCalls = (usage?.calls as number) ?? 0;
     }
 
+    // ── Persist per-key daily usage counters for threshold-based rotation ──
+    try {
+      const patch: Record<string, unknown> = {};
+      if (apiCallsByKey[1] > 0) patch.twelvedata_key_1_used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0) + apiCallsByKey[1];
+      if (apiCallsByKey[2] > 0) patch.twelvedata_key_2_used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0) + apiCallsByKey[2];
+      if (apiCallsByKey[3] > 0) patch.twelvedata_key_3_used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0) + apiCallsByKey[3];
+      if (Object.keys(patch).length > 0) {
+        patch.twelvedata_key_reset_date = new Date().toISOString().slice(0, 10);
+        await supabase.from("app_settings").update(patch).eq("id", "singleton");
+      }
+    } catch (e) {
+      console.warn("per-key usage counter update failed", e);
+    }
+
     return {
       signals, new_signals: toInsert.length,
       api_calls_used: apiCalls, api_calls_today: newCalls,
