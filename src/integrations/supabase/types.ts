@@ -63,6 +63,7 @@ export type Database = {
           metaapi_max_daily_loss_pct: number | null
           metaapi_max_lot: number | null
           metaapi_max_trades: number | null
+          metaapi_min_adx: number | null
           metaapi_min_confidence: number
           metaapi_min_lot: number | null
           metaapi_min_rr: number
@@ -73,6 +74,7 @@ export type Database = {
           metaapi_symbol_suffix_live: string | null
           metaapi_token: string | null
           metaapi_token_live: string | null
+          metaapi_trail_lock_r: number | null
           pair_auto_execute: Json
           paused: boolean
           scan_interval_minutes: number
@@ -80,6 +82,11 @@ export type Database = {
           setup_auto_execute: Json
           trading_hours_end_utc: number
           trading_hours_start_utc: number
+          twelvedata_key_1_used: number | null
+          twelvedata_key_2_used: number | null
+          twelvedata_key_3_used: number | null
+          twelvedata_key_reset_date: string | null
+          twelvedata_key_threshold: number | null
           updated_at: string
           veritas_min_conf: number
           veritas_min_hurst: number
@@ -109,6 +116,7 @@ export type Database = {
           metaapi_max_daily_loss_pct?: number | null
           metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
+          metaapi_min_adx?: number | null
           metaapi_min_confidence?: number
           metaapi_min_lot?: number | null
           metaapi_min_rr?: number
@@ -119,6 +127,7 @@ export type Database = {
           metaapi_symbol_suffix_live?: string | null
           metaapi_token?: string | null
           metaapi_token_live?: string | null
+          metaapi_trail_lock_r?: number | null
           pair_auto_execute?: Json
           paused?: boolean
           scan_interval_minutes?: number
@@ -126,6 +135,11 @@ export type Database = {
           setup_auto_execute?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
+          twelvedata_key_1_used?: number | null
+          twelvedata_key_2_used?: number | null
+          twelvedata_key_3_used?: number | null
+          twelvedata_key_reset_date?: string | null
+          twelvedata_key_threshold?: number | null
           updated_at?: string
           veritas_min_conf?: number
           veritas_min_hurst?: number
@@ -155,6 +169,7 @@ export type Database = {
           metaapi_max_daily_loss_pct?: number | null
           metaapi_max_lot?: number | null
           metaapi_max_trades?: number | null
+          metaapi_min_adx?: number | null
           metaapi_min_confidence?: number
           metaapi_min_lot?: number | null
           metaapi_min_rr?: number
@@ -165,6 +180,7 @@ export type Database = {
           metaapi_symbol_suffix_live?: string | null
           metaapi_token?: string | null
           metaapi_token_live?: string | null
+          metaapi_trail_lock_r?: number | null
           pair_auto_execute?: Json
           paused?: boolean
           scan_interval_minutes?: number
@@ -172,6 +188,11 @@ export type Database = {
           setup_auto_execute?: Json
           trading_hours_end_utc?: number
           trading_hours_start_utc?: number
+          twelvedata_key_1_used?: number | null
+          twelvedata_key_2_used?: number | null
+          twelvedata_key_3_used?: number | null
+          twelvedata_key_reset_date?: string | null
+          twelvedata_key_threshold?: number | null
           updated_at?: string
           veritas_min_conf?: number
           veritas_min_hurst?: number

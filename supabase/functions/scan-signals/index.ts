@@ -130,6 +130,35 @@ function atr(c: Candle[], period = 14): number {
   const slice = trs.slice(-period);
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
+function calcADX(candles: Candle[], period = 14): number {
+  if (candles.length < period + 2) return 25;
+  const trArr: number[] = [];
+  const pDM: number[] = [];
+  const mDM: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].h, l = candles[i].l;
+    const ph = candles[i-1].h, pl = candles[i-1].l, pc = candles[i-1].c;
+    trArr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const up = h - ph, dn = pl - l;
+    pDM.push(up > dn && up > 0 ? up : 0);
+    mDM.push(dn > up && dn > 0 ? dn : 0);
+  }
+  function ws(arr: number[], p: number): number[] {
+    if (arr.length < p) return [0];
+    let s = arr.slice(0, p).reduce((a, b) => a + b, 0);
+    const out = [s];
+    for (let i = p; i < arr.length; i++) { s = s - s / p + arr[i]; out.push(s); }
+    return out;
+  }
+  const sTR = ws(trArr, period);
+  const diP = ws(pDM, period).map((v, i) => sTR[i] > 0 ? 100 * v / sTR[i] : 0);
+  const diM = ws(mDM, period).map((v, i) => sTR[i] > 0 ? 100 * v / sTR[i] : 0);
+  const dx  = diP.map((p, i) => {
+    const sum = p + diM[i];
+    return sum > 0 ? 100 * Math.abs(p - diM[i]) / sum : 0;
+  });
+  return +((ws(dx, period).at(-1) ?? 0).toFixed(1));
+}
 function mfi(c: Candle[], period = 14): { value: number; series: number[] } {
   if (c.length < period + 2) return { value: 50, series: [] };
   const series: number[] = [];
@@ -1774,7 +1803,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, twelvedata_key_threshold, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
@@ -1782,6 +1811,38 @@ async function runScanJob(
     const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
     const veritasMinRR     = Number((veritasCfgRow as any)?.veritas_min_rr     ?? 1.60);
+    const minADX           = Number((veritasCfgRow as any)?.metaapi_min_adx    ?? 20);
+
+    // ── TwelveData usage-threshold rotation: mark keys as exhausted when they
+    // hit the daily usage threshold. Counters reset at UTC midnight.
+    try {
+      const todayUTC   = new Date().toISOString().slice(0, 10);
+      const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
+      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
+      let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
+      let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
+      let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
+      if (resetDate !== todayUTC) {
+        k1used = 0; k2used = 0; k3used = 0;
+        await supabase.from("app_settings").update({
+          twelvedata_key_1_used: 0,
+          twelvedata_key_2_used: 0,
+          twelvedata_key_3_used: 0,
+          twelvedata_key_reset_date: todayUTC,
+        }).eq("id", "singleton");
+      }
+      const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
+      for (const k of [1, 2, 3] as KeyIdx[]) {
+        if (used[k] >= threshold) keyState.exhausted.add(k);
+      }
+      // Re-derive active key if current is now over threshold.
+      if (used[keyState.active] >= threshold) {
+        const next = ([1, 2, 3] as KeyIdx[]).find(k => keys[k] && used[k] < threshold);
+        if (next) keyState.active = next;
+      }
+    } catch (e) {
+      console.warn("key threshold rotation check failed", e);
+    }
 
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
@@ -1946,6 +2007,7 @@ async function runScanJob(
       const hits         = blackoutHits(events, ccys, nowDate);
 
       // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
+      const adx15 = calcADX(d.c15);
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
@@ -1956,6 +2018,12 @@ async function runScanJob(
       for (const [name, raw] of setups) {
         if (!raw) {
           pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
+          continue;
+        }
+        // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)
+        if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
+            reason: `ADX ${adx15} < ${minADX} — ranging market` });
           continue;
         }
         if (DISABLED_SETUPS.has(raw.setup)) {
@@ -2203,6 +2271,20 @@ async function runScanJob(
       // No API calls made this run — read the current daily total.
       const { data: usage } = await supabase.from("api_usage").select("calls").eq("day", day).maybeSingle();
       newCalls = (usage?.calls as number) ?? 0;
+    }
+
+    // ── Persist per-key daily usage counters for threshold-based rotation ──
+    try {
+      const patch: Record<string, unknown> = {};
+      if (apiCallsByKey[1] > 0) patch.twelvedata_key_1_used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0) + apiCallsByKey[1];
+      if (apiCallsByKey[2] > 0) patch.twelvedata_key_2_used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0) + apiCallsByKey[2];
+      if (apiCallsByKey[3] > 0) patch.twelvedata_key_3_used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0) + apiCallsByKey[3];
+      if (Object.keys(patch).length > 0) {
+        patch.twelvedata_key_reset_date = new Date().toISOString().slice(0, 10);
+        await supabase.from("app_settings").update(patch).eq("id", "singleton");
+      }
+    } catch (e) {
+      console.warn("per-key usage counter update failed", e);
     }
 
     return {
