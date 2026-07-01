@@ -113,6 +113,11 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "veritas_min_conf"  && (typeof v !== "number" || v < 50  || v > 99)) continue;
     if (k === "veritas_min_rr"    && (typeof v !== "number" || v < 1   || v > 3)) continue;
     if (k === "metaapi_min_stop_points" && (typeof v !== "number" || v < 0 || v > 500)) continue;
+    if (k === "metaapi_trail_lock_r"    && (typeof v !== "number" || v < 0 || v > 1)) continue;
+    if (k === "metaapi_min_adx"         && (typeof v !== "number" || v < 0 || v > 50)) continue;
+    if (k === "twelvedata_key_threshold" && (typeof v !== "number" || !Number.isInteger(v) || v < 100 || v > 800)) continue;
+    if ((k === "twelvedata_key_1_used" || k === "twelvedata_key_2_used" || k === "twelvedata_key_3_used") && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100000)) continue;
+    if (k === "twelvedata_key_reset_date" && (typeof v !== "string" || v.length > 32)) continue;
     out[k] = v;
   }
   return out;
