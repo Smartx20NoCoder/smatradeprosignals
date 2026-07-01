@@ -2006,6 +2006,7 @@ async function runScanJob(
       const hits         = blackoutHits(events, ccys, nowDate);
 
       // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
+      const adx15 = calcADX(d.c15);
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
@@ -2016,6 +2017,12 @@ async function runScanJob(
       for (const [name, raw] of setups) {
         if (!raw) {
           pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
+          continue;
+        }
+        // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)
+        if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
+            reason: `ADX ${adx15} < ${minADX} — ranging market` });
           continue;
         }
         if (DISABLED_SETUPS.has(raw.setup)) {
