@@ -213,9 +213,18 @@ Deno.serve(async (req) => {
         if (!aOpen && bOpen && !s.metaapi_partial_closed) {
           let beOk = false;
           try {
+            const trailR   = Number((c as any)?.metaapi_trail_lock_r ?? 0.5);
+            const riskPerR = Math.abs(Number(s.entry) - Number(s.stop_loss));
+            const isLong   = String(s.direction ?? "").toLowerCase().includes("long")
+              || String(s.order_type ?? "").toLowerCase().includes("buy");
+            const lockedSL = trailR <= 0
+              ? Number(s.entry)
+              : (isLong
+                ? Number(s.entry) + riskPerR * trailR
+                : Number(s.entry) - riskPerR * trailR);
             const mod = await modifyPosition({
               region, accountId, token, positionId: pidB!,
-              stopLoss: Number(s.entry),
+              stopLoss: lockedSL,
               takeProfit: Number(s.tp2),
             });
             if (mod.ok) { beOk = true; breakevens++; }
