@@ -129,6 +129,9 @@ type AppSettings = {
   veritas_min_snr?: number;
   veritas_min_conf?: number;
   veritas_min_rr?: number;
+  metaapi_trail_lock_r?: number;
+  metaapi_min_adx?: number;
+  twelvedata_key_threshold?: number;
 };
 
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
