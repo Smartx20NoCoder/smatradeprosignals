@@ -130,6 +130,34 @@ function atr(c: Candle[], period = 14): number {
   const slice = trs.slice(-period);
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
+function calcADX(candles: Candle[], period = 14): number {
+  if (candles.length < period + 2) return 25;
+  const trArr: number[] = [];
+  const pDM: number[] = [];
+  const mDM: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].h, l = candles[i].l;
+    const ph = candles[i-1].h, pl = candles[i-1].l, pc = candles[i-1].c;
+    trArr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const up = h - ph, dn = pl - l;
+    pDM.push(up > dn && up > 0 ? up : 0);
+    mDM.push(dn > up && dn > 0 ? dn : 0);
+  }
+  function ws(arr: number[], p: number): number[] {
+    if (arr.length < p) return [0];
+    let s = arr.slice(0, p).reduce((a, b) => a + b, 0);
+    const out = [s];
+    for (let i = p; i < arr.length; i++) { s = s - s / p + arr[i]; out.push(s); }
+    return out;
+  }
+  const sTR = ws(trArr, period);
+  const diP = ws(pDM, period).map((v, i) => sTR[i] > 0 ? 100 * v / sTR[i] : 0);
+  const diM = ws(mDM, period).map((v, i) => sTR[i] > 0 ? 100 * v / sTR[i] : 0);
+  const dx  = diP.map((p, i) => {
+    const sum = p + diM[i];
+    return sum > 0 ? 100 * Math.abs(p - diM[i]) / sum : 0;
+  });
+  return +((ws(dx, period).at(-1) ?? 0).toFixed(1));
 function mfi(c: Candle[], period = 14): { value: number; series: number[] } {
   if (c.length < period + 2) return { value: 50, series: [] };
   const series: number[] = [];
