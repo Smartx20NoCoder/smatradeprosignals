@@ -35,7 +35,7 @@ const ALLOWED_KEYS = new Set([
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points","metaapi_trail_lock_r","metaapi_min_adx","twelvedata_key_threshold","twelvedata_key_1_used","twelvedata_key_2_used","twelvedata_key_3_used"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
