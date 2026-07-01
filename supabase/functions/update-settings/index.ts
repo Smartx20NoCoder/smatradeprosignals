@@ -26,6 +26,10 @@ const ALLOWED_KEYS = new Set([
   "veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",
   "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
   "metaapi_min_stop_points",
+  "metaapi_trail_lock_r", "metaapi_min_adx",
+  "twelvedata_key_threshold",
+  "twelvedata_key_1_used", "twelvedata_key_2_used", "twelvedata_key_3_used",
+  "twelvedata_key_reset_date",
 ]);
 
 
