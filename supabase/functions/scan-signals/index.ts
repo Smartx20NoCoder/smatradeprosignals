@@ -1802,7 +1802,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, twelvedata_key_threshold, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
@@ -1810,6 +1810,42 @@ async function runScanJob(
     const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
     const veritasMinRR     = Number((veritasCfgRow as any)?.veritas_min_rr     ?? 1.60);
+    const minADX           = Number((veritasCfgRow as any)?.metaapi_min_adx    ?? 20);
+
+    // ── TwelveData usage-threshold rotation: mark keys as exhausted when they
+    // hit the daily usage threshold. Counters reset at UTC midnight.
+    try {
+      const todayUTC   = new Date().toISOString().slice(0, 10);
+      const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
+      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
+      let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
+      let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
+      let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
+      if (resetDate !== todayUTC) {
+        k1used = 0; k2used = 0; k3used = 0;
+        await supabase.from("app_settings").update({
+          twelvedata_key_1_used: 0,
+          twelvedata_key_2_used: 0,
+          twelvedata_key_3_used: 0,
+          twelvedata_key_reset_date: todayUTC,
+        }).eq("id", "singleton");
+      }
+      const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
+      for (const k of [1, 2, 3] as KeyIdx[]) {
+        if (used[k] >= threshold) {
+          if (settings[`key${k}_exhausted_at` as keyof ActiveSettings] == null) {
+            (settings as any)[`key${k}_exhausted_at`] = new Date().toISOString();
+          }
+        }
+      }
+      // Re-derive active key if current is now over threshold.
+      if (used[settings.active_td_key] >= threshold) {
+        const next = ([1, 2, 3] as KeyIdx[]).find(k => keys[k] && used[k] < threshold);
+        if (next) settings.active_td_key = next;
+      }
+    } catch (e) {
+      console.warn("key threshold rotation check failed", e);
+    }
 
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
