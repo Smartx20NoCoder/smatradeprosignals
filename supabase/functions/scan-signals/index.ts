@@ -158,6 +158,7 @@ function calcADX(candles: Candle[], period = 14): number {
     return sum > 0 ? 100 * Math.abs(p - diM[i]) / sum : 0;
   });
   return +((ws(dx, period).at(-1) ?? 0).toFixed(1));
+}
 function mfi(c: Candle[], period = 14): { value: number; series: number[] } {
   if (c.length < period + 2) return { value: 50, series: [] };
   const series: number[] = [];
