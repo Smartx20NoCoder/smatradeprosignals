@@ -1862,6 +1862,54 @@ function MetaApiPanel({
 
       <div className="grid grid-cols-3 gap-2">
         <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Trail Lock-In (R)</div>
+          <input
+            type="number" min={0} max={1} step={0.05}
+            defaultValue={appSettings.metaapi_trail_lock_r ?? 0.5}
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              const v = Math.max(0, Math.min(1, n));
+              saveAppSettings({ metaapi_trail_lock_r: v });
+            }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          />
+          <div className="text-[10px] text-muted-foreground mt-1">After TP1, locks this fraction of 1R as profit on the runner. 0 = breakeven only. 0.5 = +0.5R.</div>
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min ADX (Trend Strength)</div>
+          <input
+            type="number" min={0} max={50} step={1}
+            defaultValue={appSettings.metaapi_min_adx ?? 20}
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              const v = Math.max(0, Math.min(50, Math.round(n)));
+              saveAppSettings({ metaapi_min_adx: v });
+            }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          />
+          <div className="text-[10px] text-muted-foreground mt-1">EMA Pullback + BOS Retest are skipped when 15M ADX &lt; this value. 0 disables filter. Recommended 20–25.</div>
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">API Key Switch Threshold</div>
+          <input
+            type="number" min={100} max={800} step={10}
+            defaultValue={appSettings.twelvedata_key_threshold ?? 750}
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              const v = Math.max(100, Math.min(800, Math.round(n)));
+              saveAppSettings({ twelvedata_key_threshold: v });
+            }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          />
+          <div className="text-[10px] text-muted-foreground mt-1">Daily calls per key before rotating K1 → K2 → K3. Resets midnight UTC.</div>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Open Trades</div>
           <input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
             onChange={(e) => saveAppSettings({ metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
