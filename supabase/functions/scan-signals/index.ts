@@ -1832,16 +1832,12 @@ async function runScanJob(
       }
       const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
       for (const k of [1, 2, 3] as KeyIdx[]) {
-        if (used[k] >= threshold) {
-          if (settings[`key${k}_exhausted_at` as keyof ActiveSettings] == null) {
-            (settings as any)[`key${k}_exhausted_at`] = new Date().toISOString();
-          }
-        }
+        if (used[k] >= threshold) keyState.exhausted.add(k);
       }
       // Re-derive active key if current is now over threshold.
-      if (used[settings.active_td_key] >= threshold) {
+      if (used[keyState.active] >= threshold) {
         const next = ([1, 2, 3] as KeyIdx[]).find(k => keys[k] && used[k] < threshold);
-        if (next) settings.active_td_key = next;
+        if (next) keyState.active = next;
       }
     } catch (e) {
       console.warn("key threshold rotation check failed", e);
