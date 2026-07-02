@@ -2189,14 +2189,24 @@ async function runScanJob(
     // signals are unaffected.
     const { data: cfgRowPre } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
     let cfg: any = cfgRowPre ?? null;
-    const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 70);
-    const minRR = Number((cfg as any)?.metaapi_min_rr ?? 2.0);
+    const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 71);
+    const minRR = Number((cfg as any)?.metaapi_min_rr ?? 1.8);
+    // Upstream quality gate — enforced regardless of auto_execute state.
+    // Skips insert, Telegram alert, and paper tracking for sub-threshold signals.
     const toInsert = dedupedInsert.filter(s => {
       const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
       // VERITAS uses its own UI-adjustable RR gate; all others use global minRR via SETUP_MIN_RR.
       const familyMinRR = setupBase === "VERITAS" ? veritasMinRR
         : (SETUP_MIN_RR[setupBase] ?? minRR);
-      return s.confidence >= minConf && s.rr >= familyMinRR;
+      if ((s.confidence ?? 0) < minConf) {
+        console.log(`[gate] ${s.pair} ${s.setup} blocked — conf ${s.confidence}% < ${minConf}%`);
+        return false;
+      }
+      if ((s.rr ?? 0) < familyMinRR) {
+        console.log(`[gate] ${s.pair} ${s.setup} blocked — RR ${s.rr} < ${familyMinRR}`);
+        return false;
+      }
+      return true;
     });
 
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
