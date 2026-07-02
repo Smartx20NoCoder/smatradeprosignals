@@ -1638,17 +1638,6 @@ const VERITAS_PAIRS = new Set([
   "XAU/USD", "BTC/USD", "ETH/USD",
 ]);
 
-// Setup-specific minimum R:R — VERITAS ATR-based TP gives 1.67 by design
-const SETUP_MIN_RR: Record<string, number> = {
-  "VERITAS": 1.60,
-  "QSS":     1.85,
-  "PRISM":   1.85,
-  "EMA":     1.85,
-  "BOS":     1.85,
-  "Session": 1.85,
-  "SMC":     1.85,
-  "CHOCH":   1.85,
-};
 
 // ATR validity ranges per pair (5M, in pips/points)
 const VERITAS_ATR_RANGE: Record<string, [number, number]> = {
@@ -2187,17 +2176,20 @@ async function runScanJob(
     // are NOT saved and NOT alerted (keeps signals tab + Telegram aligned with what
     // you'd trade manually). Only gates NEW signals; previously-saved paper-tracked
     // signals are unaffected.
-    const { data: cfgRowPre } = await supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-    let cfg: any = cfgRowPre ?? null;
-    const minConf = Number((cfg as any)?.metaapi_min_confidence ?? 71);
-    const minRR = Number((cfg as any)?.metaapi_min_rr ?? 1.8);
+    // Reuse the already-loaded settings object (no redundant DB read).
+    const cfg: any = settings;
+    const minConf = Number(cfg?.metaapi_min_confidence ?? 71);
+    const minRR = Number(cfg?.metaapi_min_rr ?? 1.8);
     // Upstream quality gate — enforced regardless of auto_execute state.
     // Skips insert, Telegram alert, and paper tracking for sub-threshold signals.
     const toInsert = dedupedInsert.filter(s => {
       const setupBase  = s.setup.split(" ")[0]; // "VERITAS", "QSS", "PRISM", "EMA", "BOS" etc.
-      // VERITAS uses its own UI-adjustable RR gate; all others use global minRR via SETUP_MIN_RR.
-      const familyMinRR = setupBase === "VERITAS" ? veritasMinRR
-        : (SETUP_MIN_RR[setupBase] ?? minRR);
+      // VERITAS uses its own DB-adjustable gate (veritas_min_rr).
+      // ALL other setups use the global metaapi_min_rr from app_settings.
+      // Nothing is hardcoded — everything flows from the DB.
+      const familyMinRR = setupBase === "VERITAS"
+        ? veritasMinRR   // already read from DB via veritas_min_rr
+        : minRR;         // metaapi_min_rr from app_settings
       if ((s.confidence ?? 0) < minConf) {
         console.log(`[gate] ${s.pair} ${s.setup} blocked — conf ${s.confidence}% < ${minConf}%`);
         return false;
