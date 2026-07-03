@@ -1372,6 +1372,9 @@ function SettingsPanel({
 
       <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
+      <ScanEngineControlsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+
 
 
       <div className="border border-border rounded bg-card p-4">
