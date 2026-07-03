@@ -2178,8 +2178,8 @@ async function runScanJob(
     // signals are unaffected.
     // Reuse the already-loaded settings object (no redundant DB read).
     const cfg: any = settings;
-    const minConf = Number(cfg?.metaapi_min_confidence ?? 71);
-    const minRR = Number(cfg?.metaapi_min_rr ?? 1.8);
+    const minConf = Number((veritasCfgRow as any)?.metaapi_min_confidence ?? cfg?.metaapi_min_confidence ?? 71);
+    const minRR = Number((veritasCfgRow as any)?.metaapi_min_rr ?? cfg?.metaapi_min_rr ?? 1.8);
     // Upstream quality gate — enforced regardless of auto_execute state.
     // Skips insert, Telegram alert, and paper tracking for sub-threshold signals.
     const toInsert = dedupedInsert.filter(s => {
