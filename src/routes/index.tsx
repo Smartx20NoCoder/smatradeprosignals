@@ -132,6 +132,8 @@ type AppSettings = {
   metaapi_trail_lock_r?: number;
   metaapi_min_adx?: number;
   twelvedata_key_threshold?: number;
+  metaapi_key_rotation_threshold?: number;
+  metaapi_min_stop_points?: number;
 };
 
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
