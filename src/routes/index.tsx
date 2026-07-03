@@ -1908,17 +1908,8 @@ function MetaApiPanel({
         </label>
       </div>
 
-      {/* ── VERITAS TUNING ─────────────────────────────────── */}
-      <div className="mt-2 border border-border rounded-lg p-4">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-          VERITAS Parameters
-        </p>
-        <p className="text-[11px] text-muted-foreground mb-3">
-          Controls SL/TP multipliers, Hurst gate, SNR floor and quality threshold specifically for VERITAS signals.
-          These override the global MIN R:R for VERITAS only.
-        </p>
-        <VeritasParamsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-      </div>
+
+
 
 
 
