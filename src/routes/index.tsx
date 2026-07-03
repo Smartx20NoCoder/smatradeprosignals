@@ -406,6 +406,12 @@ function ScalpEdge() {
       veritas_min_snr:   Number((cfg as any).veritas_min_snr   ?? 40),
       veritas_min_conf:  Number((cfg as any).veritas_min_conf  ?? 72),
       veritas_min_rr:    Number((cfg as any).veritas_min_rr    ?? 1.60),
+      metaapi_trail_lock_r:  (cfg as any).metaapi_trail_lock_r  != null ? Number((cfg as any).metaapi_trail_lock_r)  : undefined,
+      metaapi_min_adx:       (cfg as any).metaapi_min_adx       != null ? Number((cfg as any).metaapi_min_adx)       : undefined,
+      metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points) : undefined,
+      twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold) : undefined,
+      metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
+
 
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
