@@ -1807,7 +1807,7 @@ async function runScanJob(
     try {
       const todayUTC   = new Date().toISOString().slice(0, 10);
       const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
-      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
+      const threshold  = Number((veritasCfgRow as any)?.metaapi_key_rotation_threshold ?? 700);
       let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
       let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
       let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
