@@ -132,6 +132,8 @@ type AppSettings = {
   metaapi_trail_lock_r?: number;
   metaapi_min_adx?: number;
   twelvedata_key_threshold?: number;
+  metaapi_key_rotation_threshold?: number;
+  metaapi_min_stop_points?: number;
 };
 
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
@@ -404,6 +406,12 @@ function ScalpEdge() {
       veritas_min_snr:   Number((cfg as any).veritas_min_snr   ?? 40),
       veritas_min_conf:  Number((cfg as any).veritas_min_conf  ?? 72),
       veritas_min_rr:    Number((cfg as any).veritas_min_rr    ?? 1.60),
+      metaapi_trail_lock_r:  (cfg as any).metaapi_trail_lock_r  != null ? Number((cfg as any).metaapi_trail_lock_r)  : undefined,
+      metaapi_min_adx:       (cfg as any).metaapi_min_adx       != null ? Number((cfg as any).metaapi_min_adx)       : undefined,
+      metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points) : undefined,
+      twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold) : undefined,
+      metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
+
 
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
@@ -1364,6 +1372,9 @@ function SettingsPanel({
 
       <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
+      <ScanEngineControlsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+
 
 
       <div className="border border-border rounded bg-card p-4">
@@ -1513,7 +1524,203 @@ function VeritasParamsPanel({
   );
 }
 
+type ScanGateKey =
+  | "metaapi_min_confidence" | "metaapi_min_rr" | "metaapi_min_adx"
+  | "metaapi_trail_lock_r" | "twelvedata_key_threshold"
+  | "metaapi_risk_per_trade_pct" | "metaapi_min_lot" | "metaapi_max_lot"
+  | "metaapi_max_trades" | "metaapi_expiry_hours" | "metaapi_max_daily_loss_pct"
+  | "metaapi_min_stop_points"
+  | "veritas_sl_mult" | "veritas_tp_mult" | "veritas_min_hurst"
+  | "veritas_min_snr" | "veritas_min_conf" | "veritas_min_rr";
+
+function ScanEngineControlsPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const initial = useMemo<Record<ScanGateKey, number>>(() => ({
+    metaapi_min_confidence:      appSettings?.metaapi_min_confidence      ?? 82,
+    metaapi_min_rr:              appSettings?.metaapi_min_rr              ?? 2.0,
+    metaapi_min_adx:             appSettings?.metaapi_min_adx             ?? 20,
+    metaapi_trail_lock_r:        appSettings?.metaapi_trail_lock_r        ?? 0.5,
+    twelvedata_key_threshold:    appSettings?.twelvedata_key_threshold    ?? 700,
+    metaapi_risk_per_trade_pct:  appSettings?.metaapi_risk_per_trade_pct  ?? 3,
+    metaapi_min_lot:             appSettings?.metaapi_min_lot             ?? 0.1,
+    metaapi_max_lot:             appSettings?.metaapi_max_lot             ?? 1,
+    metaapi_max_trades:          appSettings?.metaapi_max_trades          ?? 5,
+    metaapi_expiry_hours:        appSettings?.metaapi_expiry_hours        ?? 12,
+    metaapi_max_daily_loss_pct:  appSettings?.metaapi_max_daily_loss_pct  ?? 50,
+    metaapi_min_stop_points:     appSettings?.metaapi_min_stop_points     ?? 0,
+    veritas_sl_mult:             appSettings?.veritas_sl_mult             ?? 1.5,
+    veritas_tp_mult:             appSettings?.veritas_tp_mult             ?? 2.5,
+    veritas_min_hurst:           appSettings?.veritas_min_hurst           ?? 0.55,
+    veritas_min_snr:             appSettings?.veritas_min_snr             ?? 40,
+    veritas_min_conf:            appSettings?.veritas_min_conf            ?? 72,
+    veritas_min_rr:              appSettings?.veritas_min_rr              ?? 1.60,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
+  const [scanGates, setScanGates] = useState<Record<ScanGateKey, number>>(initial);
+  const [savedFlash, setSavedFlash] = useState<ScanGateKey | null>(null);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (!appSettings) return;
+    setScanGates({
+      metaapi_min_confidence:      appSettings.metaapi_min_confidence      ?? 82,
+      metaapi_min_rr:              appSettings.metaapi_min_rr              ?? 2.0,
+      metaapi_min_adx:             appSettings.metaapi_min_adx             ?? 20,
+      metaapi_trail_lock_r:        appSettings.metaapi_trail_lock_r        ?? 0.5,
+      twelvedata_key_threshold:    appSettings.twelvedata_key_threshold    ?? 700,
+      metaapi_risk_per_trade_pct:  appSettings.metaapi_risk_per_trade_pct  ?? 3,
+      metaapi_min_lot:             appSettings.metaapi_min_lot             ?? 0.1,
+      metaapi_max_lot:             appSettings.metaapi_max_lot             ?? 1,
+      metaapi_max_trades:          appSettings.metaapi_max_trades          ?? 5,
+      metaapi_expiry_hours:        appSettings.metaapi_expiry_hours        ?? 12,
+      metaapi_max_daily_loss_pct:  appSettings.metaapi_max_daily_loss_pct  ?? 50,
+      metaapi_min_stop_points:     appSettings.metaapi_min_stop_points     ?? 0,
+      veritas_sl_mult:             appSettings.veritas_sl_mult             ?? 1.5,
+      veritas_tp_mult:             appSettings.veritas_tp_mult             ?? 2.5,
+      veritas_min_hurst:           appSettings.veritas_min_hurst           ?? 0.55,
+      veritas_min_snr:             appSettings.veritas_min_snr             ?? 40,
+      veritas_min_conf:            appSettings.veritas_min_conf            ?? 72,
+      veritas_min_rr:              appSettings.veritas_min_rr              ?? 1.60,
+    });
+  }, [appSettings]);
+
+  const saveGate = async (key: ScanGateKey, value: number) => {
+    if (!isFinite(value)) return;
+    setScanGates(prev => ({ ...prev, [key]: value }));
+    try {
+      await saveAppSettings({ [key]: value } as Partial<AppSettings>);
+      setSavedFlash(key);
+      setTimeout(() => {
+        setSavedFlash(cur => (cur === key ? null : cur));
+      }, 2000);
+    } catch { /* ignored — parent handles error */ }
+  };
+
+  type FieldDef = { key: ScanGateKey; label: string; min: number; max: number; step: number; hint?: string };
+  const group1: FieldDef[] = [
+    { key: "metaapi_min_confidence", label: "MIN CONFIDENCE (%)", min: 50, max: 99, step: 1,    hint: `Signals below this % are never saved or alerted. Currently: ${scanGates.metaapi_min_confidence}%` },
+    { key: "metaapi_min_rr",         label: "MIN R:R (GLOBAL)",   min: 1,  max: 4,  step: 0.05, hint: "VERITAS uses its own R:R gate below. All other setups use this value." },
+    { key: "metaapi_min_adx",        label: "MIN ADX (TREND)",    min: 0,  max: 50, step: 1,    hint: "EMA Pullback + BOS Retest skip when 15M ADX is below this. 0 = disabled." },
+    { key: "metaapi_trail_lock_r",   label: "TRAIL LOCK-IN (R)",  min: 0,  max: 1,  step: 0.05, hint: "After TP1 hit, Order B SL moves to entry + this fraction of 1R. 0 = breakeven only." },
+    { key: "twelvedata_key_threshold", label: "API KEY THRESHOLD", min: 100, max: 800, step: 50, hint: "Switch to next TwelveData key at this many daily calls. 700 = 100-call safety buffer." },
+  ];
+  const group2: FieldDef[] = [
+    { key: "metaapi_risk_per_trade_pct", label: "RISK PER TRADE (%)",   min: 0.1,  max: 10,  step: 0.1 },
+    { key: "metaapi_min_lot",            label: "MIN LOT",              min: 0.01, max: 1,   step: 0.01 },
+    { key: "metaapi_max_lot",            label: "MAX LOT",              min: 0.1,  max: 10,  step: 0.1 },
+    { key: "metaapi_max_trades",         label: "MAX OPEN TRADES",      min: 1,    max: 20,  step: 1 },
+    { key: "metaapi_expiry_hours",       label: "PENDING EXPIRY (HRS)", min: 1,    max: 72,  step: 1,  hint: "Pending limit/stop orders cancel after this." },
+    { key: "metaapi_max_daily_loss_pct", label: "MAX DAILY LOSS (%)",   min: 1,    max: 100, step: 1 },
+    { key: "metaapi_min_stop_points",    label: "MIN STOP DIST (PTS)",  min: 0,    max: 500, step: 1,  hint: "Blocks orders where SL is closer than this to entry. 0 = disabled. 25 = RoboForex XAU guard." },
+  ];
+  const group3: FieldDef[] = [
+    { key: "veritas_sl_mult",   label: "SL MULT (×ATR)",    min: 0.5,  max: 3,    step: 0.1,  hint: "Default 1.5" },
+    { key: "veritas_tp_mult",   label: "TP MULT (×ATR)",    min: 1,    max: 5,    step: 0.1,  hint: "3.0 → RR 2.0" },
+    { key: "veritas_min_hurst", label: "MIN HURST",         min: 0.50, max: 0.70, step: 0.01, hint: "0.57 recommended" },
+    { key: "veritas_min_snr",   label: "MIN SNR",           min: 20,   max: 80,   step: 5,    hint: "40–50 ideal" },
+    { key: "veritas_min_conf",  label: "MIN CONF (VERITAS)",min: 50,   max: 99,   step: 1,    hint: "72 floor" },
+    { key: "veritas_min_rr",    label: "MIN R:R (VERITAS)", min: 1,    max: 3,    step: 0.05, hint: "1.85 with TP=3×" },
+  ];
+
+  const renderField = (f: FieldDef) => {
+    const val = scanGates[f.key];
+    const flashing = savedFlash === f.key;
+    return (
+      <label key={f.key} className="text-xs relative">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{f.label}</div>
+          {flashing && (
+            <span className="text-[9px] uppercase tracking-wider text-bull font-bold">✓ saved</span>
+          )}
+        </div>
+        <input
+          type="number"
+          step={f.step} min={f.min} max={f.max}
+          className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          value={val}
+          onChange={e => {
+            const n = parseFloat(e.target.value);
+            if (isFinite(n)) setScanGates(p => ({ ...p, [f.key]: n }));
+          }}
+          onBlur={e => {
+            const n = Math.min(f.max, Math.max(f.min, parseFloat(e.target.value) || f.min));
+            saveGate(f.key, n);
+          }}
+        />
+        {f.hint && <div className="text-[10px] text-muted-foreground/70 mt-0.5">{f.hint}</div>}
+      </label>
+    );
+  };
+
+  const renderGroup = (title: string, helper: string, fields: FieldDef[]) => (
+    <div className="pt-3 mt-3 border-t border-border/60">
+      <div className="text-[11px] font-bold uppercase tracking-widest text-primary/90">{title}</div>
+      <div className="text-[10px] text-muted-foreground mb-2">{helper}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {fields.map(renderField)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-primary font-bold">Scan Engine Controls</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Every gate that affects scan-signals in one place. Changes take effect on the next scan cycle (within 15 min). No redeploy needed.
+          </div>
+        </div>
+        <span className={`text-muted-foreground text-sm transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+
+      {open && (
+        <>
+          {/* CURRENT LIVE VALUES status strip */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded bg-background/60 border border-border/60 text-[10px] font-mono text-muted-foreground">
+            <span>Conf gate: <span className="text-foreground">{scanGates.metaapi_min_confidence}%</span></span>
+            <span className="text-border">│</span>
+            <span>R:R gate: <span className="text-foreground">{scanGates.metaapi_min_rr}</span></span>
+            <span className="text-border">│</span>
+            <span>ADX filter: <span className="text-foreground">{scanGates.metaapi_min_adx}</span></span>
+            <span className="text-border">│</span>
+            <span>Trail: <span className="text-foreground">+{scanGates.metaapi_trail_lock_r}R</span></span>
+            <span className="text-border">│</span>
+            <span>Key threshold: <span className="text-foreground">{scanGates.twelvedata_key_threshold}/800</span></span>
+          </div>
+
+          {renderGroup(
+            "Signal Quality Gates",
+            "Applied in scan-signals before any signal is saved or alerted. Takes effect on next scan cycle.",
+            group1,
+          )}
+          {renderGroup(
+            "Risk & Execution Gates",
+            "Applied in metaapi-execute before placing orders.",
+            group2,
+          )}
+          {renderGroup(
+            "VERITAS Strategy Parameters",
+            "Controls VERITAS signal generation thresholds. Changes take effect on next scan cycle.",
+            group3,
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function MetaApiPanel({
+
   appSettings, saveAppSettings,
 }: {
   appSettings: AppSettings;
@@ -1862,36 +2069,6 @@ function MetaApiPanel({
 
       <div className="grid grid-cols-3 gap-2">
         <label className="text-xs">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Trail Lock-In (R)</div>
-          <input
-            type="number" min={0} max={1} step={0.05}
-            defaultValue={appSettings.metaapi_trail_lock_r ?? 0.5}
-            onBlur={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              const v = Math.max(0, Math.min(1, n));
-              saveAppSettings({ metaapi_trail_lock_r: v });
-            }}
-            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-          />
-          <div className="text-[10px] text-muted-foreground mt-1">After TP1, locks this fraction of 1R as profit on the runner. 0 = breakeven only. 0.5 = +0.5R.</div>
-        </label>
-        <label className="text-xs">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min ADX (Trend Strength)</div>
-          <input
-            type="number" min={0} max={50} step={1}
-            defaultValue={appSettings.metaapi_min_adx ?? 20}
-            onBlur={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              const v = Math.max(0, Math.min(50, Math.round(n)));
-              saveAppSettings({ metaapi_min_adx: v });
-            }}
-            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-          />
-          <div className="text-[10px] text-muted-foreground mt-1">EMA Pullback + BOS Retest are skipped when 15M ADX &lt; this value. 0 disables filter. Recommended 20–25.</div>
-        </label>
-        <label className="text-xs">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">API Key Switch Threshold</div>
           <input
             type="number" min={100} max={800} step={10}
@@ -1907,6 +2084,7 @@ function MetaApiPanel({
           <div className="text-[10px] text-muted-foreground mt-1">Daily calls per key before rotating K1 → K2 → K3. Resets midnight UTC.</div>
         </label>
       </div>
+
 
       <div className="grid grid-cols-3 gap-2">
         <label className="text-xs">
@@ -1929,17 +2107,8 @@ function MetaApiPanel({
         </label>
       </div>
 
-      {/* ── VERITAS TUNING ─────────────────────────────────── */}
-      <div className="mt-2 border border-border rounded-lg p-4">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-          VERITAS Parameters
-        </p>
-        <p className="text-[11px] text-muted-foreground mb-3">
-          Controls SL/TP multipliers, Hurst gate, SNR floor and quality threshold specifically for VERITAS signals.
-          These override the global MIN R:R for VERITAS only.
-        </p>
-        <VeritasParamsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-      </div>
+
+
 
 
 
