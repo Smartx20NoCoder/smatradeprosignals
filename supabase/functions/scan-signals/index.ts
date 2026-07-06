@@ -1792,7 +1792,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, twelvedata_key_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
@@ -1807,7 +1807,7 @@ async function runScanJob(
     try {
       const todayUTC   = new Date().toISOString().slice(0, 10);
       const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
-      const threshold  = Number((veritasCfgRow as any)?.metaapi_key_rotation_threshold ?? 700);
+      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
       let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
       let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
       let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
@@ -1822,11 +1822,11 @@ async function runScanJob(
       }
       const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
       for (const k of [1, 2, 3] as KeyIdx[]) {
-        if (used[k] >= threshold) keyState.exhausted.add(k);
+        if (keyState.configured.has(k) && used[k] >= threshold) keyState.exhausted.add(k);
       }
-      // Re-derive active key if current is now over threshold.
-      if (used[keyState.active] >= threshold) {
-        const next = ([1, 2, 3] as KeyIdx[]).find(k => keys[k] && used[k] < threshold);
+      // Re-derive active key if current is now over threshold or unconfigured.
+      if (!keyState.configured.has(keyState.active) || keyState.exhausted.has(keyState.active) || used[keyState.active] >= threshold) {
+        const next = ([1, 2, 3] as KeyIdx[]).find(k => keyState.configured.has(k) && !keyState.exhausted.has(k) && used[k] < threshold);
         if (next) keyState.active = next;
       }
     } catch (e) {
