@@ -1836,11 +1836,12 @@ async function runScanJob(
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
-    // Scan ALL pairs regardless of pair_auto_execute — that flag only gates
-    // whether metaapi-execute is called below. Signals are still generated
-    // and paper-tracked for disabled pairs.
+    const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
+    // pair_auto_execute is now a TRUE gate: disabled pairs are skipped entirely,
+    // before any candle fetch, regardless of the global auto_trade toggle.
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
+      .filter((p) => autoCfg[p] !== false)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
