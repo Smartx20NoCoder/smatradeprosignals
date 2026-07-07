@@ -2077,7 +2077,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
+          const isPausedV = setupAutoExec["VERITAS"] === false;
+          pairReport.checks.push({
+            setup: "VERITAS",
+            status: isPausedV ? "filtered" : "qualified",
+            direction: veritas.direction,
+            reason: isPausedV ? "VERITAS disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           veritasCandidates.push(veritas);
         }
       }
