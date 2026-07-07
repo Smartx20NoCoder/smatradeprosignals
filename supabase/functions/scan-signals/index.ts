@@ -2403,11 +2403,18 @@ Deno.serve(async (req) => {
           let result: any = { setup, pair, qualified: false, reason: "Unknown setup" };
           try {
             if (setup === "VERITAS") {
-              const sig = veritasSetup(pair, c5Arr, c15Arr, ss);
+              let c1mArr: Candle[] | null = null;
+              if (VERITAS_PAIRS.has(pair)) {
+                try {
+                  const f1m = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1m", td: "1min" }, 30, undefined, "manual");
+                  c1mArr = f1m.candles;
+                } catch { /* 1m fetch failure — VERITAS micro-confirm will correctly return null */ }
+              }
+              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, ss);
               result = sig
                 ? { setup, pair, qualified: true, signal: sig,
                     debug: `H=${sig.setup.match(/H=([\d.]+)/)?.[1] ?? "?"} SNR=${sig.mfi_score}` }
-                : { setup, pair, qualified: false, reason: "No VERITAS signal — check Hurst/TSI/SNR/VPT alignment" };
+                : { setup, pair, qualified: false, reason: "No VERITAS signal — check Hurst/TSI/SNR/VPT/1M-cross alignment" };
             } else if (setup === "QSS") {
               const sig = qssSetup(pair, c5Arr, c15Arr, c1hArr, ss);
               result = sig
