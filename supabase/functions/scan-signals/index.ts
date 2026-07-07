@@ -1807,7 +1807,7 @@ async function runScanJob(
     try {
       const todayUTC   = new Date().toISOString().slice(0, 10);
       const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
-      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
+      const threshold  = Number((veritasCfgRow as any)?.metaapi_key_rotation_threshold ?? 700);
       let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
       let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
       let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
@@ -1822,11 +1822,11 @@ async function runScanJob(
       }
       const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
       for (const k of [1, 2, 3] as KeyIdx[]) {
-        if (keyState.configured.has(k) && used[k] >= threshold) keyState.exhausted.add(k);
+        if (keyState.configured.includes(k) && used[k] >= threshold) keyState.exhausted.add(k);
       }
       // Re-derive active key if current is now over threshold or unconfigured.
-      if (!keyState.configured.has(keyState.active) || keyState.exhausted.has(keyState.active) || used[keyState.active] >= threshold) {
-        const next = ([1, 2, 3] as KeyIdx[]).find(k => keyState.configured.has(k) && !keyState.exhausted.has(k) && used[k] < threshold);
+      if (!keyState.configured.includes(keyState.active) || keyState.exhausted.has(keyState.active) || used[keyState.active] >= threshold) {
+        const next = ([1, 2, 3] as KeyIdx[]).find(k => keyState.configured.includes(k) && !keyState.exhausted.has(k) && used[k] < threshold);
         if (next) keyState.active = next;
       }
     } catch (e) {
