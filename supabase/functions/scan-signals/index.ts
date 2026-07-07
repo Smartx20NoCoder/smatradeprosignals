@@ -1558,6 +1558,19 @@ function estimateLot(
   return `~${(half * 2).toFixed(2)}`;
 }
 
+function setupFamilyOf(setupName: string): string {
+  const base = setupName.split("(")[0].split("+")[0].trim();
+  if (base.startsWith("VERITAS")) return "VERITAS";
+  if (base.startsWith("QSS")) return "QSS";
+  if (base.startsWith("PRISM")) return "PRISM";
+  if (base === "EMA Pullback") return "EMA Pullback";
+  if (base === "BOS Retest") return "BOS Retest";
+  if (base === "Session Range Break") return "Session Range Break";
+  if (base === "SMC OB/FVG" || base === "OB+FVG" || base === "Order Block") return "SMC OB/FVG";
+  if (base === "CHOCH") return "CHOCH";
+  return base;
+}
+
 async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -1569,6 +1582,7 @@ async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const isLive = String(cfg?.metaapi_active_mode ?? "demo") === "live";
   const isCentLive = Boolean(cfg?.metaapi_is_cent_account_live);
   for (const s of signals) {
+    if ((s as any).paper_only) continue; // setup disabled — paper track only, no alert
     const arrow = s.direction === "Long" ? "🟢 BUY" : "🔴 SELL";
     const session =
       s.session_score >= 90 ? "London/NY Overlap" :
