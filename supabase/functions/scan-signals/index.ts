@@ -2168,6 +2168,11 @@ async function runScanJob(
       ...mergedQss,
       ...mergedPrism,
     ];
+    // Tag paper_only based on setup_auto_execute — controls Telegram alert suppression.
+    for (const s of merged) {
+      const family = setupFamilyOf(s.setup);
+      (s as any).paper_only = setupAutoExec[family] === false;
+    }
     signals.push(...merged);
 
     // Diagnostic: tally outcomes across all setups so we can confirm from logs
