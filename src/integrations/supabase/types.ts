@@ -58,6 +58,7 @@ export type Database = {
           metaapi_is_cent_account: boolean | null
           metaapi_is_cent_account_live: boolean | null
           metaapi_keepalive_last: Json | null
+          metaapi_key_rotation_threshold: number | null
           metaapi_last_balance: number | null
           metaapi_last_balance_at: string | null
           metaapi_max_daily_loss_pct: number | null
@@ -111,6 +112,7 @@ export type Database = {
           metaapi_is_cent_account?: boolean | null
           metaapi_is_cent_account_live?: boolean | null
           metaapi_keepalive_last?: Json | null
+          metaapi_key_rotation_threshold?: number | null
           metaapi_last_balance?: number | null
           metaapi_last_balance_at?: string | null
           metaapi_max_daily_loss_pct?: number | null
@@ -164,6 +166,7 @@ export type Database = {
           metaapi_is_cent_account?: boolean | null
           metaapi_is_cent_account_live?: boolean | null
           metaapi_keepalive_last?: Json | null
+          metaapi_key_rotation_threshold?: number | null
           metaapi_last_balance?: number | null
           metaapi_last_balance_at?: string | null
           metaapi_max_daily_loss_pct?: number | null
@@ -328,6 +331,7 @@ export type Database = {
           outcome_r: number | null
           pair: string
           paper_hit: string | null
+          paper_only: boolean | null
           paper_status: string | null
           partial_close: boolean
           rr: number
@@ -371,6 +375,7 @@ export type Database = {
           outcome_r?: number | null
           pair: string
           paper_hit?: string | null
+          paper_only?: boolean | null
           paper_status?: string | null
           partial_close?: boolean
           rr: number
@@ -414,6 +419,7 @@ export type Database = {
           outcome_r?: number | null
           pair?: string
           paper_hit?: string | null
+          paper_only?: boolean | null
           paper_status?: string | null
           partial_close?: boolean
           rr?: number
