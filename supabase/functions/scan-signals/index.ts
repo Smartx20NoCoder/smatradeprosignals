@@ -1872,8 +1872,11 @@ async function runScanJob(
     }> = [];
 
     for (const p of skippedPairs) {
-      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason: "Market closed (weekend / Fri 22:00+ UTC)" }] });
-      emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
+      const reason = autoCfg[p] === false
+        ? "Pair disabled in Settings (pair_auto_execute)"
+        : "Market closed (weekend / Fri 22:00+ UTC)";
+      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason }] });
+      emit?.({ type: "pair_done", pair: p, status: "done", message: `Skipped: ${reason}` });
     }
 
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; c1m?: Candle[] | null; cached: boolean };
