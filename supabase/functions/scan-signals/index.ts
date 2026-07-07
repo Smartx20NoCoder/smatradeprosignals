@@ -1466,6 +1466,7 @@ type Signal = RawSignal & {
   session_score: number; confidence: number; news_flag: boolean;
   order_type: string; spread_pips: number;
   htf_bias: string; mfi_score: number; mfi_divergence: boolean;
+  paper_only?: boolean;
 };
 
 function qualifyAndScore(
