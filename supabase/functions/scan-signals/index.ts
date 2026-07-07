@@ -2122,7 +2122,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "PRISM", status: "qualified", direction: prism.direction });
+          const isPausedP = setupAutoExec["PRISM"] === false;
+          pairReport.checks.push({
+            setup: "PRISM",
+            status: isPausedP ? "filtered" : "qualified",
+            direction: prism.direction,
+            reason: isPausedP ? "PRISM disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           prismCandidates.push(prism);
         }
       }
