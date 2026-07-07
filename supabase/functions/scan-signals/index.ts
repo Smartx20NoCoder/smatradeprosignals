@@ -2099,7 +2099,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
+          const isPausedQ = setupAutoExec["QSS"] === false;
+          pairReport.checks.push({
+            setup: "QSS",
+            status: isPausedQ ? "filtered" : "qualified",
+            direction: qss.direction,
+            reason: isPausedQ ? "QSS disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           qssCandidates.push(qss);
         }
       }
