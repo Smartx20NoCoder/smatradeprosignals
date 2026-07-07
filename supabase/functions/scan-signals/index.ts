@@ -1466,6 +1466,7 @@ type Signal = RawSignal & {
   session_score: number; confidence: number; news_flag: boolean;
   order_type: string; spread_pips: number;
   htf_bias: string; mfi_score: number; mfi_divergence: boolean;
+  paper_only?: boolean;
 };
 
 function qualifyAndScore(
@@ -1557,6 +1558,19 @@ function estimateLot(
   return `~${(half * 2).toFixed(2)}`;
 }
 
+function setupFamilyOf(setupName: string): string {
+  const base = setupName.split("(")[0].split("+")[0].trim();
+  if (base.startsWith("VERITAS")) return "VERITAS";
+  if (base.startsWith("QSS")) return "QSS";
+  if (base.startsWith("PRISM")) return "PRISM";
+  if (base === "EMA Pullback") return "EMA Pullback";
+  if (base === "BOS Retest") return "BOS Retest";
+  if (base === "Session Range Break") return "Session Range Break";
+  if (base === "SMC OB/FVG" || base === "OB+FVG" || base === "Order Block") return "SMC OB/FVG";
+  if (base === "CHOCH") return "CHOCH";
+  return base;
+}
+
 async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -1568,6 +1582,7 @@ async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const isLive = String(cfg?.metaapi_active_mode ?? "demo") === "live";
   const isCentLive = Boolean(cfg?.metaapi_is_cent_account_live);
   for (const s of signals) {
+    if ((s as any).paper_only) continue; // setup disabled — paper track only, no alert
     const arrow = s.direction === "Long" ? "🟢 BUY" : "🔴 SELL";
     const session =
       s.session_score >= 90 ? "London/NY Overlap" :
@@ -1792,7 +1807,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, twelvedata_key_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
@@ -1807,7 +1822,7 @@ async function runScanJob(
     try {
       const todayUTC   = new Date().toISOString().slice(0, 10);
       const resetDate  = String((veritasCfgRow as any)?.twelvedata_key_reset_date ?? "");
-      const threshold  = Number((veritasCfgRow as any)?.twelvedata_key_threshold ?? 750);
+      const threshold  = Number((veritasCfgRow as any)?.metaapi_key_rotation_threshold ?? 700);
       let k1used = Number((veritasCfgRow as any)?.twelvedata_key_1_used ?? 0);
       let k2used = Number((veritasCfgRow as any)?.twelvedata_key_2_used ?? 0);
       let k3used = Number((veritasCfgRow as any)?.twelvedata_key_3_used ?? 0);
@@ -1822,11 +1837,11 @@ async function runScanJob(
       }
       const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
       for (const k of [1, 2, 3] as KeyIdx[]) {
-        if (keyState.configured.has(k) && used[k] >= threshold) keyState.exhausted.add(k);
+        if (keyState.configured.includes(k) && used[k] >= threshold) keyState.exhausted.add(k);
       }
       // Re-derive active key if current is now over threshold or unconfigured.
-      if (!keyState.configured.has(keyState.active) || keyState.exhausted.has(keyState.active) || used[keyState.active] >= threshold) {
-        const next = ([1, 2, 3] as KeyIdx[]).find(k => keyState.configured.has(k) && !keyState.exhausted.has(k) && used[k] < threshold);
+      if (!keyState.configured.includes(keyState.active) || keyState.exhausted.has(keyState.active) || used[keyState.active] >= threshold) {
+        const next = ([1, 2, 3] as KeyIdx[]).find(k => keyState.configured.includes(k) && !keyState.exhausted.has(k) && used[k] < threshold);
         if (next) keyState.active = next;
       }
     } catch (e) {
@@ -1836,11 +1851,12 @@ async function runScanJob(
     // Filter pair list for weekend / Friday-late: only BTC trades.
     // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
-    // Scan ALL pairs regardless of pair_auto_execute — that flag only gates
-    // whether metaapi-execute is called below. Signals are still generated
-    // and paper-tracked for disabled pairs.
+    const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
+    // pair_auto_execute is now a TRUE gate: disabled pairs are skipped entirely,
+    // before any candle fetch, regardless of the global auto_trade toggle.
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
+      .filter((p) => autoCfg[p] !== false)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
@@ -1871,8 +1887,11 @@ async function runScanJob(
     }> = [];
 
     for (const p of skippedPairs) {
-      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason: "Market closed (weekend / Fri 22:00+ UTC)" }] });
-      emit?.({ type: "pair_done", pair: p, status: "done", message: "Skipped: market closed" });
+      const reason = autoCfg[p] === false
+        ? "Pair disabled in Settings (pair_auto_execute)"
+        : "Market closed (weekend / Fri 22:00+ UTC)";
+      report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason }] });
+      emit?.({ type: "pair_done", pair: p, status: "done", message: `Skipped: ${reason}` });
     }
 
     type PD = { c5: Candle[]; c15: Candle[]; c1h: Candle[]; c1m?: Candle[] | null; cached: boolean };
@@ -2028,7 +2047,14 @@ async function runScanJob(
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
-          pairReport.checks.push({ setup: name, status: "qualified", direction: q.signal.direction });
+          const family = setupFamilyOf(name);
+          const isPaused = setupAutoExec[family] === false;
+          pairReport.checks.push({
+            setup: name,
+            status: isPaused ? "filtered" : "qualified",
+            direction: q.signal.direction,
+            reason: isPaused ? `${family} disabled in Settings — paper tracked only, no alert` : undefined,
+          });
           legacyCandidates.push(q.signal);
         }
       }
@@ -2051,7 +2077,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "VERITAS", status: "qualified", direction: veritas.direction });
+          const isPausedV = setupAutoExec["VERITAS"] === false;
+          pairReport.checks.push({
+            setup: "VERITAS",
+            status: isPausedV ? "filtered" : "qualified",
+            direction: veritas.direction,
+            reason: isPausedV ? "VERITAS disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           veritasCandidates.push(veritas);
         }
       }
@@ -2067,7 +2099,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "QSS", status: "qualified", direction: qss.direction });
+          const isPausedQ = setupAutoExec["QSS"] === false;
+          pairReport.checks.push({
+            setup: "QSS",
+            status: isPausedQ ? "filtered" : "qualified",
+            direction: qss.direction,
+            reason: isPausedQ ? "QSS disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           qssCandidates.push(qss);
         }
       }
@@ -2084,7 +2122,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          pairReport.checks.push({ setup: "PRISM", status: "qualified", direction: prism.direction });
+          const isPausedP = setupAutoExec["PRISM"] === false;
+          pairReport.checks.push({
+            setup: "PRISM",
+            status: isPausedP ? "filtered" : "qualified",
+            direction: prism.direction,
+            reason: isPausedP ? "PRISM disabled in Settings — paper tracked only, no alert" : undefined,
+          });
           prismCandidates.push(prism);
         }
       }
@@ -2124,6 +2168,11 @@ async function runScanJob(
       ...mergedQss,
       ...mergedPrism,
     ];
+    // Tag paper_only based on setup_auto_execute — controls Telegram alert suppression.
+    for (const s of merged) {
+      const family = setupFamilyOf(s.setup);
+      (s as any).paper_only = setupAutoExec[family] === false;
+    }
     signals.push(...merged);
 
     // Diagnostic: tally outcomes across all setups so we can confirm from logs
@@ -2354,11 +2403,18 @@ Deno.serve(async (req) => {
           let result: any = { setup, pair, qualified: false, reason: "Unknown setup" };
           try {
             if (setup === "VERITAS") {
-              const sig = veritasSetup(pair, c5Arr, c15Arr, ss);
+              let c1mArr: Candle[] | null = null;
+              if (VERITAS_PAIRS.has(pair)) {
+                try {
+                  const f1m = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1m", td: "1min" }, 30, undefined, "manual");
+                  c1mArr = f1m.candles;
+                } catch { /* 1m fetch failure — VERITAS micro-confirm will correctly return null */ }
+              }
+              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, ss);
               result = sig
                 ? { setup, pair, qualified: true, signal: sig,
                     debug: `H=${sig.setup.match(/H=([\d.]+)/)?.[1] ?? "?"} SNR=${sig.mfi_score}` }
-                : { setup, pair, qualified: false, reason: "No VERITAS signal — check Hurst/TSI/SNR/VPT alignment" };
+                : { setup, pair, qualified: false, reason: "No VERITAS signal — check Hurst/TSI/SNR/VPT/1M-cross alignment" };
             } else if (setup === "QSS") {
               const sig = qssSetup(pair, c5Arr, c15Arr, c1hArr, ss);
               result = sig
