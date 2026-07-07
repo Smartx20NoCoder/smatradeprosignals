@@ -2047,7 +2047,14 @@ async function runScanJob(
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
-          pairReport.checks.push({ setup: name, status: "qualified", direction: q.signal.direction });
+          const family = setupFamilyOf(name);
+          const isPaused = setupAutoExec[family] === false;
+          pairReport.checks.push({
+            setup: name,
+            status: isPaused ? "filtered" : "qualified",
+            direction: q.signal.direction,
+            reason: isPaused ? `${family} disabled in Settings — paper tracked only, no alert` : undefined,
+          });
           legacyCandidates.push(q.signal);
         }
       }
