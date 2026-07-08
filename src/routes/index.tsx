@@ -122,7 +122,7 @@ type AppSettings = {
   metaapi_live_configured: boolean;
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
-  scan_interval_minutes: 15 | 30;
+  scan_interval_minutes: 5 | 15 | 30;
   veritas_sl_mult?: number;
   veritas_tp_mult?: number;
   veritas_min_hurst?: number;
@@ -155,7 +155,7 @@ const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/U
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
-const CRON_INTERVAL_MIN = 15;
+const CRON_INTERVAL_MIN = 5;
 // Notional account size used by risk meter (1% per trade assumed)
 const NOTIONAL_ACCOUNT = 10000;
 const RISK_PER_TRADE_PCT = 1.0;
@@ -399,7 +399,7 @@ function ScalpEdge() {
       metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
       metaapi_live_configured: !!cfg.metaapi_live_configured,
       metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
-      scan_interval_minutes: (Number((cfg as any).scan_interval_minutes ?? 15) === 30 ? 30 : 15) as 15 | 30,
+      scan_interval_minutes: ([5, 15, 30].includes(Number((cfg as any).scan_interval_minutes)) ? Number((cfg as any).scan_interval_minutes) : 15) as 5 | 15 | 30,
       veritas_sl_mult:   Number((cfg as any).veritas_sl_mult   ?? 1.5),
       veritas_tp_mult:   Number((cfg as any).veritas_tp_mult   ?? 2.5),
       veritas_min_hurst: Number((cfg as any).veritas_min_hurst ?? 0.55),
@@ -679,9 +679,10 @@ function ScalpEdge() {
   const openSignals = signals.filter((s) => stageOf(s) === 2);
   const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
 
-  // Server cron projected budget (every 15 min, ~14 calls per latest-mode scan)
+  // Server cron projected budget — actual scans run at the app-level interval.
   const autoCallsPerScan = 14;
-  const scansPerDay = Math.floor((24 * 60) / CRON_INTERVAL_MIN);
+  const effectiveIntervalMin = appSettings.scan_interval_minutes || 15;
+  const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
   const projectedDaily = scansPerDay * autoCallsPerScan;
 
   // Risk exposure (open / In-Trade signals)
@@ -741,7 +742,7 @@ function ScalpEdge() {
           ) : (
             <>
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              SERVER CRON · every {CRON_INTERVAL_MIN}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+              SERVER CRON · every {effectiveIntervalMin}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
               {lastCron && (
                 <span className="text-muted-foreground normal-case">
                   · last cron {timeAgo(lastCron.started_at)} ago
@@ -1302,7 +1303,7 @@ function SettingsPanel({
             <div className="text-xs text-muted-foreground mt-0.5">
               {appSettings.paused
                 ? "Cron job exits immediately. No API calls are made."
-                : `Auto-scans every ${CRON_INTERVAL_MIN} minutes server-side.`}
+                : `Auto-scans every ${appSettings.scan_interval_minutes || 15} minutes server-side.`}
             </div>
           </div>
           <button
@@ -2445,7 +2446,7 @@ function HealthPanel({
   todaysEvents: EconomicEvent[];
 }) {
   void todaysEvents;
-  const scanInterval = appSettings.scan_interval_minutes === 30 ? 30 : 15;
+  const scanInterval = [5, 15, 30].includes(appSettings.scan_interval_minutes) ? appSettings.scan_interval_minutes : 15;
   // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
   const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
   const lastOk = lastCron?.ok ?? false;
@@ -2511,7 +2512,7 @@ function HealthPanel({
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
             <div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">Scan Interval</div>
             <div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
-              {([15, 30] as const).map((opt) => {
+              {([5, 15, 30] as const).map((opt) => {
                 const active = scanInterval === opt;
                 return (
                   <button
@@ -2525,7 +2526,7 @@ function HealthPanel({
                 );
               })}
             </div>
-            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">cron base {CRON_INTERVAL_MIN}m</div>
+            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">5 min = fastest, highest API usage · 15 min = balanced (recommended) · 30 min = lowest API usage</div>
           </div>
         </div>
       </div>

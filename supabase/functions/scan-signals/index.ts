@@ -1638,6 +1638,14 @@ type ActiveSettings = {
   key3_exhausted_at: string | null;
   pair_auto_execute: Record<string, boolean>;
   scan_interval_minutes: number;
+  setup_auto_execute: Record<string, boolean>;
+  metaapi_auto_trade: boolean;
+  metaapi_last_balance: number;
+  metaapi_risk_per_trade_pct: number;
+  metaapi_min_lot: number;
+  metaapi_max_lot: number;
+  metaapi_active_mode: string;
+  metaapi_is_cent_account_live: boolean;
 };
 
 // Core pairs always scanned regardless of pair_auto_execute setting.
@@ -1740,7 +1748,16 @@ async function loadSettings(supabase: ReturnType<typeof createClient>, configure
     key2_exhausted_at: stillExhausted[2],
     key3_exhausted_at: stillExhausted[3],
     pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
-    scan_interval_minutes: Number(data?.scan_interval_minutes ?? 15) === 30 ? 30 : 15,
+    scan_interval_minutes: [5, 15, 30].includes(Number(data?.scan_interval_minutes))
+      ? Number(data?.scan_interval_minutes) : 15,
+    setup_auto_execute: (data?.setup_auto_execute as Record<string, boolean>) ?? {},
+    metaapi_auto_trade: !!data?.metaapi_auto_trade,
+    metaapi_last_balance: Number(data?.metaapi_last_balance ?? 0),
+    metaapi_risk_per_trade_pct: Number(data?.metaapi_risk_per_trade_pct ?? 3),
+    metaapi_min_lot: Number(data?.metaapi_min_lot ?? 0.01),
+    metaapi_max_lot: Number(data?.metaapi_max_lot ?? 1),
+    metaapi_active_mode: String(data?.metaapi_active_mode ?? "demo"),
+    metaapi_is_cent_account_live: !!data?.metaapi_is_cent_account_live,
   };
 }
 
@@ -2510,15 +2527,17 @@ Deno.serve(async (req) => {
         await finalize(skipResult, true);
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      // 30-minute interval gate: cron fires every 15min at :02/:17/:32/:47.
-      // When interval=30, skip the :17 and :47 runs (minute % 30 in [15,19]).
-      if (settings.scan_interval_minutes === 30) {
-        const m = new Date().getUTCMinutes();
-        const modm = m % 30;
-        if (modm >= 15 && modm <= 19) {
-          const skipResult = { skipped: true, reason: "30min interval", new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
-          await finalize(skipResult, true);
-          return new Response(JSON.stringify({ ok: true, skipped: "30min interval" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // Interval gate: cron fires every 5min. Skip runs that don't align
+      // to the configured cadence (5/15/30 min).
+      {
+        const interval = settings.scan_interval_minutes;
+        if (interval > 5) {
+          const m = new Date().getUTCMinutes();
+          if (m % interval >= 5) {
+            const skipResult = { skipped: true, reason: `${interval}min interval`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+            await finalize(skipResult, true);
+            return new Response(JSON.stringify({ ok: true, skipped: `${interval}min interval` }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
         }
       }
       if (!isWithinTradingHours(new Date(), settings)) {
