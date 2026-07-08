@@ -679,9 +679,10 @@ function ScalpEdge() {
   const openSignals = signals.filter((s) => stageOf(s) === 2);
   const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
 
-  // Server cron projected budget (every 15 min, ~14 calls per latest-mode scan)
+  // Server cron projected budget — actual scans run at the app-level interval.
   const autoCallsPerScan = 14;
-  const scansPerDay = Math.floor((24 * 60) / CRON_INTERVAL_MIN);
+  const effectiveIntervalMin = appSettings.scan_interval_minutes || 15;
+  const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
   const projectedDaily = scansPerDay * autoCallsPerScan;
 
   // Risk exposure (open / In-Trade signals)
