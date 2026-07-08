@@ -1748,7 +1748,16 @@ async function loadSettings(supabase: ReturnType<typeof createClient>, configure
     key2_exhausted_at: stillExhausted[2],
     key3_exhausted_at: stillExhausted[3],
     pair_auto_execute: (data?.pair_auto_execute as Record<string, boolean>) ?? {},
-    scan_interval_minutes: Number(data?.scan_interval_minutes ?? 15) === 30 ? 30 : 15,
+    scan_interval_minutes: [5, 15, 30].includes(Number(data?.scan_interval_minutes))
+      ? Number(data?.scan_interval_minutes) : 15,
+    setup_auto_execute: (data?.setup_auto_execute as Record<string, boolean>) ?? {},
+    metaapi_auto_trade: !!data?.metaapi_auto_trade,
+    metaapi_last_balance: Number(data?.metaapi_last_balance ?? 0),
+    metaapi_risk_per_trade_pct: Number(data?.metaapi_risk_per_trade_pct ?? 3),
+    metaapi_min_lot: Number(data?.metaapi_min_lot ?? 0.01),
+    metaapi_max_lot: Number(data?.metaapi_max_lot ?? 1),
+    metaapi_active_mode: String(data?.metaapi_active_mode ?? "demo"),
+    metaapi_is_cent_account_live: !!data?.metaapi_is_cent_account_live,
   };
 }
 
