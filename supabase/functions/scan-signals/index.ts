@@ -1638,6 +1638,14 @@ type ActiveSettings = {
   key3_exhausted_at: string | null;
   pair_auto_execute: Record<string, boolean>;
   scan_interval_minutes: number;
+  setup_auto_execute: Record<string, boolean>;
+  metaapi_auto_trade: boolean;
+  metaapi_last_balance: number;
+  metaapi_risk_per_trade_pct: number;
+  metaapi_min_lot: number;
+  metaapi_max_lot: number;
+  metaapi_active_mode: string;
+  metaapi_is_cent_account_live: boolean;
 };
 
 // Core pairs always scanned regardless of pair_auto_execute setting.
