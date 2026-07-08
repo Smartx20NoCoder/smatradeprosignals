@@ -742,7 +742,7 @@ function ScalpEdge() {
           ) : (
             <>
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              SERVER CRON · every {CRON_INTERVAL_MIN}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+              SERVER CRON · every {effectiveIntervalMin}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
               {lastCron && (
                 <span className="text-muted-foreground normal-case">
                   · last cron {timeAgo(lastCron.started_at)} ago
