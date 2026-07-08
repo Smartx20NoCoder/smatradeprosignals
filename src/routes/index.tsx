@@ -2446,7 +2446,7 @@ function HealthPanel({
   todaysEvents: EconomicEvent[];
 }) {
   void todaysEvents;
-  const scanInterval = appSettings.scan_interval_minutes === 30 ? 30 : 15;
+  const scanInterval = [5, 15, 30].includes(appSettings.scan_interval_minutes) ? appSettings.scan_interval_minutes : 15;
   // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
   const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
   const lastOk = lastCron?.ok ?? false;
