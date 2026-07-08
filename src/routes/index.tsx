@@ -2512,7 +2512,7 @@ function HealthPanel({
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
             <div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">Scan Interval</div>
             <div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
-              {([15, 30] as const).map((opt) => {
+              {([5, 15, 30] as const).map((opt) => {
                 const active = scanInterval === opt;
                 return (
                   <button
@@ -2526,7 +2526,7 @@ function HealthPanel({
                 );
               })}
             </div>
-            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">cron base {CRON_INTERVAL_MIN}m</div>
+            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">5 min = fastest, highest API usage · 15 min = balanced (recommended) · 30 min = lowest API usage</div>
           </div>
         </div>
       </div>
