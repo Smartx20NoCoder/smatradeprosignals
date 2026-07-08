@@ -51,7 +51,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
         (typeof v !== "number" || v < 0 || v > 23 || !Number.isInteger(v))) continue;
     if (k === "active_td_key" && (typeof v !== "number" || ![1, 2, 3].includes(v))) continue;
     if ((k === "key1_exhausted_at" || k === "key2_exhausted_at" || k === "key3_exhausted_at") && v !== null && typeof v !== "string") continue;
-    if (k === "scan_interval_minutes" && (typeof v !== "number" || ![15, 30].includes(v))) continue;
+    if (k === "scan_interval_minutes" && (typeof v !== "number" || ![5, 15, 30].includes(v))) continue;
     if (k === "session_config" && (typeof v !== "object" || v === null)) continue;
     if (k === "metaapi_account_id" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
     if (k === "metaapi_region" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
