@@ -122,7 +122,7 @@ type AppSettings = {
   metaapi_live_configured: boolean;
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
-  scan_interval_minutes: 15 | 30;
+  scan_interval_minutes: 5 | 15 | 30;
   veritas_sl_mult?: number;
   veritas_tp_mult?: number;
   veritas_min_hurst?: number;
