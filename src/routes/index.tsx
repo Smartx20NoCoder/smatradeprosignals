@@ -155,7 +155,7 @@ const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/U
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
-const CRON_INTERVAL_MIN = 15;
+const CRON_INTERVAL_MIN = 5;
 // Notional account size used by risk meter (1% per trade assumed)
 const NOTIONAL_ACCOUNT = 10000;
 const RISK_PER_TRADE_PCT = 1.0;
