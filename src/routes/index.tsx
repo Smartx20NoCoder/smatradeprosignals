@@ -1303,7 +1303,7 @@ function SettingsPanel({
             <div className="text-xs text-muted-foreground mt-0.5">
               {appSettings.paused
                 ? "Cron job exits immediately. No API calls are made."
-                : `Auto-scans every ${CRON_INTERVAL_MIN} minutes server-side.`}
+                : `Auto-scans every ${appSettings.scan_interval_minutes || 15} minutes server-side.`}
             </div>
           </div>
           <button
