@@ -339,6 +339,9 @@ function ScalpEdge() {
   }
 
   async function loadHealth() {
+    const { data: runs } = await supabase.from("scan_runs")
+      .select("*").order("started_at", { ascending: false }).limit(20);
+    setScanRuns((runs as ScanRun[]) ?? []);
     const { data: cache } = await supabase.from("candle_cache")
       .select("pair, timeframe, fetched_at");
     setCacheRows((cache as CacheRow[]) ?? []);
@@ -3544,5 +3547,3 @@ function NewsPanel({
     </div>
   );
 }
-
-
