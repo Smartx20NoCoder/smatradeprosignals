@@ -86,6 +86,7 @@ type ScanRun = {
   ok: boolean;
 };
 type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type PriceHealthRow = { pair: string; timeframe: string; candle_count: number; last_close: string; fetched_at: string };
 type SessionWindow = { enabled: boolean; start: number; end: number };
 type SessionConfig = {
   scan_active_sessions_only: boolean;
@@ -252,6 +253,7 @@ function ScalpEdge() {
   const [soundOn, setSoundOn] = useState(true);
   const [scanRuns, setScanRuns] = useState<ScanRun[]>([]);
   const [cacheRows, setCacheRows] = useState<CacheRow[]>([]);
+  const [priceHealth, setPriceHealth] = useState<PriceHealthRow[]>([]);
 
   const lastSignalCountRef = useRef(0);
   const lastSeenSignalIdsRef = useRef<Set<string>>(new Set());
@@ -337,12 +339,12 @@ function ScalpEdge() {
   }
 
   async function loadHealth() {
-    const { data: runs } = await supabase.from("scan_runs")
-      .select("*").order("started_at", { ascending: false }).limit(20);
-    setScanRuns((runs as ScanRun[]) ?? []);
     const { data: cache } = await supabase.from("candle_cache")
       .select("pair, timeframe, fetched_at");
     setCacheRows((cache as CacheRow[]) ?? []);
+    const { data: priceRows } = await (supabase as any).from("candle_cache_health")
+      .select("pair, timeframe, candle_count, last_close, fetched_at");
+    setPriceHealth((priceRows as PriceHealthRow[]) ?? []);
     // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
     const { data: cfgRows } = await (supabase as any).rpc("get_app_settings_public");
     const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
@@ -483,7 +485,23 @@ function ScalpEdge() {
     })();
     // Poll the database every 30s for cron-created signals and health stats
     const t = setInterval(() => { loadSignals(); loadHealth(); }, 30000);
-    return () => clearInterval(t);
+    // Mobile browsers throttle/pause setInterval when the tab is backgrounded
+    // (e.g. switching to check TwelveData or Telegram). Force an immediate
+    // refresh the instant the tab becomes visible/focused again so the
+    // Health tab never shows stale, frozen numbers after switching apps.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadSignals();
+        loadHealth();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -853,6 +871,7 @@ function ScalpEdge() {
           <HealthPanel
             scanRuns={scanRuns}
             cacheRows={cacheRows}
+            priceHealth={priceHealth}
             budgetToday={budgetToday}
             budgetTodayKey1={budgetTodayKey1}
             budgetTodayKey2={budgetTodayKey2}
@@ -2430,11 +2449,12 @@ function RiskExposureWidget({
 }
 
 function HealthPanel({
-  scanRuns, cacheRows, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
+  scanRuns, cacheRows, priceHealth, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
   appSettings, saveAppSettings, todaysEvents,
 }: {
   scanRuns: ScanRun[];
   cacheRows: CacheRow[];
+  priceHealth: PriceHealthRow[];
   budgetToday: number;
   budgetTodayKey1: number;
   budgetTodayKey2: number;
@@ -2552,7 +2572,7 @@ function HealthPanel({
                   // 1m is only fetched for VERITAS pairs — hide for all others.
                   if (tf === "1m" && (!VERITAS_PAIRS_UI.has(p) || !at)) return null;
                   const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
-                  const ttl = tf === "1m" ? 3 : tf === "5m" ? 10 : tf === "15m" ? 15 : 60;
+                  const ttl = tf === "1m" ? 3 : tf === "5m" ? 4.5 : tf === "15m" ? 15 : 60;
                   const fresh = ageMin !== null && ageMin < ttl;
                   return (
                     <span key={tf} className="flex items-center gap-1">
@@ -2569,6 +2589,59 @@ function HealthPanel({
           })()}
         </div>
         <div className="text-[10px] text-muted-foreground mt-2">Pairs not scanned in the last 2 hours are hidden.</div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Price &amp; Candle Health (active pairs)</div>
+        <div className="space-y-1 text-xs font-mono">
+          {(() => {
+            const activePairs = PAIRS.filter((p) => appSettings.pair_auto_execute?.[p] !== false);
+            const byPair: Record<string, Record<string, PriceHealthRow>> = {};
+            for (const r of priceHealth) {
+              if (!byPair[r.pair]) byPair[r.pair] = {};
+              byPair[r.pair][r.timeframe] = r;
+            }
+            if (activePairs.length === 0) {
+              return <div className="text-muted-foreground">No pairs currently active.</div>;
+            }
+            return activePairs.map((p) => {
+              const row5m = byPair[p]?.["5m"];
+              const price = row5m ? Number(row5m.last_close) : null;
+              const priceStr = price === null ? "—"
+                : price >= 1000 ? price.toFixed(2)
+                : price >= 10 ? price.toFixed(4)
+                : price.toFixed(5);
+              return (
+                <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+                  <span className="font-bold w-20">{p}</span>
+                  <span className="w-24 text-foreground">{priceStr}</span>
+                  {(["1m", "5m", "15m", "1h"] as const).map((tf) => {
+                    const r = byPair[p]?.[tf];
+                    if (tf === "1m" && !VERITAS_PAIRS_UI.has(p)) return null;
+                    const ageMin = r ? (Date.now() - new Date(r.fetched_at).getTime()) / 60000 : null;
+                    const ttl = tf === "1m" ? 3 : tf === "5m" ? 4.5 : tf === "15m" ? 15 : 60;
+                    const fresh = ageMin !== null && ageMin < ttl;
+                    const count = r?.candle_count ?? 0;
+                    const minRequired = 65;
+                    const countLow = count > 0 && count < minRequired;
+                    return (
+                      <span key={tf} className="flex items-center gap-1">
+                        <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
+                        <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
+                          {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+                        </span>
+                        <span className={countLow ? "text-bear" : "text-muted-foreground"}>
+                          ({count || "—"})
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-2">Price from latest 5m close. Candle count in parentheses — red means below the ~65 minimum most strategies need.</div>
       </div>
 
       <div className="border border-border rounded bg-card p-4">
