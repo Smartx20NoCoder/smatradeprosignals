@@ -33,7 +33,7 @@ const TFS = [
   { label: "15m", td: "15min" },
   { label: "1h", td: "1h" },
 ];
-const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 3, "5m": 4.5, "15m": 15, "1h": 60 };
+const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 4.2, "5m": 4.5, "15m": 14.5, "1h": 59.5 };
 const DEFAULT_CACHE_TTL_MIN = 4.8;
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
