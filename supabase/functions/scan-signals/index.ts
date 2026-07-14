@@ -1,7 +1,7 @@
 // ScalpEdge scan engine v3
 // 7 pairs (XAU/USD + BTC/USD replace GBP/CHF + USD/CHF), 5 setups, 1H HTF bias filter,
 // MFI confirmation, spread cushion. Every individual TwelveData call is serialized
-// with an ~8s gap and pair+timeframe candle data is cached for at least 10 minutes.
+// with an ~7.8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
@@ -36,8 +36,10 @@ const TFS = [
 const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 3, "5m": 4.5, "15m": 15, "1h": 60 };
 const DEFAULT_CACHE_TTL_MIN = 15;
 const DAILY_BUDGET = 800;
-// Spacing between every individual TwelveData request: 8.2s → safely under 8/min.
-const API_CALL_SPACING_MS = 4500;
+// Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
+// safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
+// silently exceeding the limit despite the stale comment claiming otherwise.)
+const API_CALL_SPACING_MS = 7800;
 const RATE_LIMIT_RETRY_MS = 60_000;
 const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
