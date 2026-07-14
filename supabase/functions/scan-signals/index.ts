@@ -40,7 +40,7 @@ const DAILY_BUDGET = 800;
 // safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
 // silently exceeding the limit despite the stale comment claiming otherwise.)
 const API_CALL_SPACING_MS = 7800;
-const RATE_LIMIT_RETRY_MS = 90_000;
+const RATE_LIMIT_RETRY_MS = 60_000;
 const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
 let lastTwelveDataCallStartedAt = 0;
@@ -230,17 +230,44 @@ function newsFlag(dUTC: Date, pair: string): boolean {
 }
 
 // ---------- Data fetch ----------
-async function throttledTwelveDataFetch(url: string, emit?: ProgressEmitter, context?: { pair: string; timeframe: string }): Promise<Response> {
-  const run = async () => {
-    const waitMs = Math.max(0, API_CALL_SPACING_MS - (Date.now() - lastTwelveDataCallStartedAt));
+async function throttledTwelveDataFetch(
+  url: string, 
+  emit?: ProgressEmitter, 
+  context?: { pair: string; timeframe: string }
+): Promise<Response> {
+  
+  // Wrap the logic in an executable closure so it evaluates timestamps dynamically at execution time
+  const run = async (): Promise<Response> => {
+    const now = Date.now();
+    const timeSinceLastCall = now - lastTwelveDataCallStartedAt;
+    const waitMs = Math.max(0, API_CALL_SPACING_MS - timeSinceLastCall);
+
     if (waitMs > 0) {
-      emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "waiting", message: `Waiting ${Math.ceil(waitMs / 1000)}s for rate limit slot` });
-      await delay(waitMs);
+      emit?.({ 
+        type: "progress", 
+        pair: context?.pair ?? "", 
+        timeframe: context?.timeframe, 
+        status: "waiting", 
+        message: `Waiting ${Math.ceil(waitMs / 1000)}s for rate limit slot` 
+      });
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
+
+    // Capture the absolute start time right before sending the HTTP request
     lastTwelveDataCallStartedAt = Date.now();
-    emit?.({ type: "progress", pair: context?.pair ?? "", timeframe: context?.timeframe, status: "fetching", message: `Fetching ${context?.pair ?? "market"} ${context?.timeframe ?? "candles"}` });
+    
+    emit?.({ 
+      type: "progress", 
+      pair: context?.pair ?? "", 
+      timeframe: context?.timeframe, 
+      status: "fetching", 
+      message: `Fetching ${context?.pair ?? "market"} ${context?.timeframe ?? "candles"}` 
+    });
+    
     return fetch(url);
   };
+
+  // Chain sequentially. Catch rejections so one broken pair doesn't freeze the app engine
   const next = twelveDataQueue.then(run, run);
   twelveDataQueue = next.then(() => undefined, () => undefined);
   return next;
@@ -255,7 +282,6 @@ type KeyState = {
 };
 
 function nextAvailableKey(state: KeyState): KeyIdx | null {
-  // Find next non-exhausted configured key, starting after the current active one.
   const order = state.configured;
   if (order.length === 0) return null;
   const startIdx = order.indexOf(state.active);
@@ -275,73 +301,130 @@ async function fetchCandles(
   outputSize: number,
   emit?: ProgressEmitter,
   source: string = "manual",
+  retryAttempt = 0 // Track retries within this fetch lifecycle
 ): Promise<{ candles: Candle[]; usedApi: number; usedKey: KeyIdx; cached: boolean }> {
+  
   const keyIdx: KeyIdx = state.active;
   const { data: cached } = await supabase
     .from("candle_cache").select("candles, fetched_at")
     .eq("pair", pair).eq("timeframe", tf.label).maybeSingle();
+  
   const ttlMin = CACHE_TTL_MIN_BY_TF[tf.label] ?? DEFAULT_CACHE_TTL_MIN;
-  if (cached) {
+  
+  // 1. Cache Check
+  if (cached && cached.fetched_at) {
     const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
     if (ageMin < ttlMin) {
       emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Cached (${ageMin.toFixed(1)}m / ${ttlMin}m TTL)` });
       return { candles: cached.candles as Candle[], usedApi: 0, usedKey: keyIdx, cached: true };
     }
   }
+  
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "fetching", message: `Fetching fresh (TTL ${ttlMin}m, key #${state.active})` });
 
-  // No retries within a single execution. On 429, mark key exhausted, rotate, and skip pair.
+  // 2. Build URL with currently active key
   const fetchKey: KeyIdx = state.active;
   const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
-  const r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
-  let usedApi = 1;
+  const url = `https://twelvedata.com{encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
+  
+  let r: Response;
+  try {
+    r = await throttledTwelveDataFetch(url, emit, { pair, timeframe: tf.label });
+  } catch (err) {
+    const errorObj = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    (errorObj as any).usedApi = 0;
+    (errorObj as any).usedKey = fetchKey;
+    throw errorObj;
+  }
 
+  // 3. Handle 429 Rate Limits / Daily Blocks from HTTP Headers
   if (r.status === 429) {
-    // Mark current key as exhausted for this cycle and rotate to next available.
     state.exhausted.add(fetchKey);
     const nxt = nextAvailableKey(state);
+    
+    // Scenario A: You have another API key configured to failover to
     if (nxt && nxt !== fetchKey) {
       state.active = nxt;
-      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — rotating to Key ${nxt}` });
-    } else {
-      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — no other keys available` });
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — rotating to Key ${nxt} instantly.` });
+      // Instantly retry the fetch using the fresh rotated key
+      return fetchCandles(supabase, keys, state, pair, tf, outputSize, emit, source, retryAttempt);
+    } 
+    
+    // Scenario B: No keys left, but we have minutely retry attempts remaining
+    if (retryAttempt < MAX_429_RETRIES) {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — Waiting ${RATE_LIMIT_RETRY_MS / 1000}s for cool-down (Attempt ${retryAttempt + 1}/${MAX_429_RETRIES})` });
+      
+      // Enforce the rate limit cooldown sleep period
+      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_RETRY_MS));
+      
+      // Clear exhausted map for the next try loop round
+      state.exhausted.clear();
+      lastTwelveDataCallStartedAt = Date.now();
+      
+      return fetchCandles(supabase, keys, state, pair, tf, outputSize, emit, source, retryAttempt + 1);
     }
-    const msg = `TwelveData 429 — using stale cache for ${pair}`;
-    console.log(msg);
+
+    // Scenario C: Total failure, drop back to stale cache fallback safely
+    emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} 429 — Exhausted all retries. Falling back to stale cache.` });
     if (cached) {
-      // The HTTP request was sent (and counted by TwelveData), so count it locally too.
       return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
     }
-    // No cache available — skip this pair this cycle. Still counts as an API call.
-    const err = new Error(`429 no cache: ${pair}`);
+    
+    const err = new Error(`429 no cache available for: ${pair}`);
     (err as any).usedApi = 1;
     (err as any).usedKey = fetchKey;
     throw err;
   }
 
-  if (!r) {
-    // No HTTP request was actually completed — do not count.
-    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
-    (err as any).usedApi = 0;
-    (err as any).usedKey = fetchKey;
-    throw err;
-  }
+  // 4. Handle JSON Payloads & Catch Hidden "200 OK" Quota Limit Errors
   const j = await r.json().catch(() => ({}));
+
+  // Detect TwelveData hidden errors (Daily budget met or key issues) inside a 200/other status response
+  const apiErrorMessage = j.message || "";
+  const isQuotaExhausted = 
+    j.code === 429 || 
+    apiErrorMessage.toLowerCase().includes("limit reached") || 
+    apiErrorMessage.toLowerCase().includes("credits") ||
+    apiErrorMessage.toLowerCase().includes("quota");
+
+  if (isQuotaExhausted) {
+    state.exhausted.add(fetchKey);
+    const nxt = nextAvailableKey(state);
+
+    if (nxt && nxt !== fetchKey) {
+      state.active = nxt;
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Daily Quota hit on Key ${fetchKey} — Auto-switching to Key ${nxt}!` });
+      // Instantly call again with the new active key, skipping any delays
+      return fetchCandles(supabase, keys, state, pair, tf, outputSize, emit, source, retryAttempt);
+    } else {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "rate_limited", message: `Key ${fetchKey} exhausted daily quota — No alternative keys available!` });
+      if (cached) {
+        return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
+      }
+      const err = new Error(`Quota exhausted and no cache available for: ${pair}`);
+      (err as any).usedApi = 1; 
+      (err as any).usedKey = fetchKey; 
+      throw err;
+    }
+  }
+
+  // Check for normal malformed payloads
   if (!j.values || !Array.isArray(j.values)) {
     console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
-    // HTTP call was sent (non-429) — count it even though the body was unusable.
-    const err = new Error(`Failed to fetch candles for ${pair} ${tf.label}`);
+    const err = new Error(`Failed to parse candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 1;
     (err as any).usedKey = fetchKey;
     throw err;
   }
+
+  // 5. Format & Merge Cached Data
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
     o: +v.open, h: +v.high, l: +v.low, c: +v.close,
     v: v.volume ? +v.volume : undefined,
   })).reverse();
+
   if (cached) {
     const prev = cached.candles as Candle[];
     const merged = [...prev];
@@ -356,12 +439,15 @@ async function fetchCandles(
     merged.sort((a, b) => a.t - b.t);
     fresh = merged.slice(-200);
   }
+
+  // 6. Persist to Cache Database Table
   await supabase.from("candle_cache").upsert(
     { pair, timeframe: tf.label, candles: fresh, fetched_at: new Date().toISOString() },
     { onConflict: "pair,timeframe" },
   );
+
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${state.active})` });
-  return { candles: fresh, usedApi, usedKey: fetchKey, cached: false };
+  return { candles: fresh, usedApi: 1, usedKey: fetchKey, cached: false };
 }
 
 // ---------- Setups ----------
