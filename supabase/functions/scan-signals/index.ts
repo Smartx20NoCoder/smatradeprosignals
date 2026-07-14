@@ -34,13 +34,13 @@ const TFS = [
   { label: "1h", td: "1h" },
 ];
 const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 3, "5m": 4.5, "15m": 15, "1h": 60 };
-const DEFAULT_CACHE_TTL_MIN = 15;
+const DEFAULT_CACHE_TTL_MIN = 4.8;
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
 // safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
 // silently exceeding the limit despite the stale comment claiming otherwise.)
 const API_CALL_SPACING_MS = 7800;
-const RATE_LIMIT_RETRY_MS = 60_000;
+const RATE_LIMIT_RETRY_MS = 90_000;
 const MAX_429_RETRIES = 2;
 let twelveDataQueue: Promise<void> = Promise.resolve();
 let lastTwelveDataCallStartedAt = 0;
