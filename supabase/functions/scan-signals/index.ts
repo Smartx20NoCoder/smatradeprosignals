@@ -33,8 +33,8 @@ const TFS = [
   { label: "15m", td: "15min" },
   { label: "1h", td: "1h" },
 ];
-const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 4.2, "5m": 4.5, "15m": 14.5, "1h": 59.5 };
-const DEFAULT_CACHE_TTL_MIN = 4.8;
+const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 4.5, "5m": 4.5, "15m": 14.5, "1h": 59.5 };
+const DEFAULT_CACHE_TTL_MIN = 4.5;
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
 // safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
@@ -2040,6 +2040,15 @@ async function runScanJob(
           twelvedata_key_3_used: 0,
           twelvedata_key_reset_date: todayUTC,
         }).eq("id", "singleton");
+        // Keep the in-memory snapshot in sync — otherwise the persist-block
+        // near the end of this function reads the stale pre-reset values
+        // from veritasCfgRow and writes them straight back, silently
+        // undoing this reset within the same scan cycle.
+        if (veritasCfgRow) {
+          (veritasCfgRow as any).twelvedata_key_1_used = 0;
+          (veritasCfgRow as any).twelvedata_key_2_used = 0;
+          (veritasCfgRow as any).twelvedata_key_3_used = 0;
+        }
       }
       const used: Record<KeyIdx, number> = { 1: k1used, 2: k2used, 3: k3used };
       for (const k of [1, 2, 3] as KeyIdx[]) {
