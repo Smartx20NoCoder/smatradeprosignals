@@ -325,7 +325,7 @@ async function fetchCandles(
   // 2. Build URL with currently active key
   const fetchKey: KeyIdx = state.active;
   const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
-  const url = `https://twelvedata.com{encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   
   let r: Response;
   try {
@@ -449,107 +449,6 @@ async function fetchCandles(
   emit?.({ type: "progress", pair, timeframe: tf.label, status: "done", message: `Fetched and cached (key #${state.active})` });
   return { candles: fresh, usedApi: 1, usedKey: fetchKey, cached: false };
 }
-
-// ---------- Timeframe Selection & Execution Engine ----------
-async function executeScheduledScan(supabase: any, keys: any, state: any, emit?: ProgressEmitter) {
-  const now = new Date();
-  const minute = now.getMinutes();
-  
-  console.log(`[Scan Triggered via Cron] Server Clock Time: ${now.toISOString()}`);
-
-  // Base Rule: Every 5 minutes requires a fresh 5m timeframe check
-  const timeframesToScan = [
-    { label: "5m", td: "5min" }
-  ];
-
-  // Rule 2: If the minute is clean on 15m intervals (0, 15, 30, 45) -> Add 15m
-  if (minute % 15 === 0) {
-    timeframesToScan.push({ label: "15m", td: "15min" });
-  }
-
-  // Rule 3: If the minute is 0 (Top of the hour clock strike) -> Add 1h
-  if (minute === 0) {
-    timeframesToScan.push({ label: "1h", td: "1h" });
-  }
-
-  // Reset exhausted keys tracker array at the beginning of each automated cron run
-  state.exhausted.clear();
-
-  const scanPromises: Promise<any>[] = [];
-
-  // Parallel pipeline construction: Queue them all concurrently to be queued via the sequential throttler
-  for (const pair of PAIRS) {
-    for (const tf of timeframesToScan) {
-      const targetOutputSize = tf.label === "1h" ? 48 : 200; // Optimize payload bounds dynamically
-      
-      const p = fetchCandles(supabase, keys, state, pair, tf, targetOutputSize, emit)
-        .then((res) => {
-          if (!res.cached) {
-            console.log(`[Fresh Data Processed] ${pair} ${tf.label} collected on Key #${res.usedKey}`);
-          }
-        })
-        .catch((err) => console.error(`[Execution Error Stack] ${pair} ${tf.label}:`, err.message));
-      
-      scanPromises.push(p);
-    }
-  }
-
-  // CRITICAL STEP FOR SERVERLESS ENVIRONMENT: Prevent function exit until execution queue pipeline resolves entirely
-  await Promise.all(scanPromises);
-  console.log("[Scan Loop Terminated] All tasks successfully processed.");
-}
-
-// ---------- Main Deno Server / Edge Function Handler ----------
-Deno.serve(async (req) => {
-  // Handle CORS options preflight safely
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  try {
-    // 1. Authenticate Request
-    const authError = await checkInternalAuth(req);
-    if (authError) return authError;
-
-    // 2. Initialize Supabase Connection Instance
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // 3. Construct Key States
-    const keys: KeySet = {
-      1: Deno.env.get("TWELVEDATA_API_KEY_1"),
-      2: Deno.env.get("TWELVEDATA_API_KEY_2"),
-      3: Deno.env.get("TWELVEDATA_API_KEY_3"),
-    };
-
-    const configured: KeyIdx[] = [];
-    if (keys[1]) configured.push(1);
-    if (keys[2]) configured.push(2);
-    if (keys[3]) configured.push(3);
-
-    const state: KeyState = {
-      active: configured[0] ?? 1,
-      configured,
-      exhausted: new Set<KeyIdx>(),
-    };
-
-    // 4. Trigger the Time-Synchronized Calculation Pipeline
-    await executeScheduledScan(supabase, keys, state);
-
-    return new Response(JSON.stringify({ success: true, message: "Scan loop completed smoothly" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
-    });
-
-  } catch (globalError: any) {
-    console.error("[Fatal Runtime Error Exception]", globalError);
-    return new Response(JSON.stringify({ error: globalError.message }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500,
-    });
-  }
-});
 
 // ---------- Setups ----------
 type RawSignal = {
