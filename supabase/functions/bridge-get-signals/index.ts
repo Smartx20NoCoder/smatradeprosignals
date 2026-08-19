@@ -1,6 +1,11 @@
 // Bridge polling endpoint — called by the ScalpEdge Bridge MT4 EA on a timer.
-// Returns qualifying, not-yet-executed signals for the bridge-handled pairs
-// (GBP/USD, XAU/USD by default — configurable via app_settings.bridge_pairs).
+// Returns:
+//   - risk: the LIVE settings-page risk/lot config, sent every poll so the EA's
+//     lot sizing always matches what's configured in Settings rather than a
+//     static value baked into the EA's own inputs (same "single source of truth"
+//     principle already used for SL/TP/trail sizing on the MT4 side).
+//   - signals: qualifying, not-yet-executed signals for the bridge-handled pairs
+//     (GBP/USD, XAU/USD by default — configurable via app_settings.bridge_pairs).
 // Also records a heartbeat (bridge_last_seen) so metaapi-execute knows whether
 // to defer to the bridge or fall back to MetaAPI execution.
 //
@@ -10,8 +15,7 @@
 // on every subsequent poll so the EA can keep re-checking price against it,
 // until it either fills (EA calls bridge-report-execution) or expires (this
 // endpoint marks it "failed" and stops returning it once bridge_claim_expiry_min
-// has elapsed since it was claimed — the next scan will generate a fresh signal,
-// same philosophy as every other expiry/staleness check in this codebase).
+// has elapsed since it was claimed).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkSecret, corsHeaders, safeError } from "../_shared/metaapi.ts";
 
@@ -36,8 +40,22 @@ Deno.serve(async (req) => {
       .update({ bridge_last_seen: new Date().toISOString() })
       .eq("id", "singleton");
 
+    // Live risk/lot config — sent every poll so the EA never trades on a stale
+    // local copy of these values if Settings gets changed.
+    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+    const isLive = mode === "live";
+    const isCentAccount = isLive
+      ? Boolean(c?.metaapi_is_cent_account_live)
+      : Boolean(c?.metaapi_is_cent_account);
+    const risk = {
+      risk_pct: Number(c?.metaapi_risk_per_trade_pct ?? 2),
+      min_lot: Number(c?.metaapi_min_lot ?? 0.10),
+      max_lot: Number(c?.metaapi_max_lot ?? 0.50),
+      is_cent_account: isCentAccount,
+    };
+
     if (!c.metaapi_auto_trade) {
-      return new Response(JSON.stringify({ ok: true, signals: [] }), {
+      return new Response(JSON.stringify({ ok: true, risk, signals: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -120,7 +138,7 @@ Deno.serve(async (req) => {
     }
 
     const signals = [...(alreadyClaimed ?? []), ...freshClaimed];
-    return new Response(JSON.stringify({ ok: true, signals }), {
+    return new Response(JSON.stringify({ ok: true, risk, signals }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
