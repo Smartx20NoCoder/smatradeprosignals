@@ -1,6 +1,10 @@
-// Executes a MetaApi order for a given signal id as TWO half-lot orders:
-//   - Order A: closes at TP1
-//   - Order B: runner to TP2 (sync moves SL to BE once A closes)
+// Executes a MetaApi order for a given signal id as a SINGLE order:
+//   - One position, full risk-sized lot (previously split 50/50 across two orders).
+//   - stop_loss = signal's stop loss at entry, take_profit = signal's tp2 (final target,
+//     acts as an outer safety cap — the trade is expected to usually exit via the trail).
+//   - Ongoing trail management (stepped R-multiple ratchet) happens in metaapi-sync,
+//     which now moves this position's SL forward every sync cycle instead of doing a
+//     one-time breakeven jump keyed off a second order closing at TP1.
 // Adds risk gates: max concurrent trades, daily loss limit, pending-order expiry.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -152,15 +156,11 @@ Deno.serve(async (req) => {
       });
     }
 
-
-
-
-
     // Concurrent trades gate — count active open positions only (pending orders have no risk yet).
     const { count: activeCount } = await supabase
       .from("signals")
       .select("id", { count: "exact", head: true })
-      .in("metaapi_execution_status", ["filled", "partial"]);
+      .eq("metaapi_execution_status", "filled");
     if ((activeCount ?? 0) >= maxTrades) {
       const msg = `max concurrent trades reached (${activeCount}/${maxTrades})`;
       await markFailed(supabase, signal_id, msg);
@@ -168,7 +168,6 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
 
     const health = await getAccountInfo({ region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken });
     if (!health.ok) {
@@ -288,13 +287,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const orderBStopLoss = Number(s.stop_loss);
-
     const mid = ((priceRes.bid ?? 0) + (priceRes.ask ?? 0)) / 2;
     // For pending orders, broker validates SL from entry price not current market
     const isPending = picked.kind === "limit" || picked.kind === "stop";
     const stopReference = isPending ? Number(s.entry) : mid;
-    const referencePrice = stopReference;
     const slDistance = Math.abs(stopReference - Number(s.stop_loss));
     const slSym = pairToSymbol(s.pair, "");
     const brokerMinSL = slSym.includes("XAU") ? 1.5
@@ -309,7 +305,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // % risk-based lot sizing
+    // % risk-based lot sizing — SINGLE ORDER now carries the FULL per-trade risk budget
+    // (previously this was split 50/50 across Order A + Order B).
     const accountBalance = (health.data as any)?.balance ?? 100;
     const riskPct = Number(c?.metaapi_risk_per_trade_pct ?? 2) / 100;
     const minLot = Number(c?.metaapi_min_lot ?? 0.01);
@@ -335,28 +332,25 @@ Deno.serve(async (req) => {
       : 0.10) * centMultiplier;
 
     const slPoints = Math.abs(Number(s.entry) - Number(s.stop_loss));
-    const targetRiskDollars = accountBalance * riskPct; // total risk across both half-lots
-    const halfRiskDollars = targetRiskDollars / 2; // per order
+    const targetRiskDollars = accountBalance * riskPct; // full per-trade risk — one order now carries all of it
 
     let rawLot = slPoints > 0
-      ? halfRiskDollars / (slPoints * pointValuePer001Lot * 100)
-      : fallbackLot / 2;
+      ? targetRiskDollars / (slPoints * pointValuePer001Lot * 100)
+      : fallbackLot;
 
-// Broker lot step rules — round DOWN to nearest valid step (never round up, never over-risk)
-const isBTCGroup = sym.includes("BTC") || sym.includes("ETH");
-const isXRPGroup = sym.includes("XRP");
-const lotStep = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.01;
-const lotMin  = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.10;
+    // Broker lot step rules — round DOWN to nearest valid step (never round up, never over-risk)
+    const isBTCGroup = sym.includes("BTC") || sym.includes("ETH");
+    const isXRPGroup = sym.includes("XRP");
+    const lotStep = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.01;
+    const lotMin  = isBTCGroup ? 0.1 : isXRPGroup ? 1.0 : 0.10;
 
-// Round DOWN to nearest step, then clamp between min and half of maxLot
-let halfLot = Math.floor(rawLot / lotStep) * lotStep;
-halfLot = Math.max(lotMin, Math.min(maxLot / 2, halfLot));
-halfLot = Math.round(halfLot * 1000) / 1000; // clean floating point
-
-    const lot = halfLot * 2; // total for reference only — orders use halfLot each
+    // Round DOWN to nearest step, then clamp between min and max
+    let lot = Math.floor(rawLot / lotStep) * lotStep;
+    lot = Math.max(lotMin, Math.min(maxLot, lot));
+    lot = Math.round(lot * 1000) / 1000; // clean floating point
 
     // Safety gate: if even minimum lot risks more than 2× target, block the trade
-    const minLotRisk = (slPoints * pointValuePer001Lot * 100) * minLot * 2;
+    const minLotRisk = (slPoints * pointValuePer001Lot * 100) * minLot;
     const maxAllowedRisk = targetRiskDollars * 2; // allow 2× tolerance before blocking
     if (minLotRisk > maxAllowedRisk) {
       const msg = `Min lot risk $${minLotRisk.toFixed(2)} exceeds max allowed $${maxAllowedRisk.toFixed(2)} for this SL width — trade skipped`;
@@ -375,70 +369,41 @@ halfLot = Math.round(halfLot * 1000) / 1000; // clean floating point
       metaapi_execution_error: null,
     }).eq("id", signal_id);
 
-    // Order A — closes at TP1
-    const orderA = await placeOrder({
+    // Single order — full lot, initial SL from the signal, TP = tp2 (final target) as a
+    // circuit-breaker cap. From here, metaapi-sync ratchets the SL forward on a stepped
+    // R-multiple trail once price clears metaapi_trail_activate_r — same continuous-trail
+    // philosophy as the MT4 EA. No separate runner order, no partial-close step.
+    const order = await placeOrder({
       region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken,
       actionType: picked.action,
-      symbol, volume: halfLot,
+      symbol, volume: lot,
       openPrice: picked.openPrice,
       stopLoss: Number(s.stop_loss),
-      takeProfit: Number(s.tp1),
-      comment: `sig ${String(signal_id).slice(0, 8)} A`,
-      expiration,
-    });
-    if (!orderA.ok) {
-      await markFailed(supabase, signal_id, orderA.error ?? "order A failed");
-      return safeError(orderA.error ?? "order A failed", 500);
-    }
-
-    // Order B — runner to TP2
-    const orderB = await placeOrder({
-      region: effectiveRegion, accountId: effectiveAccountId, token: effectiveToken,
-      actionType: picked.action,
-      symbol, volume: halfLot,
-      openPrice: picked.openPrice,
-      stopLoss: orderBStopLoss,
       takeProfit: Number(s.tp2),
-      comment: `sig ${String(signal_id).slice(0, 8)} B`,
+      comment: `sig ${String(signal_id).slice(0, 8)}`,
       expiration,
     });
-    if (!orderB.ok) {
-      try {
-        const tradeUrl = `https://mt-client-api-v1.${effectiveRegion}.agiliumtrade.ai/users/current/accounts/${effectiveAccountId}/trade`;
-        const headers = { "Content-Type": "application/json", "auth-token": effectiveToken! };
-        if (orderA.data?.positionId) {
-          await fetch(tradeUrl, { method: "POST", headers,
-            body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: orderA.data.positionId }) });
-        } else if (orderA.data?.orderId) {
-          await fetch(tradeUrl, { method: "POST", headers,
-            body: JSON.stringify({ actionType: "ORDER_CANCEL", orderId: orderA.data.orderId }) });
-        }
-      } catch (e) { console.error("Order A cleanup failed", e); }
-      await markFailed(supabase, signal_id, orderB.error ?? "order B failed");
-      return safeError(orderB.error ?? "order B failed", 500);
+    if (!order.ok) {
+      await markFailed(supabase, signal_id, order.error ?? "order failed");
+      return safeError(order.error ?? "order failed", 500);
     }
 
-    const aFilled = !!orderA.data?.positionId;
-    const bFilled = !!orderB.data?.positionId;
-    const bothFilled = aFilled && bFilled;
+    const filled = !!order.data?.positionId;
 
     await supabase.from("signals").update({
-      metaapi_order_id: orderA.data?.orderId ?? orderA.data?.positionId ?? null,
-      metaapi_position_id: orderA.data?.positionId ?? null,
-      metaapi_order_id_b: orderB.data?.orderId ?? orderB.data?.positionId ?? null,
-      metaapi_position_id_b: orderB.data?.positionId ?? null,
+      metaapi_order_id: order.data?.orderId ?? order.data?.positionId ?? null,
+      metaapi_position_id: order.data?.positionId ?? null,
       metaapi_executed_lot: lot,
       metaapi_order_type: picked.kind,
-      metaapi_execution_status: bothFilled ? "filled" : "order_pending",
+      metaapi_execution_status: filled ? "filled" : "order_pending",
       metaapi_execution_error: null,
       executed_at: new Date().toISOString(),
-      status: bothFilled ? "executed" : "pending",
+      status: filled ? "executed" : "pending",
     }).eq("id", signal_id);
 
     return new Response(JSON.stringify({
       ok: true, kind: picked.kind,
-      a: { positionId: orderA.data?.positionId, orderId: orderA.data?.orderId },
-      b: { positionId: orderB.data?.positionId, orderId: orderB.data?.orderId },
+      positionId: order.data?.positionId, orderId: order.data?.orderId,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("metaapi-execute error", e);
