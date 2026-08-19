@@ -3,8 +3,15 @@
 //   - stop_loss = signal's stop loss at entry, take_profit = signal's tp2 (final target,
 //     acts as an outer safety cap — the trade is expected to usually exit via the trail).
 //   - Ongoing trail management (stepped R-multiple ratchet) happens in metaapi-sync,
-//     which now moves this position's SL forward every sync cycle instead of doing a
-//     one-time breakeven jump keyed off a second order closing at TP1.
+//     which moves this position's SL forward every sync cycle.
+//
+// BRIDGE FALLBACK: for pairs the ScalpEdge Bridge EA handles (app_settings.bridge_pairs,
+// default GBP/USD + XAU/USD), this function defers to the bridge while it's alive and a
+// signal is still within its claim window (app_settings.bridge_claim_grace_sec) — the
+// bridge gets first attempt since it trades for free off the VPS. If the bridge is
+// offline (no heartbeat) or the claim window has passed, MetaAPI executes as normal —
+// no manual switch needed either way.
+//
 // Adds risk gates: max concurrent trades, daily loss limit, pending-order expiry.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -58,7 +65,17 @@ Deno.serve(async (req) => {
       supabase.from("app_settings").select("*").eq("id", "singleton").maybeSingle(),
     ]);
     if (!signal) return safeError("signal not found", 404);
-    if (!force_retry && ((signal as any).metaapi_position_id || (signal as any).metaapi_order_id)) {
+
+    const c: any = cfg ?? {};
+    const s: any = signal;
+
+    // Blocking-status check — covers normal already-executed signals AND signals
+    // the bridge has claimed (bridge_claimed has no position/order id yet, so the
+    // old id-only check wouldn't have caught it).
+    const blockingStatuses = ["bridge_claimed", "pending", "order_pending", "filled", "closed"];
+    const alreadyHandled = blockingStatuses.includes(String(s.metaapi_execution_status ?? ""))
+      || !!s.metaapi_position_id || !!s.metaapi_order_id;
+    if (!force_retry && alreadyHandled) {
       return new Response(JSON.stringify({ ok: true, skipped: "already executed" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -71,7 +88,23 @@ Deno.serve(async (req) => {
       }).eq("id", signal_id);
     }
 
-    const c: any = cfg ?? {};
+    // Defer to the bridge EA for its pairs while it's alive and the signal is still
+    // within its claim window. Quiet defer (no markFailed) — this is expected, not
+    // an error, and the same trigger that called us will naturally re-check later.
+    if (!force_retry) {
+      const bridgePairs: string[] = Array.isArray(c.bridge_pairs) && c.bridge_pairs.length > 0
+        ? c.bridge_pairs : ["GBP/USD", "XAU/USD"];
+      const bridgeGraceSec = Number(c.bridge_claim_grace_sec ?? 90);
+      const bridgeLastSeenMs = c.bridge_last_seen ? new Date(c.bridge_last_seen).getTime() : 0;
+      const bridgeAlive = (Date.now() - bridgeLastSeenMs) < bridgeGraceSec * 1000;
+      const signalAgeSec = (Date.now() - new Date(s.created_at).getTime()) / 1000;
+      if (bridgePairs.includes(String(s.pair)) && bridgeAlive && signalAgeSec < bridgeGraceSec) {
+        return new Response(JSON.stringify({ ok: false, reason: "deferring to bridge EA (active, within claim window)" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const autoTrade = !!c.metaapi_auto_trade;
     const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
     const isLive = mode === "live";
@@ -112,7 +145,6 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const s: any = signal;
     if (Number(s.confidence) < minConf || Number(s.rr) < minRR) {
       const msg = `Signal below threshold: confidence=${s.confidence}% (min=${minConf}%), RR=${s.rr} (min=${minRR}). Raise thresholds in settings or this signal no longer qualifies.`;
       await markFailed(supabase, signal_id, msg);
@@ -395,6 +427,7 @@ Deno.serve(async (req) => {
       metaapi_position_id: order.data?.positionId ?? null,
       metaapi_executed_lot: lot,
       metaapi_order_type: picked.kind,
+      metaapi_execution_channel: "metaapi",
       metaapi_execution_status: filled ? "filled" : "order_pending",
       metaapi_execution_error: null,
       executed_at: new Date().toISOString(),
