@@ -1,9 +1,15 @@
 // Bridge polling endpoint — called by the ScalpEdge Bridge MT4 EA on a timer.
 // Returns:
+//   - scanning_active: mirrors scan-signals' own isWithinTradingHours()/paused check
+//     (same session_config + trading_hours_start_utc/end_utc fields, same interpretation).
+//     When false, the app has stopped scanning for new signals — the EA uses this to
+//     force-close any open bridge positions, same "Hard EOD Stop" pattern already
+//     proven in AdaptiveSupertrend.mq4's ForceCloseHour. Kept in sync manually with
+//     scan-signals.ts's isWithinTradingHours() — if that logic changes there, mirror
+//     the change here too.
 //   - risk: the LIVE settings-page risk/lot config, sent every poll so the EA's
 //     lot sizing always matches what's configured in Settings rather than a
-//     static value baked into the EA's own inputs (same "single source of truth"
-//     principle already used for SL/TP/trail sizing on the MT4 side).
+//     static value baked into the EA's own inputs.
 //   - signals: qualifying, not-yet-executed signals for the bridge-handled pairs
 //     (GBP/USD, XAU/USD by default — configurable via app_settings.bridge_pairs).
 // Also records a heartbeat (bridge_last_seen) so metaapi-execute knows whether
@@ -18,6 +24,43 @@
 // has elapsed since it was claimed).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkSecret, corsHeaders, safeError } from "../_shared/metaapi.ts";
+
+// ── Trading-hours check — mirrored from scan-signals.ts's isWithinTradingHours() ──
+type SessionWindow = { enabled: boolean; start: number; end: number };
+type SessionConfig = {
+  scan_active_sessions_only: boolean;
+  sessions: { london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow };
+  custom_overrides: Record<string, { start: number; end: number } | null>;
+};
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  scan_active_sessions_only: false,
+  sessions: {
+    london: { enabled: true, start: 7, end: 16 },
+    ny:     { enabled: true, start: 12, end: 21 },
+    tokyo:  { enabled: true, start: 0, end: 9 },
+    sydney: { enabled: true, start: 22, end: 7 },
+  },
+  custom_overrides: {},
+};
+function hourInWindow(h: number, start: number, end: number): boolean {
+  return start <= end ? (h >= start && h < end) : (h >= start || h < end);
+}
+function isWithinTradingHours(d: Date, c: any): boolean {
+  const h = d.getUTCHours();
+  const dow = String(d.getUTCDay());
+  const cfg: SessionConfig = (c?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG;
+  const override = cfg.custom_overrides?.[dow];
+  if (override && typeof override.start === "number" && typeof override.end === "number") {
+    return hourInWindow(h, override.start, override.end);
+  }
+  if (cfg.scan_active_sessions_only) {
+    const ss = cfg.sessions ?? DEFAULT_SESSION_CONFIG.sessions;
+    return Object.values(ss).some((w) => w.enabled && hourInWindow(h, w.start, w.end));
+  }
+  const start = Number(c?.trading_hours_start_utc ?? 1);
+  const end = Number(c?.trading_hours_end_utc ?? 20);
+  return hourInWindow(h, start, end);
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -40,6 +83,10 @@ Deno.serve(async (req) => {
       .update({ bridge_last_seen: new Date().toISOString() })
       .eq("id", "singleton");
 
+    // Scanning-active flag — paused toggle OR outside trading hours both mean
+    // "the app has stopped looking for new signals right now."
+    const scanningActive = !c.paused && isWithinTradingHours(new Date(), c);
+
     // Live risk/lot config — sent every poll so the EA never trades on a stale
     // local copy of these values if Settings gets changed.
     const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
@@ -55,7 +102,7 @@ Deno.serve(async (req) => {
     };
 
     if (!c.metaapi_auto_trade) {
-      return new Response(JSON.stringify({ ok: true, risk, signals: [] }), {
+      return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -87,17 +134,14 @@ Deno.serve(async (req) => {
       }).in("id", staleClaims.map((r: any) => r.id));
     }
 
-    // Already-claimed, still-open signals — keep returning these every poll
-    // until they fill or expire, so the EA can keep re-checking price.
+    // Don't hand out NEW claims once scanning has stopped — only keep tracking
+    // claims already in flight so they can still fill or expire cleanly.
     const { data: alreadyClaimed } = await supabase
       .from("signals")
       .select("id, pair, direction, order_type, entry, stop_loss, tp2")
       .eq("metaapi_execution_status", "bridge_claimed")
       .in("pair", bridgePairs);
 
-    // Fresh, qualifying, unclaimed signals — same gates as metaapi-execute
-    // (confidence, RR, pair/setup toggles). Broker-specific checks (SL distance,
-    // live price proximity) are the EA's job once it has a live quote.
     const { count: activeCount } = await supabase
       .from("signals")
       .select("id", { count: "exact", head: true })
@@ -105,7 +149,7 @@ Deno.serve(async (req) => {
     const roomForMore = (activeCount ?? 0) < maxTrades;
 
     const freshClaimed: any[] = [];
-    if (roomForMore) {
+    if (roomForMore && scanningActive) {
       const { data: candidates } = await supabase
         .from("signals")
         .select("id, pair, direction, order_type, entry, stop_loss, tp2, confidence, rr, setup")
@@ -138,7 +182,7 @@ Deno.serve(async (req) => {
     }
 
     const signals = [...(alreadyClaimed ?? []), ...freshClaimed];
-    return new Response(JSON.stringify({ ok: true, risk, signals }), {
+    return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
