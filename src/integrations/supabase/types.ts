@@ -436,7 +436,33 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      candle_cache_health: {
+        Row: {
+          candle_count: number | null
+          fetched_at: string | null
+          last_candle_time: number | null
+          last_close: number | null
+          pair: string | null
+          timeframe: string | null
+        }
+        Insert: {
+          candle_count?: never
+          fetched_at?: string | null
+          last_candle_time?: never
+          last_close?: never
+          pair?: string | null
+          timeframe?: string | null
+        }
+        Update: {
+          candle_count?: never
+          fetched_at?: string | null
+          last_candle_time?: never
+          last_close?: never
+          pair?: string | null
+          timeframe?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_app_settings_public: {
