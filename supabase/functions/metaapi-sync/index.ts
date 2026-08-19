@@ -1,7 +1,9 @@
-// Syncs MetaApi state back to signals for the two-order (A=TP1, B=TP2) model.
-// - When Order A closes (TP1 hit) → mark partial, move B's SL to entry (breakeven).
-// - When Order B also closes → reconcile final PnL (sum of both positions' deals).
-// - If both are gone before TP1 was tagged → SL hit on both.
+// Syncs MetaApi state back to signals for the SINGLE-ORDER model.
+// - While the position is open: run a continuous stepped R-multiple trail (never
+//   loosens the stop, ratchets it forward one step behind live progress). Same
+//   philosophy as the MT4 EA's trail — just no second "runner" order to manage.
+// - When the position closes: reconcile final PnL and classify the outcome by the
+//   R-multiple the close price actually reached (not a fixed TP1/TP2 split anymore).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   checkSecret,
@@ -14,6 +16,59 @@ import {
   pairToSymbol,
   safeError,
 } from "../_shared/metaapi.ts";
+
+// Continuous single-order trailing stop — steps the SL forward every sync cycle.
+// Mirrors the MT4 EA's stepped-ratchet trail: never loosens, locks in R progressively
+// instead of jumping straight to a fixed floor. Returns true if the SL was moved.
+async function applyTrail(params: {
+  supabase: any; region: string; accountId: string; token: string; suffix: string;
+  s: any; pid: string; livePos: any; trailStepR: number; trailActivateR: number;
+}): Promise<boolean> {
+  const { supabase, region, accountId, token, suffix, s, pid, livePos, trailStepR, trailActivateR } = params;
+  const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
+  if (risk <= 0 || trailStepR <= 0) return false;
+
+  const isLong = String(s.direction ?? "").toLowerCase().includes("long")
+    || String(s.order_type ?? "").toLowerCase().includes("buy");
+
+  // Prefer the live position's own currentPrice; fall back to a fresh quote if absent.
+  let currentPrice = Number(livePos?.currentPrice ?? 0);
+  if (!currentPrice) {
+    const symbol = pairToSymbol(String(s.pair), suffix);
+    const pr = await getSymbolPrice({ region, accountId, token, symbol });
+    if (!pr.ok) return false;
+    currentPrice = isLong ? Number(pr.bid ?? 0) : Number(pr.ask ?? 0);
+  }
+  if (!currentPrice) return false;
+
+  const progressR = isLong
+    ? (currentPrice - Number(s.entry)) / risk
+    : (Number(s.entry) - currentPrice) / risk;
+  if (progressR < trailActivateR) return false;
+
+  // Lock in one step BEHIND current progress — e.g. at 1.4R progress with a 0.5R step,
+  // the floor sits at entry + 1.0R (the last fully-completed step), not 1.4R itself.
+  const lockedSteps = Math.floor(progressR / trailStepR) * trailStepR;
+  const laggedSteps = Math.max(lockedSteps - trailStepR, 0);
+  const newSL = isLong
+    ? Number(s.entry) + risk * laggedSteps
+    : Number(s.entry) - risk * laggedSteps;
+
+  const currentSL = Number(s.stop_loss);
+  const improves = isLong ? newSL > currentSL + 1e-9 : newSL < currentSL - 1e-9;
+  if (!improves) return false;
+
+  const mod = await modifyPosition({
+    region, accountId, token, positionId: pid,
+    stopLoss: newSL, takeProfit: Number(s.tp2),
+  });
+  if (!mod.ok) {
+    console.error("trail modify failed for", pid, mod.error);
+    return false;
+  }
+  await supabase.from("signals").update({ stop_loss: newSL }).eq("id", s.id);
+  return true;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -73,73 +128,52 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Pass 1: promote pending LIMIT/STOP A-orders to "filled" once broker fills them.
+    // Pass 1: promote pending LIMIT/STOP orders to "filled" once broker fills them.
     let pendingPromoted = 0;
     const { data: pendingSignals } = await supabase
       .from("signals")
-      .select("id, created_at, metaapi_order_id, metaapi_order_id_b, metaapi_position_id, metaapi_position_id_b")
+      .select("id, created_at, metaapi_order_id, metaapi_position_id")
       .eq("metaapi_execution_status", "order_pending");
 
     for (const po of (pendingSignals ?? []) as any[]) {
+      if (po.metaapi_position_id) continue; // already filled
+      const orderId = po.metaapi_order_id;
+      if (!orderId) continue;
       const startTime = new Date(new Date(po.created_at).getTime() - 60_000).toISOString();
-      const patch: Record<string, unknown> = {};
-      let anyCanceled = false;
-      let bothFilledOrKnown = true;
-
-      for (const slot of [
-        { idField: "metaapi_order_id", posField: "metaapi_position_id" },
-        { idField: "metaapi_order_id_b", posField: "metaapi_position_id_b" },
-      ]) {
-        const existingPos = po[slot.posField];
-        if (existingPos) continue; // already filled
-        const orderId = po[slot.idField];
-        if (!orderId) continue;
-        const ord = await getHistoryOrderById({
-          region, accountId, token, orderId: String(orderId), startTime,
-        });
-        if (!ord.ok || !ord.data) { bothFilledOrKnown = false; continue; }
-        const positionId = ord.data.positionId ? String(ord.data.positionId) : null;
-        const state = String(ord.data.state ?? "").toUpperCase();
-        if (positionId && (state.includes("FILLED") || state === "ORDER_STATE_FILLED" || state === "")) {
-          patch[slot.posField] = positionId;
-        } else if (state.includes("CANCEL") || state.includes("EXPIRED") || state.includes("REJECT")) {
-          anyCanceled = true;
-        } else {
-          bothFilledOrKnown = false;
-        }
-      }
-
-      if (anyCanceled) {
+      const ord = await getHistoryOrderById({
+        region, accountId, token, orderId: String(orderId), startTime,
+      });
+      if (!ord.ok || !ord.data) continue;
+      const positionId = ord.data.positionId ? String(ord.data.positionId) : null;
+      const state = String(ord.data.state ?? "").toUpperCase();
+      if (positionId && (state.includes("FILLED") || state === "ORDER_STATE_FILLED" || state === "")) {
         await supabase.from("signals").update({
-          ...patch,
+          metaapi_position_id: positionId,
+          metaapi_execution_status: "filled",
+          executed_at: new Date().toISOString(),
+          status: "executed",
+        }).eq("id", po.id);
+        pendingPromoted++;
+      } else if (state.includes("CANCEL") || state.includes("EXPIRED") || state.includes("REJECT")) {
+        await supabase.from("signals").update({
           metaapi_execution_status: "canceled",
           metaapi_execution_error: "order canceled/expired/rejected by broker",
         }).eq("id", po.id);
         pendingPromoted++;
-      } else if (Object.keys(patch).length > 0) {
-        // Did both legs end up with a position id (existing + just-resolved)?
-        const aPos = po.metaapi_position_id ?? patch["metaapi_position_id"];
-        const bPos = po.metaapi_position_id_b ?? patch["metaapi_position_id_b"];
-        const promote = !!aPos && !!bPos && bothFilledOrKnown;
-        await supabase.from("signals").update({
-          ...patch,
-          ...(promote
-            ? { metaapi_execution_status: "filled", executed_at: new Date().toISOString(), status: "executed" }
-            : {}),
-        }).eq("id", po.id);
-        if (promote) pendingPromoted++;
       }
     }
 
-    // Pass 2: reconcile signals with active executions.
+    // Pass 2: reconcile signals with active executions + run the continuous trail.
+    const trailStepR = Number((c as any)?.metaapi_trail_lock_r ?? 0.5);
+    const trailActivateR = Number((c as any)?.metaapi_trail_activate_r ?? 0.35);
+
     const { data: openSignals } = await supabase
       .from("signals")
-      .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_position_id_b, metaapi_filled_price, metaapi_execution_status, metaapi_partial_closed, metaapi_breakeven_moved, metaapi_executed_lot")
-      .in("metaapi_execution_status", ["filled", "partial"]);
+      .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_filled_price, metaapi_execution_status, metaapi_executed_lot")
+      .eq("metaapi_execution_status", "filled");
 
     let updated = 0;
-    let partials = 0;
-    let breakevens = 0;
+    let trailed = 0;
     let closes = 0;
     const openSet = new Set<string>();
     const openMap = new Map<string, any>();
@@ -177,17 +211,6 @@ Deno.serve(async (req) => {
                 }
               );
             }
-            if (s.metaapi_position_id_b) {
-              await fetch(
-                `https://mt-client-api-v1.${region}.agiliumtrade.ai` +
-                `/users/current/accounts/${accountId}/trade`,
-                {
-                  method: "POST",
-                  headers: { "auth-token": token, "Content-Type": "application/json" },
-                  body: JSON.stringify({ actionType: "POSITION_CLOSE_ID", positionId: s.metaapi_position_id_b }),
-                }
-              );
-            }
           } catch (e) {
             console.log(`Time exit close failed for ${s.id}: ${e}`);
           }
@@ -204,134 +227,83 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const pidA = s.metaapi_position_id ? String(s.metaapi_position_id) : null;
-        const pidB = s.metaapi_position_id_b ? String(s.metaapi_position_id_b) : null;
-        const aOpen = !!pidA && openSet.has(pidA);
-        const bOpen = !!pidB && openSet.has(pidB);
+        const pid = s.metaapi_position_id ? String(s.metaapi_position_id) : null;
+        const isOpen = !!pid && openSet.has(pid);
 
-        // TP1 hit branch: A closed, B still open, partial not yet tagged.
-        if (!aOpen && bOpen && !s.metaapi_partial_closed) {
-          let beOk = false;
-          try {
-            const trailR   = Number((c as any)?.metaapi_trail_lock_r ?? 0.5);
-            const riskPerR = Math.abs(Number(s.entry) - Number(s.stop_loss));
-            const isLong   = String(s.direction ?? "").toLowerCase().includes("long")
-              || String(s.order_type ?? "").toLowerCase().includes("buy");
-            const lockedSL = trailR <= 0
-              ? Number(s.entry)
-              : (isLong
-                ? Number(s.entry) + riskPerR * trailR
-                : Number(s.entry) - riskPerR * trailR);
-            const mod = await modifyPosition({
-              region, accountId, token, positionId: pidB!,
-              stopLoss: lockedSL,
-              takeProfit: Number(s.tp2),
-            });
-            if (mod.ok) { beOk = true; breakevens++; }
-            else console.error("breakeven move failed for B", pidB, mod.error);
-          } catch (e) {
-            console.error("breakeven move exception", pidB, e);
-          }
+        // Still open → run the trail, then refresh PnL.
+        if (isOpen) {
+          const livePos = openMap.get(pid!);
+          const moved = await applyTrail({
+            supabase, region, accountId, token, suffix: effectiveSuffix,
+            s, pid: pid!, livePos, trailStepR, trailActivateR,
+          });
+          if (moved) trailed++;
           await supabase.from("signals").update({
-            metaapi_partial_closed: true,
-            metaapi_breakeven_moved: beOk,
-            metaapi_execution_status: "partial",
-            partial_close: true,
-            status: "tp1",
-          }).eq("id", s.id);
-          partials++;
-          updated++;
-
-          // Refresh runner PnL too
-          const livePos = openMap.get(pidB!);
-          if (livePos) {
-            await supabase.from("signals").update({
-              metaapi_pnl: Number(livePos.unrealizedProfit ?? 0),
-            }).eq("id", s.id);
-          }
-          continue;
-        }
-
-        // Both still open → just refresh aggregated PnL.
-        if (aOpen || bOpen) {
-          let pnl = 0;
-          if (aOpen) pnl += Number(openMap.get(pidA!)?.unrealizedProfit ?? 0);
-          if (bOpen) pnl += Number(openMap.get(pidB!)?.unrealizedProfit ?? 0);
-          await supabase.from("signals").update({
-            metaapi_pnl: pnl,
-            metaapi_filled_price: s.metaapi_filled_price
-              ?? Number(openMap.get(pidA!)?.openPrice ?? openMap.get(pidB!)?.openPrice ?? 0),
+            metaapi_pnl: Number(livePos?.unrealizedProfit ?? 0),
+            metaapi_filled_price: s.metaapi_filled_price ?? Number(livePos?.openPrice ?? 0),
           }).eq("id", s.id);
           updated++;
           continue;
         }
 
-        // Both closed → reconcile.
+        // Closed → reconcile final PnL and classify the outcome by R-multiple reached.
         let totalPnl = 0;
         let lastTime: string | null = null;
-        let orderAClosePrice: number | null = null;
-        for (const pid of [pidA, pidB]) {
-          if (!pid) continue;
+        let closePrice: number | null = null;
+        if (pid) {
           try {
             const ph = await getHistoryDealsByPosition({ region, accountId, token, positionId: pid });
             if (ph.ok && ph.data) {
-              let pidLastTime: string | null = null;
-              let pidLastPrice: number | null = null;
               for (const d of (ph.data as any[])) {
                 totalPnl += Number(d.profit ?? 0) + Number(d.swap ?? 0) + Number(d.commission ?? 0);
                 const t = d.time as string | undefined;
-                if (t && (!lastTime || new Date(t).getTime() > new Date(lastTime).getTime())) lastTime = t;
-                // Track the last (closing) deal price for this position
-                if (t && (!pidLastTime || new Date(t).getTime() >= new Date(pidLastTime).getTime())) {
-                  pidLastTime = t;
+                if (t && (!lastTime || new Date(t).getTime() >= new Date(lastTime).getTime())) {
+                  lastTime = t;
                   const px = Number(d.price ?? d.closePrice ?? 0);
-                  if (Number.isFinite(px) && px > 0) pidLastPrice = px;
+                  if (Number.isFinite(px) && px > 0) closePrice = px;
                 }
               }
-              if (pid === pidA && pidLastPrice != null) orderAClosePrice = pidLastPrice;
             }
           } catch (e) {
             console.error("history-deals/position failed for", pid, e);
           }
         }
 
-        let closedStatus = s.metaapi_partial_closed
-          ? (totalPnl >= 0 ? "tp2" : "be")
-          : "sl_hit";
-
-        // Order A may have hit TP1 inside the sync window before B closed on the original SL.
-        // If we never tagged the partial state but A's close price reached TP1, classify accordingly.
         const isLong = String(s.direction ?? "").toLowerCase().includes("long")
           || String(s.order_type ?? "").toLowerCase().includes("buy");
-        const tp1Level = Number(s.tp1);
-        const orderAHitTP1 = orderAClosePrice != null && Number.isFinite(tp1Level) && tp1Level > 0
-          ? (isLong ? orderAClosePrice >= tp1Level * 0.999 : orderAClosePrice <= tp1Level * 1.001)
-          : false;
-        if (orderAHitTP1 && !s.metaapi_partial_closed) {
-          closedStatus = totalPnl >= 0 ? "tp1_partial" : "be";
-        }
-
         const risk = Math.abs(Number(s.entry) - Number(s.stop_loss));
+        const rMultiple = (risk > 0 && closePrice != null)
+          ? (isLong ? (closePrice - Number(s.entry)) / risk : (Number(s.entry) - closePrice) / risk)
+          : (totalPnl >= 0 ? 0 : -1);
+        const tp2R = risk > 0
+          ? (isLong ? (Number(s.tp2) - Number(s.entry)) / risk : (Number(s.entry) - Number(s.tp2)) / risk)
+          : null;
+
+        // Outcome buckets reuse the EXISTING status vocabulary so the frontend needs no
+        // changes: "tp2" = reached the final target, "tp1" = closed in profit via the
+        // trailing stop before reaching tp2 (repurposed from the old partial-take label —
+        // rename later if you want a dedicated "trail exit" label), "be" = flat,
+        // "sl_hit"/"loss" = stopped out for a loss.
+        let closedStatus: string;
+        if (tp2R != null && rMultiple >= tp2R * 0.999) closedStatus = "tp2";
+        else if (rMultiple > 0.05) closedStatus = "tp1_partial";
+        else if (rMultiple > -0.05) closedStatus = "be";
+        else closedStatus = "sl_hit";
+
         const statusMap: Record<string, string> = {
           tp2: "tp2",
+          tp1_partial: "tp1",
           be: "be",
           sl_hit: "loss",
-          tp1_partial: "tp1",
-        };
-        const outcomeMap: Record<string, number> = {
-          tp2: risk > 0 ? Math.abs(Number(s.tp2) - Number(s.entry)) / risk : 0,
-          be: 0,
-          sl_hit: -1,
-          tp1_partial: 0.5,
         };
 
         await supabase.from("signals").update({
           metaapi_execution_status: "closed",
           metaapi_pnl: totalPnl,
           status: statusMap[closedStatus] ?? "closed",
-          outcome_r: outcomeMap[closedStatus] ?? null,
+          outcome_r: Number.isFinite(rMultiple) ? Number(rMultiple.toFixed(2)) : null,
           closed_at: lastTime ?? new Date().toISOString(),
-          notes: `MetaApi auto-close ${closedStatus} pnl=${totalPnl.toFixed(2)}`,
+          notes: `MetaApi auto-close ${closedStatus} pnl=${totalPnl.toFixed(2)} R=${rMultiple.toFixed(2)}`,
         }).eq("id", s.id);
         closes++;
         updated++;
@@ -341,6 +313,10 @@ Deno.serve(async (req) => {
     }
 
     // Pass 3: paper-tracking for non-executed signals (last 24h).
+    // NOTE: this still simulates the OLD two-stage TP1→TP2 paper model. It's display/
+    // analytics-only and doesn't touch real trades, but paper stats will now diverge
+    // slightly from how live trades actually exit (continuous trail vs staged TP).
+    // Left unchanged for this pass — flag if you want it updated to match too.
     let paperUpdated = 0;
     let paperExpired = 0;
     try {
@@ -461,7 +437,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(JSON.stringify({
-      ok: true, updated, checked: openSignals?.length ?? 0, partials, breakevens, closes, pendingPromoted,
+      ok: true, updated, checked: openSignals?.length ?? 0, trailed, closes, pendingPromoted,
       paperUpdated, paperExpired, paperBackfilled,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
