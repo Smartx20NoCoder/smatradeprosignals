@@ -1,8 +1,18 @@
-// ScalpEdge scan engine v3
+// ScalpEdge scan engine v3.1
 // 7 pairs (XAU/USD + BTC/USD replace GBP/CHF + USD/CHF), 5 setups, 1H HTF bias filter,
 // MFI confirmation, spread cushion. Every individual TwelveData call is serialized
 // with an ~7.8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
+//
+// v3.1: Fixed a leak where a disabled legacy setup (setup_auto_execute[x]=false)
+// could still ride along inside a merged compound signal — e.g. disabling
+// "Session Range Break" didn't stop "EMA Pullback + Session Range Break" from
+// generating, alerting, and saving as a fully-qualified signal, because the
+// merge step's paper_only check only ever inspected the FIRST component of a
+// combined setup name. Disabled-setup signals now go into a separate
+// legacyPaperOnly bucket that never enters mergeFamily(), so a disabled
+// setup can no longer combine with — or silently ride inside — an enabled
+// one. It's still individually paper-tracked on its own, same as before.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
 
@@ -2109,6 +2119,17 @@ async function runScanJob(
     const qssCandidates:     Signal[] = [];
     const prismCandidates:   Signal[] = [];
     const legacyCandidates:  Signal[] = [];
+    // Disabled-setup signals land here instead of legacyCandidates so they can
+    // NEVER combine with an enabled setup via mergeFamily(). Previously a
+    // disabled setup (e.g. "Session Range Break") still went into the same
+    // pool as everything else, so if it fired on the same pair+direction as
+    // an enabled setup (e.g. "EMA Pullback") in the same scan cycle, they'd
+    // merge into "EMA Pullback + Session Range Break" — and since
+    // setupFamilyOf() on a merged name only checks the FIRST component, the
+    // disabled half rode along undetected: full alert, full save, as if
+    // 100% enabled. Keeping them fully separate here closes that gap while
+    // still preserving standalone paper-tracking for the disabled setup.
+    const legacyPaperOnly:   Signal[] = [];
 
     for (const pair of allowedPairs) {
       const d = pairData[pair];
@@ -2169,7 +2190,12 @@ async function runScanJob(
             direction: q.signal.direction,
             reason: isPaused ? `${family} disabled in Settings — paper tracked only, no alert` : undefined,
           });
-          legacyCandidates.push(q.signal);
+          if (isPaused) {
+            (q.signal as any).paper_only = true;
+            legacyPaperOnly.push(q.signal);
+          } else {
+            legacyCandidates.push(q.signal);
+          }
         }
       }
 
@@ -2278,6 +2304,7 @@ async function runScanJob(
 
     const merged: Signal[] = [
       ...mergedLegacy,
+      ...legacyPaperOnly,
       ...mergedVeritas,
       ...mergedQss,
       ...mergedPrism,
