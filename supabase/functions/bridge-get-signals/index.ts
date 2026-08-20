@@ -142,11 +142,22 @@ Deno.serve(async (req) => {
       .eq("metaapi_execution_status", "bridge_claimed")
       .in("pair", bridgePairs);
 
-    const { count: activeCount } = await supabase
+    // Active-trade count. "filled" rows are time-bounded to the last 48h so a
+    // single dropped close-report can't wedge the slot counter forever;
+    // "bridge_claimed" already self-expires via bridge_claim_expiry_min.
+    const filledCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
+    const { count: filledCount } = await supabase
       .from("signals")
       .select("id", { count: "exact", head: true })
-      .in("metaapi_execution_status", ["filled", "bridge_claimed"]);
-    const roomForMore = (activeCount ?? 0) < maxTrades;
+      .eq("metaapi_execution_status", "filled")
+      .gte("executed_at", filledCutoff);
+    const { count: claimedCount } = await supabase
+      .from("signals")
+      .select("id", { count: "exact", head: true })
+      .eq("metaapi_execution_status", "bridge_claimed");
+    const activeCount = (filledCount ?? 0) + (claimedCount ?? 0);
+    const roomForMore = activeCount < maxTrades;
+
 
     const freshClaimed: any[] = [];
     if (roomForMore && scanningActive) {
