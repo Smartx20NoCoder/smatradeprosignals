@@ -88,22 +88,22 @@ Deno.serve(async (req) => {
       }).eq("id", signal_id);
     }
 
-    // Defer to the bridge EA for its pairs while it's alive and the signal is still
-    // within its claim window. Quiet defer (no markFailed) — this is expected, not
-    // an error, and the same trigger that called us will naturally re-check later.
+    // Bridge pairs ALWAYS defer, unconditionally. MetaApi is not subscribed on this
+    // account, so a direct attempt can only fail — and marking the signal "failed"
+    // permanently removes it from bridge-get-signals' claimable pool (NULL-status only).
+    // Quiet defer: do NOT touch metaapi_execution_status.
+    // To reintroduce heartbeat-based failover once MetaApi is resubscribed, restore the
+    // bridgeAlive (bridge_last_seen vs bridge_claim_grace_sec) + signal-age conditions here.
     if (!force_retry) {
       const bridgePairs: string[] = Array.isArray(c.bridge_pairs) && c.bridge_pairs.length > 0
         ? c.bridge_pairs : ["GBP/USD", "XAU/USD"];
-      const bridgeGraceSec = Number(c.bridge_claim_grace_sec ?? 90);
-      const bridgeLastSeenMs = c.bridge_last_seen ? new Date(c.bridge_last_seen).getTime() : 0;
-      const bridgeAlive = (Date.now() - bridgeLastSeenMs) < bridgeGraceSec * 1000;
-      const signalAgeSec = (Date.now() - new Date(s.created_at).getTime()) / 1000;
-      if (bridgePairs.includes(String(s.pair)) && bridgeAlive && signalAgeSec < bridgeGraceSec) {
-        return new Response(JSON.stringify({ ok: false, reason: "deferring to bridge EA (active, within claim window)" }), {
+      if (bridgePairs.includes(String(s.pair))) {
+        return new Response(JSON.stringify({ ok: false, reason: "deferring to bridge EA (bridge pair — always deferred)" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
+
 
     const autoTrade = !!c.metaapi_auto_trade;
     const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
