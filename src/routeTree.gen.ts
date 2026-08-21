@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as Char91DotmcpChar93ListToolsRouteImport } from './routes/[.mcp]/list-tools'
 import { Route as ApiPublicBridgeReportCloseRouteImport } from './routes/api/public/bridge-report-close'
+import { Route as ApiPublicBridgeGetSignalsRouteImport } from './routes/api/public/bridge-get-signals'
 import { Route as ApiInternalScanRouteImport } from './routes/api/internal/scan'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 
@@ -45,6 +46,12 @@ const ApiPublicBridgeReportCloseRoute =
     path: '/api/public/bridge-report-close',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicBridgeGetSignalsRoute =
+  ApiPublicBridgeGetSignalsRouteImport.update({
+    id: '/api/public/bridge-get-signals',
+    path: '/api/public/bridge-get-signals',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiInternalScanRoute = ApiInternalScanRouteImport.update({
   id: '/api/internal/scan',
   path: '/api/internal/scan',
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
 }
 export interface FileRoutesByTo {
@@ -73,6 +81,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
 }
 export interface FileRoutesById {
@@ -83,6 +92,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
 }
 export interface FileRouteTypes {
@@ -94,6 +104,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
   id:
     | '__root__'
@@ -112,6 +124,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
   fileRoutesById: FileRoutesById
 }
@@ -122,6 +135,7 @@ export interface RootRouteChildren {
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiInternalScanRoute: typeof ApiInternalScanRoute
+  ApiPublicBridgeGetSignalsRoute: typeof ApiPublicBridgeGetSignalsRoute
   ApiPublicBridgeReportCloseRoute: typeof ApiPublicBridgeReportCloseRoute
 }
 
@@ -162,6 +176,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicBridgeReportCloseRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/bridge-get-signals': {
+      id: '/api/public/bridge-get-signals'
+      path: '/api/public/bridge-get-signals'
+      fullPath: '/api/public/bridge-get-signals'
+      preLoaderRoute: typeof ApiPublicBridgeGetSignalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/internal/scan': {
       id: '/api/internal/scan'
       path: '/api/internal/scan'
@@ -187,6 +208,7 @@ const rootRouteChildren: RootRouteChildren = {
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiInternalScanRoute: ApiInternalScanRoute,
+  ApiPublicBridgeGetSignalsRoute: ApiPublicBridgeGetSignalsRoute,
   ApiPublicBridgeReportCloseRoute: ApiPublicBridgeReportCloseRoute,
 }
 export const routeTree = rootRouteImport
