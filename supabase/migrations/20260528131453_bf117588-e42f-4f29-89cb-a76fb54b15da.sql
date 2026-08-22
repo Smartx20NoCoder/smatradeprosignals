@@ -4,8 +4,9 @@ ALTER TABLE public.app_settings
 DROP FUNCTION IF EXISTS public.get_app_settings_public();
 
 CREATE OR REPLACE FUNCTION public.get_app_settings_public()
- RETURNS TABLE(id text, paused boolean, trading_hours_start_utc integer, trading_hours_end_utc integer, session_config jsonb, active_td_key integer, key1_exhausted_at timestamp with time zone, metaapi_auto_trade boolean, metaapi_min_confidence integer, metaapi_min_rr numeric, metaapi_fixed_lot numeric, metaapi_region text, metaapi_symbol_suffix text, metaapi_connected_at timestamp with time zone, metaapi_configured boolean, updated_at timestamp with time zone)
- LANGUAGE sql
+ RETURNS TABLE(id text, paused boolean, trading_hours_start_utc integer, trading_hours_end_utc integer, session_config jsonb, active_td_key integer, key1_exhausted_at timestamp with time zone, metaapi_auto_trade boolean, metaapi_min_confidence integer, metaapi_min_rr numeric, metaapi_fixed_lot numeric, metaapi_region text, metaapi_symbol_suffix text, metaapi_connected_at timestamp with time zone, metaapi_configured boolean, metaapi_token_configured boolean, metaapi_max_trades integer, metaapi_expiry_hours integer, metaapi_max_daily_loss_pct numeric, metaapi_risk_per_trade_pct numeric, metaapi_min_lot numeric, metaapi_max_lot numeric, metaapi_is_cent_account boolean, pair_auto_execute jsonb, setup_auto_execute jsonb, metaapi_active_mode text, metaapi_region_live text, metaapi_symbol_suffix_live text, metaapi_live_configured boolean, metaapi_live_token_configured boolean, metaapi_is_cent_account_live boolean, scan_interval_minutes integer, bridge_last_seen timestamp with time zone, updated_at timestamp with time zone)
+ 
+  LANGUAGE sql
  STABLE SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
