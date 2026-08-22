@@ -109,7 +109,7 @@ Deno.serve(async (req) => {
 
     const bridgePairs: string[] = Array.isArray(c.bridge_pairs) && c.bridge_pairs.length > 0
       ? c.bridge_pairs
-      : ["GBP/USD", "XAU/USD"];
+      : ["GBP/USD", "XAU/USD", "BTC/USD"];
     const minConf = Number(c.metaapi_min_confidence ?? 75);
     const minRR = Number(c.metaapi_min_rr ?? 2);
     const maxTrades = Number(c.metaapi_max_trades ?? 3);
