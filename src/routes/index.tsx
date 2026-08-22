@@ -1,225 +1,158 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
-    createFileRoute
-} from "@tanstack/react-router";
-import {
-    useServerFn
-} from "@tanstack/react-start";
-import {
-    useEffect,
-    useMemo,
-    useRef,
-    useState
-} from "react";
-import {
-    supabase
-} from "@/integrations/supabase/client";
-import type {
-    TablesUpdate
-} from "@/integrations/supabase/types";
-import {
-    checkSubscriptionFn,
-    checkSymbolsMetaApiFn,
-    forceSubscribeMetaApiFn,
-    getTdKeysConfiguredFn,
-    healthCheckMetaApiFn,
-    pingMetaApiFn,
-    refreshNewsCalendarFn,
-    retryExecutionFn,
-    testTradeMetaApiFn,
-    updateAppSettingsFn,
+  checkSubscriptionFn,
+  checkSymbolsMetaApiFn,
+  forceSubscribeMetaApiFn,
+  getTdKeysConfiguredFn,
+  healthCheckMetaApiFn,
+  pingMetaApiFn,
+  refreshNewsCalendarFn,
+  retryExecutionFn,
+  testTradeMetaApiFn,
+  updateAppSettingsFn,
 } from "@/lib/api.functions";
 
 import {
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    Tooltip,
-    ResponsiveContainer,
-    CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-import {
-    ChevronDown,
-    ChevronRight
-} from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
-export const Route = createFileRoute("/")({
-    component: ScalpEdge
-});
+export const Route = createFileRoute("/")({ component: ScalpEdge });
 
 type Signal = {
-    id: string;
-    pair: string;
-    timeframe: string;
-    setup: string;
-    direction: "Long" | "Short";
-    entry: number;
-    stop_loss: number;
-    tp1: number;
-    tp2: number;
-    rr: number;
-    session_score: number;
-    confidence: number;
-    news_flag: boolean;
-    status: string;
-    outcome_r: number | null;
-    created_at: string;
-    executed_at: string | null;
-    partial_close: boolean;
-    order_type: string | null;
-    candle_time: string | null;
-    spread_pips: number | null;
-    htf_bias: string | null;
-    mfi_score: number | null;
-    mfi_divergence: boolean;
-    notes: string | null;
-    metaapi_position_id?: string | null;
-    metaapi_order_id?: string | null;
-    metaapi_execution_status?: string | null;
-    metaapi_execution_error?: string | null;
-    metaapi_filled_price?: number | null;
-    metaapi_pnl?: number | null;
-    paper_status?: string | null;
-    paper_hit?: string | null;
-    // --- ADDED PER-SIGNAL TRANSACTIONS TRACKING PARAMETER ---
-    metaapi_execution_channel?: "bridge" | "metaapi" | null;
+  id: string;
+  pair: string;
+  timeframe: string;
+  setup: string;
+  direction: "Long" | "Short";
+  entry: number;
+  stop_loss: number;
+  tp1: number;
+  tp2: number;
+  rr: number;
+  session_score: number;
+  confidence: number;
+  news_flag: boolean;
+  status: string;
+  outcome_r: number | null;
+  created_at: string;
+  executed_at: string | null;
+  partial_close: boolean;
+  order_type: string | null;
+  candle_time: string | null;
+  spread_pips: number | null;
+  htf_bias: string | null;
+  mfi_score: number | null;
+  mfi_divergence: boolean;
+  notes: string | null;
+  metaapi_position_id?: string | null;
+  metaapi_order_id?: string | null;
+  metaapi_execution_status?: string | null;
+  metaapi_execution_error?: string | null;
+  metaapi_filled_price?: number | null;
+  metaapi_pnl?: number | null;
+  paper_status?: string | null;
+  paper_hit?: string | null;
 };
 
-type ReportCheck = {
-    setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string
-};
-type PairReport = {
-    pair: string; cached: boolean; candle_time?: string; htf_bias?: string; checks: ReportCheck[]
-};
-type ScanResult = {
-    when: string; new: number; used: number; today: number; mode: string; errors: string[]; report: PairReport[]
-};
+type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
+type PairReport = { pair: string; cached: boolean; candle_time?: string; htf_bias?: string; checks: ReportCheck[] };
+type ScanResult = { when: string; new: number; used: number; today: number; mode: string; errors: string[]; report: PairReport[] };
 type ProgressStatus = "pending" | "waiting" | "fetching" | "cached" | "done" | "rate_limited" | "error";
-type ProgressItem = {
-    status: ProgressStatus; message?: string; updatedAt?: number
-};
+type ProgressItem = { status: ProgressStatus; message?: string; updatedAt?: number };
 type ProgressEvent = {
-    type: "progress" | "pair_start" | "pair_done" | "complete" | "error";
-    pair?: string;
-    timeframe?: string;
-    status?: ProgressStatus;
-    message?: string;
-    result?: any;
-    error?: string;
+  type: "progress" | "pair_start" | "pair_done" | "complete" | "error";
+  pair?: string;
+  timeframe?: string;
+  status?: ProgressStatus;
+  message?: string;
+  result?: any;
+  error?: string;
 };
 type ScanRun = {
-    id: string;
-    started_at: string;
-    finished_at: string | null;
-    mode: string;
-    source: string;
-    new_signals: number;
-    api_calls_used: number;
-    api_calls_today: number;
-    errors: any;
-    ok: boolean;
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  mode: string;
+  source: string;
+  new_signals: number;
+  api_calls_used: number;
+  api_calls_today: number;
+  errors: any;
+  ok: boolean;
 };
-type CacheRow = {
-    pair: string; timeframe: string; fetched_at: string
-};
-type PriceHealthRow = {
-    pair: string; timeframe: string; candle_count: number; last_close: string; fetched_at: string
-};
-type SessionWindow = {
-    enabled: boolean; start: number; end: number
-};
+type CacheRow = { pair: string; timeframe: string; fetched_at: string };
+type PriceHealthRow = { pair: string; timeframe: string; candle_count: number; last_close: string; fetched_at: string };
+type SessionWindow = { enabled: boolean; start: number; end: number };
 type SessionConfig = {
-    scan_active_sessions_only: boolean;
-    sessions: {
-        london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow
-    };
-    custom_overrides: Record < string,
-    {
-        start: number; end: number
-    } | null >;
+  scan_active_sessions_only: boolean;
+  sessions: { london: SessionWindow; ny: SessionWindow; tokyo: SessionWindow; sydney: SessionWindow };
+  custom_overrides: Record<string, { start: number; end: number } | null>;
 };
 type AppSettings = {
-    paused: boolean;
-    trading_hours_start_utc: number;
-    trading_hours_end_utc: number;
-    active_td_key: number;
-    session_config: SessionConfig;
-    metaapi_account_id: string | null;
-    metaapi_region: string;
-    metaapi_auto_trade: boolean;
-    metaapi_min_confidence: number;
-    metaapi_min_rr: number;
-    metaapi_fixed_lot: number;
-    metaapi_risk_per_trade_pct: number;
-    metaapi_min_lot: number;
-    metaapi_max_lot: number;
-    metaapi_is_cent_account: boolean;
-    metaapi_max_trades: number;
-    metaapi_expiry_hours: number;
-    metaapi_max_daily_loss_pct: number;
-    metaapi_symbol_suffix: string;
-    metaapi_connected_at: string | null;
-    metaapi_token_configured: boolean;
-    pair_auto_execute: Record < string,
-    boolean >;
-    setup_auto_execute: Record < string,
-    boolean >;
-    metaapi_active_mode: "demo" | "live";
-    metaapi_region_live: string;
-    metaapi_symbol_suffix_live: string;
-    metaapi_live_configured: boolean;
-    metaapi_live_token_configured: boolean;
-    metaapi_is_cent_account_live: boolean;
-    scan_interval_minutes: 5 | 15 | 30;
-    veritas_sl_mult?: number;
-    veritas_tp_mult?: number;
-    veritas_min_hurst?: number;
-    veritas_min_snr?: number;
-    veritas_min_conf?: number;
-    veritas_min_rr?: number;
-    metaapi_trail_lock_r?: number;
-    metaapi_min_adx?: number;
-    twelvedata_key_threshold?: number;
-    metaapi_key_rotation_threshold?: number;
-    metaapi_min_stop_points?: number;
-    // --- ADDED THE HARDWARE HEARTBEAT LIFECYCLE MONITORING PARAMETER ---
-    bridge_last_seen: string | null;
+  paused: boolean;
+  trading_hours_start_utc: number;
+  trading_hours_end_utc: number;
+  active_td_key: number;
+  session_config: SessionConfig;
+  metaapi_account_id: string | null;
+  metaapi_region: string;
+  metaapi_auto_trade: boolean;
+  metaapi_min_confidence: number;
+  metaapi_min_rr: number;
+  metaapi_fixed_lot: number;
+  metaapi_risk_per_trade_pct: number;
+  metaapi_min_lot: number;
+  metaapi_max_lot: number;
+  metaapi_is_cent_account: boolean;
+  metaapi_max_trades: number;
+  metaapi_expiry_hours: number;
+  metaapi_max_daily_loss_pct: number;
+  metaapi_symbol_suffix: string;
+  metaapi_connected_at: string | null;
+  metaapi_token_configured: boolean;
+  pair_auto_execute: Record<string, boolean>;
+  setup_auto_execute: Record<string, boolean>;
+  metaapi_active_mode: "demo" | "live";
+  metaapi_region_live: string;
+  metaapi_symbol_suffix_live: string;
+  metaapi_live_configured: boolean;
+  metaapi_live_token_configured: boolean;
+  metaapi_is_cent_account_live: boolean;
+  scan_interval_minutes: 5 | 15 | 30;
+  veritas_sl_mult?: number;
+  veritas_tp_mult?: number;
+  veritas_min_hurst?: number;
+  veritas_min_snr?: number;
+  veritas_min_conf?: number;
+  veritas_min_rr?: number;
+  metaapi_trail_lock_r?: number;
+  metaapi_min_adx?: number;
+  twelvedata_key_threshold?: number;
+  metaapi_key_rotation_threshold?: number;
+  metaapi_min_stop_points?: number;
 };
 
-type EconomicEvent = {
-    id: string; event_time: string; currency: string; title: string; impact: string
-};
+type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
 const DEFAULT_SESSION_CONFIG: SessionConfig = {
-    scan_active_sessions_only: false,
-    sessions: {
-        london: {
-            enabled: true,
-            start: 7,
-            end: 16
-        },
-        ny: {
-            enabled: true,
-            start: 12,
-            end: 21
-        },
-        tokyo: {
-            enabled: true,
-            start: 0,
-            end: 9
-        },
-        sydney: {
-            enabled: true,
-            start: 22,
-            end: 7
-        },
-    },
-    custom_overrides: {},
+  scan_active_sessions_only: false,
+  sessions: {
+    london: { enabled: true, start: 7, end: 16 },
+    ny:     { enabled: true, start: 12, end: 21 },
+    tokyo:  { enabled: true, start: 0, end: 9 },
+    sydney: { enabled: true, start: 22, end: 7 },
+  },
+  custom_overrides: {},
 };
 
 const DAILY_BUDGET = 800;
 const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
-const VERITAS_PAIRS_UI = new Set(["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]);
+const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/USD","ETH/USD"]);
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
@@ -230,4208 +163,3387 @@ const RISK_PER_TRADE_PCT = 1.0;
 
 // Correlation pairs (same direction → blocked when one is In-Trade)
 const CORRELATIONS: [string, string][] = [
-    ["EUR/USD", "GBP/USD"],
-    ["GBP/JPY", "EUR/JPY"],
+  ["EUR/USD", "GBP/USD"],
+  ["GBP/JPY", "EUR/JPY"],
 ];
 
-function isGold(p: string) {
-    return p === "XAU/USD";
-}
-function isBTC(p: string) {
-    return p === "BTC/USD";
-}
+function isGold(p: string) { return p === "XAU/USD"; }
+function isBTC(p: string) { return p === "BTC/USD"; }
 function fmtPrice(p: number, pair: string) {
-    if (isGold(pair)) return p.toFixed(2);
-    if (isBTC(pair)) return p.toFixed(1);
-    return p.toFixed(pair.includes("JPY") ? 3: 5);
+  if (isGold(pair)) return p.toFixed(2);
+  if (isBTC(pair)) return p.toFixed(1);
+  return p.toFixed(pair.includes("JPY") ? 3 : 5);
 }
 function fmtCandle(iso: string | null, tf: string) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    return `${tf} candle · ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${tf} candle · ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
 }
 function timeAgo(iso: string) {
-    const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-    if (m < 1) return "now";
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h`;
-    return `${Math.floor(h / 24)}d`;
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
 }
 
 // Loud multi-tone WebAudio alert for new signals
 function playBeep() {
-    try {
-        const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
-        const ctx = new Ctx();
-        // Three ascending tones, each loud and sustained
-        const tones = [{
-            f: 880,
-            start: 0.00,
-            dur: 0.30
-        },
-            {
-                f: 1320,
-                start: 0.35,
-                dur: 0.30
-            },
-            {
-                f: 1760,
-                start: 0.70,
-                dur: 0.55
-            },
-        ];
-        const master = ctx.createGain();
-        master.gain.value = 0.9; // near-max
-        master.connect(ctx.destination);
-        for (const t of tones) {
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = "square"; // square wave = more cut-through than sine
-            o.frequency.value = t.f;
-            o.connect(g); g.connect(master);
-            const s = ctx.currentTime + t.start;
-            g.gain.setValueAtTime(0.0001, s);
-            g.gain.exponentialRampToValueAtTime(0.8, s + 0.02);
-            g.gain.exponentialRampToValueAtTime(0.0001, s + t.dur);
-            o.start(s); o.stop(s + t.dur + 0.02);
-        }
-        setTimeout(() => ctx.close(), 1600);
-    } catch {
-        /* ignore */
+  try {
+    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const ctx = new Ctx();
+    // Three ascending tones, each loud and sustained
+    const tones = [
+      { f: 880, start: 0.00, dur: 0.30 },
+      { f: 1320, start: 0.35, dur: 0.30 },
+      { f: 1760, start: 0.70, dur: 0.55 },
+    ];
+    const master = ctx.createGain();
+    master.gain.value = 0.9; // near-max
+    master.connect(ctx.destination);
+    for (const t of tones) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "square"; // square wave = more cut-through than sine
+      o.frequency.value = t.f;
+      o.connect(g); g.connect(master);
+      const s = ctx.currentTime + t.start;
+      g.gain.setValueAtTime(0.0001, s);
+      g.gain.exponentialRampToValueAtTime(0.8, s + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, s + t.dur);
+      o.start(s); o.stop(s + t.dur + 0.02);
     }
+    setTimeout(() => ctx.close(), 1600);
+  } catch { /* ignore */ }
 }
 
 // Stage helpers
 const CLOSED_STATUSES = ["tp1", "tp2", "be", "loss", "win", "expired"];
 function stageOf(s: Signal): 1 | 2 | 3 {
-    if (CLOSED_STATUSES.includes(s.status)) return 3;
-    if (s.status === "executed") return 2;
-    return 1;
+  if (CLOSED_STATUSES.includes(s.status)) return 3;
+  if (s.status === "executed") return 2;
+  return 1;
 }
 
 function ScalpEdge() {
-    const [signals,
-        setSignals] = useState < Signal[] > ([]);
-    const [scanning,
-        setScanning] = useState(false);
-    const [scanProgress,
-        setScanProgress] = useState < Record < string,
-    ProgressItem>>({});
-    const [currentFetch,
-        setCurrentFetch] = useState < string | null > (null);
-    const [scanTimeframes,
-        setScanTimeframes] = useState < string[] > ([...TFS]);
-    const [lastScan,
-        setLastScan] = useState < ScanResult | null > (null);
-    const [reportOpen,
-        setReportOpen] = useState(false);
-    const [budgetToday,
-        setBudgetToday] = useState(0);
-    const [budgetTodayKey1,
-        setBudgetTodayKey1] = useState(0);
-    const [budgetTodayKey2,
-        setBudgetTodayKey2] = useState(0);
-    const [budgetTodayKey3,
-        setBudgetTodayKey3] = useState(0);
-    const [tdKeysConfigured,
-        setTdKeysConfigured] = useState < {
-        k1: boolean; k2: boolean; k3: boolean
-    } > ({
-            k1: true, k2: true, k3: false
-        });
-    const [tdKeysExhausted,
-        setTdKeysExhausted] = useState < {
-        k1: boolean; k2: boolean; k3: boolean
-    } > ({
-            k1: false, k2: false, k3: false
-        });
-    const [tab,
-        setTab] = useState < "signals" | "edge" | "history" | "news" | "health" | "settings" > ("signals");
-    const [newsDate,
-        setNewsDate] = useState < string > (() => new Date().toISOString().slice(0, 10));
-    const [newsEvents,
-        setNewsEvents] = useState < EconomicEvent[] > ([]);
-    const [newsLoading,
-        setNewsLoading] = useState(false);
-    const [newsError,
-        setNewsError] = useState < string | null > (null);
-    const [newsRefreshing,
-        setNewsRefreshing] = useState(false);
-    const [now,
-        setNow] = useState(Date.now());
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<Record<string, ProgressItem>>({});
+  const [currentFetch, setCurrentFetch] = useState<string | null>(null);
+  const [scanTimeframes, setScanTimeframes] = useState<string[]>([...TFS]);
+  const [lastScan, setLastScan] = useState<ScanResult | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [budgetToday, setBudgetToday] = useState(0);
+  const [budgetTodayKey1, setBudgetTodayKey1] = useState(0);
+  const [budgetTodayKey2, setBudgetTodayKey2] = useState(0);
+  const [budgetTodayKey3, setBudgetTodayKey3] = useState(0);
+  const [tdKeysConfigured, setTdKeysConfigured] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: true, k2: true, k3: false });
+  const [tdKeysExhausted, setTdKeysExhausted] = useState<{ k1: boolean; k2: boolean; k3: boolean }>({ k1: false, k2: false, k3: false });
+  const [tab, setTab] = useState<"signals" | "edge" | "history" | "news" | "health" | "settings">("signals");
+  const [newsDate, setNewsDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [newsEvents, setNewsEvents] = useState<EconomicEvent[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsRefreshing, setNewsRefreshing] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
-    // Settings
-    // (Auto-scan is server-side cron now; no client toggle state needed.)
-    const [soundOn,
-        setSoundOn] = useState(true);
-    const [scanRuns,
-        setScanRuns] = useState < ScanRun[] > ([]);
-    const [cacheRows,
-        setCacheRows] = useState < CacheRow[] > ([]);
-    const [priceHealth,
-        setPriceHealth] = useState < PriceHealthRow[] > ([]);
+  // Settings
+  // (Auto-scan is server-side cron now; no client toggle state needed.)
+  const [soundOn, setSoundOn] = useState(true);
+  const [scanRuns, setScanRuns] = useState<ScanRun[]>([]);
+  const [cacheRows, setCacheRows] = useState<CacheRow[]>([]);
+  const [priceHealth, setPriceHealth] = useState<PriceHealthRow[]>([]);
 
-    const lastSignalCountRef = useRef(0);
-    const lastSeenSignalIdsRef = useRef < Set < string>>(new Set());
+  const lastSignalCountRef = useRef(0);
+  const lastSeenSignalIdsRef = useRef<Set<string>>(new Set());
 
-    const [appSettings,
-        setAppSettings] = useState < AppSettings > ({
-            paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
-            session_config: DEFAULT_SESSION_CONFIG,
-            metaapi_account_id: null, metaapi_region: "new-york", metaapi_auto_trade: false,
-            metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
-            metaapi_risk_per_trade_pct: 2, metaapi_min_lot: 0.01, metaapi_max_lot: 0.10,
-            metaapi_max_trades: 3, metaapi_expiry_hours: 24, metaapi_max_daily_loss_pct: 5,
-            metaapi_symbol_suffix: "",
-            metaapi_connected_at: null,
-            metaapi_token_configured: false,
-            metaapi_is_cent_account: false,
-            metaapi_is_cent_account_live: false,
-            pair_auto_execute: {
-                "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
-                "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
-                "AUD/JPY": false, "AUD/USD": false,
-            },
-            setup_auto_execute: {
-                "EMA Pullback": true,
-                "BOS Retest": true,
-                "Session Range Break": true,
-                "VERITAS": false,
-                "PRISM": false,
-            },
-            metaapi_active_mode: "demo",
-            metaapi_region_live: "london",
-            metaapi_symbol_suffix_live: "",
-            metaapi_live_configured: false,
-            metaapi_live_token_configured: false,
-            scan_interval_minutes: 15,
-            veritas_sl_mult: 1.5, veritas_tp_mult: 2.5, veritas_min_hurst: 0.55,
-            veritas_min_snr: 40, veritas_min_conf: 72, veritas_min_rr: 1.60,
-
-        });
-    const [todaysEvents,
-        setTodaysEvents] = useState < EconomicEvent[] > ([]);
-
-    useEffect(() => {
-        const t = setInterval(() => setNow(Date.now()), 30000);
-        return () => clearInterval(t);
-    }, []);
-
-    // Persist settings (sound only — auto-scan is server-side). SSR-safe.
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const raw = window.localStorage.getItem("scalpedge-settings");
-        if (raw) {
-            try {
-                const s = JSON.parse(raw);
-                if (typeof s.soundOn === "boolean") setSoundOn(s.soundOn);
-            } catch {
-                /* ignore */
-            }
-        }
+  const [appSettings, setAppSettings] = useState<AppSettings>({
+    paused: false, trading_hours_start_utc: 1, trading_hours_end_utc: 20, active_td_key: 1,
+    session_config: DEFAULT_SESSION_CONFIG,
+    metaapi_account_id: null, metaapi_region: "new-york", metaapi_auto_trade: false,
+    metaapi_min_confidence: 75, metaapi_min_rr: 2, metaapi_fixed_lot: 0.01,
+    metaapi_risk_per_trade_pct: 2, metaapi_min_lot: 0.01, metaapi_max_lot: 0.10,
+    metaapi_max_trades: 3, metaapi_expiry_hours: 24, metaapi_max_daily_loss_pct: 5,
+    metaapi_symbol_suffix: "",
+    metaapi_connected_at: null,
+    metaapi_token_configured: false,
+    metaapi_is_cent_account: false,
+    metaapi_is_cent_account_live: false,
+    pair_auto_execute: {
+      "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
+      "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+      "AUD/JPY": false, "AUD/USD": false,
     },
-        []);
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        window.localStorage.setItem("scalpedge-settings", JSON.stringify({
-            soundOn
-        }));
+    setup_auto_execute: {
+      "EMA Pullback": true,
+      "BOS Retest": true,
+      "Session Range Break": true,
+      "VERITAS": false,
+      "PRISM": false,
     },
-        [soundOn]);
+    metaapi_active_mode: "demo",
+    metaapi_region_live: "london",
+    metaapi_symbol_suffix_live: "",
+    metaapi_live_configured: false,
+    metaapi_live_token_configured: false,
+    scan_interval_minutes: 15,
+    veritas_sl_mult: 1.5, veritas_tp_mult: 2.5, veritas_min_hurst: 0.55,
+    veritas_min_snr: 40, veritas_min_conf: 72, veritas_min_rr: 1.60,
 
-    async function loadSignals() {
-        const {
-            data
-        } = await supabase
-        .from("signals").select("*")
-        .order("created_at",
-            {
-                ascending: false
-            }).limit(1000);
-        const next = (data as Signal[]) ?? [];
-        // Detect new signal IDs from server-side cron and beep
-        const incoming = next.map((s) => s.id);
-        const prev = lastSeenSignalIdsRef.current;
-        if (prev.size > 0 && soundOn) {
-            const fresh = incoming.filter((id) => !prev.has(id));
-            if (fresh.length > 0) playBeep();
-        }
-        lastSeenSignalIdsRef.current = new Set(incoming);
-        setSignals(next);
-        const today = new Date().toISOString().slice(0, 10);
-        const {
-            data: u
-        } = await supabase.from("api_usage")
-        .select("calls, calls_key1, calls_key2, calls_key3").eq("day", today).maybeSingle();
-        setBudgetToday(((u as any)?.calls as number) ?? 0);
-        setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
-        setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
-        setBudgetTodayKey3(((u as any)?.calls_key3 as number) ?? 0);
+  });
+  const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Persist settings (sound only — auto-scan is server-side). SSR-safe.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem("scalpedge-settings");
+    if (raw) {
+      try {
+        const s = JSON.parse(raw);
+        if (typeof s.soundOn === "boolean") setSoundOn(s.soundOn);
+      } catch { /* ignore */ }
     }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
+  }, [soundOn]);
 
-    async function loadHealth() {
-        const {
-            data: runs
-        } = await supabase.from("scan_runs")
-        .select("*").order("started_at", {
-            ascending: false
-        }).limit(20);
-        setScanRuns((runs as ScanRun[]) ?? []);
-        const {
-            data: cache
-        } = await supabase.from("candle_cache")
-        .select("pair, timeframe, fetched_at");
-        setCacheRows((cache as CacheRow[]) ?? []);
-        const {
-            data: priceRows
-        } = await (supabase as any).from("candle_cache_health")
-        .select("pair, timeframe, candle_count, last_close, fetched_at");
-        setPriceHealth((priceRows as PriceHealthRow[]) ?? []);
-        // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
-        const {
-            data: cfgRows
-        } = await (supabase as any).rpc("get_app_settings_public");
-        const cfg = Array.isArray(cfgRows) ? cfgRows[0]: cfgRows;
-        if (cfg) {
-            const sameUtcDay = (iso?: string | null) => {
-                if (!iso) return false;
-                const d = new Date(iso),
-                n = new Date();
-                return d.getUTCFullYear() === n.getUTCFullYear() && d.getUTCMonth() === n.getUTCMonth() && d.getUTCDate() === n.getUTCDate();
-            };
-            setTdKeysExhausted({
-                k1: sameUtcDay(cfg.key1_exhausted_at),
-                k2: sameUtcDay(cfg.key2_exhausted_at),
-                k3: sameUtcDay(cfg.key3_exhausted_at),
-            });
-        }
-        if (cfg) setAppSettings({
-            paused: !!cfg.paused,
-            trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
-            trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
-            active_td_key: Number(cfg.active_td_key ?? 1),
-            session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
-            // metaapi_account_id is never sent to the browser; show only "configured" boolean via panel
-            metaapi_account_id: cfg.metaapi_configured ? "(configured)": null,
-            metaapi_region: (cfg.metaapi_region as string) ?? "new-york",
-            metaapi_auto_trade: !!cfg.metaapi_auto_trade,
-            metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
-            metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
-            metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
-            metaapi_risk_per_trade_pct: Number(cfg.metaapi_risk_per_trade_pct ?? 2),
-            metaapi_min_lot: Number(cfg.metaapi_min_lot ?? 0.01),
-            metaapi_max_lot: Number(cfg.metaapi_max_lot ?? 0.10),
-            metaapi_max_trades: Number(cfg.metaapi_max_trades ?? 3),
-            metaapi_expiry_hours: Number(cfg.metaapi_expiry_hours ?? 24),
-            metaapi_max_daily_loss_pct: Number(cfg.metaapi_max_daily_loss_pct ?? 5),
-            metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
-            metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
-            metaapi_token_configured: !!cfg.metaapi_token_configured,
-            metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
-            metaapi_is_cent_account_live: !!(cfg as any).metaapi_is_cent_account_live,
-            pair_auto_execute: (cfg.pair_auto_execute as Record < string, boolean >) ?? {
-                "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
-                "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
-                "AUD/JPY": false, "AUD/USD": false,
-            },
-            setup_auto_execute: ((cfg as any).setup_auto_execute as Record < string, boolean >) ?? {
-                "EMA Pullback": true,
-                "BOS Retest": true,
-                "Session Range Break": true,
-                "VERITAS": false,
-                "PRISM": false,
-            },
-            metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live": "demo"),
-            metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
-            metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
-            metaapi_live_configured: !!cfg.metaapi_live_configured,
-            metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
-            scan_interval_minutes: ([5, 15, 30].includes(Number((cfg as any).scan_interval_minutes)) ? Number((cfg as any).scan_interval_minutes): 15) as 5 | 15 | 30,
-            veritas_sl_mult: Number((cfg as any).veritas_sl_mult ?? 1.5),
-            veritas_tp_mult: Number((cfg as any).veritas_tp_mult ?? 2.5),
-            veritas_min_hurst: Number((cfg as any).veritas_min_hurst ?? 0.55),
-            veritas_min_snr: Number((cfg as any).veritas_min_snr ?? 40),
-            veritas_min_conf: Number((cfg as any).veritas_min_conf ?? 72),
-            veritas_min_rr: Number((cfg as any).veritas_min_rr ?? 1.60),
-            metaapi_trail_lock_r: (cfg as any).metaapi_trail_lock_r != null ? Number((cfg as any).metaapi_trail_lock_r): undefined,
-            metaapi_min_adx: (cfg as any).metaapi_min_adx != null ? Number((cfg as any).metaapi_min_adx): undefined,
-            metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points): undefined,
-            twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold): undefined,
-            metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold): undefined,
-
-
-        });
-        const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
-        const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
-        const {
-            data: ev
-        } = await (supabase as any).from("economic_events")
-        .select("*").gte("event_time", dayStart.toISOString()).lt("event_time", dayEnd.toISOString())
-        .order("event_time", {
-            ascending: true
-        });
-        setTodaysEvents((ev as EconomicEvent[]) ?? []);
+  async function loadSignals() {
+    const { data } = await supabase
+      .from("signals").select("*")
+      .order("created_at", { ascending: false }).limit(1000);
+    const next = (data as Signal[]) ?? [];
+    // Detect new signal IDs from server-side cron and beep
+    const incoming = next.map((s) => s.id);
+    const prev = lastSeenSignalIdsRef.current;
+    if (prev.size > 0 && soundOn) {
+      const fresh = incoming.filter((id) => !prev.has(id));
+      if (fresh.length > 0) playBeep();
     }
+    lastSeenSignalIdsRef.current = new Set(incoming);
+    setSignals(next);
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: u } = await supabase.from("api_usage")
+      .select("calls, calls_key1, calls_key2, calls_key3").eq("day", today).maybeSingle();
+    setBudgetToday(((u as any)?.calls as number) ?? 0);
+    setBudgetTodayKey1(((u as any)?.calls_key1 as number) ?? 0);
+    setBudgetTodayKey2(((u as any)?.calls_key2 as number) ?? 0);
+    setBudgetTodayKey3(((u as any)?.calls_key3 as number) ?? 0);
+  }
 
-    async function saveAppSettings(patch: Partial < AppSettings >) {
-        const prev = appSettings;
-        const next = {
-            ...appSettings,
-            ...patch
-        };
-        setAppSettings(next);
-        try {
-            await updateAppSettingsFn( {
-                data: patch as Record < string, unknown >
-            });
-        } catch (err) {
-            console.error("saveAppSettings failed", err);
-            setAppSettings(prev);
-            alert(err instanceof Error ? err.message: "Failed to save settings");
-        }
+  async function loadHealth() {
+    const { data: runs } = await supabase.from("scan_runs")
+      .select("*").order("started_at", { ascending: false }).limit(20);
+    setScanRuns((runs as ScanRun[]) ?? []);
+    const { data: cache } = await supabase.from("candle_cache")
+      .select("pair, timeframe, fetched_at");
+    setCacheRows((cache as CacheRow[]) ?? []);
+    const { data: priceRows } = await (supabase as any).from("candle_cache_health")
+      .select("pair, timeframe, candle_count, last_close, fetched_at");
+    setPriceHealth((priceRows as PriceHealthRow[]) ?? []);
+    // Reads now go through a safe security-definer RPC that hides metaapi_account_id.
+    const { data: cfgRows } = await (supabase as any).rpc("get_app_settings_public");
+    const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
+    if (cfg) {
+      const sameUtcDay = (iso?: string | null) => {
+        if (!iso) return false;
+        const d = new Date(iso), n = new Date();
+        return d.getUTCFullYear()===n.getUTCFullYear() && d.getUTCMonth()===n.getUTCMonth() && d.getUTCDate()===n.getUTCDate();
+      };
+      setTdKeysExhausted({
+        k1: sameUtcDay(cfg.key1_exhausted_at),
+        k2: sameUtcDay(cfg.key2_exhausted_at),
+        k3: sameUtcDay(cfg.key3_exhausted_at),
+      });
     }
+    if (cfg) setAppSettings({
+      paused: !!cfg.paused,
+      trading_hours_start_utc: Number(cfg.trading_hours_start_utc ?? 1),
+      trading_hours_end_utc: Number(cfg.trading_hours_end_utc ?? 20),
+      active_td_key: Number(cfg.active_td_key ?? 1),
+      session_config: (cfg.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG,
+      // metaapi_account_id is never sent to the browser; show only "configured" boolean via panel
+      metaapi_account_id: cfg.metaapi_configured ? "(configured)" : null,
+      metaapi_region: (cfg.metaapi_region as string) ?? "new-york",
+      metaapi_auto_trade: !!cfg.metaapi_auto_trade,
+      metaapi_min_confidence: Number(cfg.metaapi_min_confidence ?? 75),
+      metaapi_min_rr: Number(cfg.metaapi_min_rr ?? 2),
+      metaapi_fixed_lot: Number(cfg.metaapi_fixed_lot ?? 0.01),
+      metaapi_risk_per_trade_pct: Number(cfg.metaapi_risk_per_trade_pct ?? 2),
+      metaapi_min_lot: Number(cfg.metaapi_min_lot ?? 0.01),
+      metaapi_max_lot: Number(cfg.metaapi_max_lot ?? 0.10),
+      metaapi_max_trades: Number(cfg.metaapi_max_trades ?? 3),
+      metaapi_expiry_hours: Number(cfg.metaapi_expiry_hours ?? 24),
+      metaapi_max_daily_loss_pct: Number(cfg.metaapi_max_daily_loss_pct ?? 5),
+      metaapi_symbol_suffix: (cfg.metaapi_symbol_suffix as string | null) ?? "",
+      metaapi_connected_at: (cfg.metaapi_connected_at as string | null) ?? null,
+      metaapi_token_configured: !!cfg.metaapi_token_configured,
+      metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
+      metaapi_is_cent_account_live: !!(cfg as any).metaapi_is_cent_account_live,
+      pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
+        "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
+        "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+        "AUD/JPY": false, "AUD/USD": false,
+      },
+      setup_auto_execute: ((cfg as any).setup_auto_execute as Record<string, boolean>) ?? {
+        "EMA Pullback": true,
+        "BOS Retest": true,
+        "Session Range Break": true,
+        "VERITAS": false,
+        "PRISM": false,
+      },
+      metaapi_active_mode: ((cfg.metaapi_active_mode as string) === "live" ? "live" : "demo"),
+      metaapi_region_live: (cfg.metaapi_region_live as string) ?? "london",
+      metaapi_symbol_suffix_live: (cfg.metaapi_symbol_suffix_live as string | null) ?? "",
+      metaapi_live_configured: !!cfg.metaapi_live_configured,
+      metaapi_live_token_configured: !!cfg.metaapi_live_token_configured,
+      scan_interval_minutes: ([5, 15, 30].includes(Number((cfg as any).scan_interval_minutes)) ? Number((cfg as any).scan_interval_minutes) : 15) as 5 | 15 | 30,
+      veritas_sl_mult:   Number((cfg as any).veritas_sl_mult   ?? 1.5),
+      veritas_tp_mult:   Number((cfg as any).veritas_tp_mult   ?? 2.5),
+      veritas_min_hurst: Number((cfg as any).veritas_min_hurst ?? 0.55),
+      veritas_min_snr:   Number((cfg as any).veritas_min_snr   ?? 40),
+      veritas_min_conf:  Number((cfg as any).veritas_min_conf  ?? 72),
+      veritas_min_rr:    Number((cfg as any).veritas_min_rr    ?? 1.60),
+      metaapi_trail_lock_r:  (cfg as any).metaapi_trail_lock_r  != null ? Number((cfg as any).metaapi_trail_lock_r)  : undefined,
+      metaapi_min_adx:       (cfg as any).metaapi_min_adx       != null ? Number((cfg as any).metaapi_min_adx)       : undefined,
+      metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points) : undefined,
+      twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold) : undefined,
+      metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
 
-    async function refreshNewsCalendar() {
-        setNewsRefreshing(true);
-        setNewsError(null);
-        try {
-            await refreshNewsCalendarFn( {
-                data: {
-                    source: "manual", date: newsDate
-                }
-            });
-            // Re-load events for current date after refresh
-            await loadNewsEvents(newsDate);
-            await loadHealth();
-        } catch (err) {
-            console.error("refreshNewsCalendar error", err);
-            setNewsError(err instanceof Error ? err.message: "Failed to refresh calendar");
-        } finally {
-            setNewsRefreshing(false);
-        }
+
+    });
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+    const { data: ev } = await (supabase as any).from("economic_events")
+      .select("*").gte("event_time", dayStart.toISOString()).lt("event_time", dayEnd.toISOString())
+      .order("event_time", { ascending: true });
+    setTodaysEvents((ev as EconomicEvent[]) ?? []);
+  }
+
+  async function saveAppSettings(patch: Partial<AppSettings>) {
+    const prev = appSettings;
+    const next = { ...appSettings, ...patch };
+    setAppSettings(next);
+    try {
+      await updateAppSettingsFn({ data: patch as Record<string, unknown> });
+    } catch (err) {
+      console.error("saveAppSettings failed", err);
+      setAppSettings(prev);
+      alert(err instanceof Error ? err.message : "Failed to save settings");
     }
+  }
 
-    async function loadNewsEvents(day: string) {
-        setNewsLoading(true);
-        try {
-            const dayStart = new Date(`${day}T00:00:00Z`);
-            const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
-            const {
-                data,
-                error
-            } = await (supabase as any).from("economic_events")
-            .select("*")
-            .gte("event_time", dayStart.toISOString())
-            .lt("event_time", dayEnd.toISOString())
-            .order("event_time", {
-                ascending: true
-            });
-            if (error) throw error;
-            setNewsEvents((data as EconomicEvent[]) ?? []);
-        } catch (err) {
-            console.error("loadNewsEvents error", err);
-            setNewsEvents([]);
-            setNewsError(err instanceof Error ? err.message: "Failed to load events");
-        } finally {
-            setNewsLoading(false);
-        }
+  async function refreshNewsCalendar() {
+    setNewsRefreshing(true);
+    setNewsError(null);
+    try {
+      await refreshNewsCalendarFn({ data: { source: "manual", date: newsDate } });
+      // Re-load events for current date after refresh
+      await loadNewsEvents(newsDate);
+      await loadHealth();
+    } catch (err) {
+      console.error("refreshNewsCalendar error", err);
+      setNewsError(err instanceof Error ? err.message : "Failed to refresh calendar");
+    } finally {
+      setNewsRefreshing(false);
     }
+  }
 
-    useEffect(() => {
+  async function loadNewsEvents(day: string) {
+    setNewsLoading(true);
+    try {
+      const dayStart = new Date(`${day}T00:00:00Z`);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+      const { data, error } = await (supabase as any).from("economic_events")
+        .select("*")
+        .gte("event_time", dayStart.toISOString())
+        .lt("event_time", dayEnd.toISOString())
+        .order("event_time", { ascending: true });
+      if (error) throw error;
+      setNewsEvents((data as EconomicEvent[]) ?? []);
+    } catch (err) {
+      console.error("loadNewsEvents error", err);
+      setNewsEvents([]);
+      setNewsError(err instanceof Error ? err.message : "Failed to load events");
+    } finally {
+      setNewsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSignals();
+    loadHealth();
+    (async () => {
+      try {
+        const r = await getTdKeysConfiguredFn();
+        setTdKeysConfigured({ k1: !!r.k1, k2: !!r.k2, k3: !!r.k3 });
+      } catch { /* ignore */ }
+    })();
+    // Poll the database every 30s for cron-created signals and health stats
+    const t = setInterval(() => { loadSignals(); loadHealth(); }, 30000);
+    // Mobile browsers throttle/pause setInterval when the tab is backgrounded
+    // (e.g. switching to check TwelveData or Telegram). Force an immediate
+    // refresh the instant the tab becomes visible/focused again so the
+    // Health tab never shows stale, frozen numbers after switching apps.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
         loadSignals();
         loadHealth();
-        (async () => {
-            try {
-                const r = await getTdKeysConfiguredFn();
-                setTdKeysConfigured({
-                    k1: !!r.k1, k2: !!r.k2, k3: !!r.k3
-                });
-            } catch {
-                /* ignore */
-            }
-        })();
-        // Poll the database every 30s for cron-created signals and health stats
-        const t = setInterval(() => {
-            loadSignals(); loadHealth();
-        }, 30000);
-        // Mobile browsers throttle/pause setInterval when the tab is backgrounded
-        // (e.g. switching to check TwelveData or Telegram). Force an immediate
-        // refresh the instant the tab becomes visible/focused again so the
-        // Health tab never shows stale, frozen numbers after switching apps.
-        const onVisible = () => {
-            if (document.visibilityState === "visible") {
-                loadSignals();
-                loadHealth();
-            }
-        };
-        document.addEventListener("visibilitychange", onVisible);
-        window.addEventListener("focus", onVisible);
-        return () => {
-            clearInterval(t);
-            document.removeEventListener("visibilitychange", onVisible);
-            window.removeEventListener("focus", onVisible);
-        };
-    },
-        []);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
 
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            await loadNewsEvents(newsDate);
-            if (cancelled) return;
-        })();
-        return () => {
-            cancelled = true;
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [newsDate]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await loadNewsEvents(newsDate);
+      if (cancelled) return;
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newsDate]);
 
-    async function runScan(mode: "full" | "latest" = "full") {
-        setScanning(true);
-        // Server always fetches all 3 timeframes now (1h cache is TTL-protected),
-        // so progress UI must match — otherwise 1h progress events become orphans.
-        const activeTfs = [...TFS];
-        setScanTimeframes(activeTfs);
-        const init: Record < string, ProgressItem > = {};
-        PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = {
-            status: "pending"
-        })));
-        setScanProgress(init);
-        setCurrentFetch(null);
-        try {
-            // Proxied through TanStack server route — INTERNAL_FN_SECRET stays server-side.
-            const res = await fetch(`/api/internal/scan`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    mode,
-                    stream: true
-                }),
-            });
-            if (!res.ok) throw new Error(`Scan failed (${res.status})`);
-            if (!res.body) throw new Error("Live scan stream unavailable");
+  async function runScan(mode: "full" | "latest" = "full") {
+    setScanning(true);
+    // Server always fetches all 3 timeframes now (1h cache is TTL-protected),
+    // so progress UI must match — otherwise 1h progress events become orphans.
+    const activeTfs = [...TFS];
+    setScanTimeframes(activeTfs);
+    const init: Record<string, ProgressItem> = {};
+    PAIRS.forEach((p) => activeTfs.forEach((tf) => (init[`${p}|${tf}`] = { status: "pending" })));
+    setScanProgress(init);
+    setCurrentFetch(null);
+    try {
+      // Proxied through TanStack server route — INTERNAL_FN_SECRET stays server-side.
+      const res = await fetch(`/api/internal/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, stream: true }),
+      });
+      if (!res.ok) throw new Error(`Scan failed (${res.status})`);
+      if (!res.body) throw new Error("Live scan stream unavailable");
 
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            let data: any = null;
-            const handleEvent = (evt: ProgressEvent) => {
-                if (evt.type === "complete") {
-                    data = evt.result; return;
-                }
-                if (evt.type === "error") throw new Error(evt.error ?? "Scan failed");
-                if (!evt.pair || !evt.timeframe || !evt.status) return;
-                const label = `${evt.pair} ${evt.timeframe}`;
-                setCurrentFetch(evt.status === "fetching" || evt.status === "waiting" || evt.status === "rate_limited" ? label: null);
-                setScanProgress((s) => ({
-                    ...s, [`${evt.pair}|${evt.timeframe}`]: {
-                        status: evt.status!, message: evt.message, updatedAt: Date.now()
-                    }
-                }));
-            };
-            while (true) {
-                const {
-                    value,
-                    done
-                } = await reader.read();
-                buffer += decoder.decode(value ?? new Uint8Array(), {
-                    stream: !done
-                });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() ?? "";
-                for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
-                if (done) break;
-            }
-            if (buffer.trim()) handleEvent(JSON.parse(buffer));
-            if (!data) throw new Error("Scan completed without a result");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let data: any = null;
+      const handleEvent = (evt: ProgressEvent) => {
+        if (evt.type === "complete") { data = evt.result; return; }
+        if (evt.type === "error") throw new Error(evt.error ?? "Scan failed");
+        if (!evt.pair || !evt.timeframe || !evt.status) return;
+        const label = `${evt.pair} ${evt.timeframe}`;
+        setCurrentFetch(evt.status === "fetching" || evt.status === "waiting" || evt.status === "rate_limited" ? label : null);
+        setScanProgress((s) => ({ ...s, [`${evt.pair}|${evt.timeframe}`]: { status: evt.status!, message: evt.message, updatedAt: Date.now() } }));
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+        if (done) break;
+      }
+      if (buffer.trim()) handleEvent(JSON.parse(buffer));
+      if (!data) throw new Error("Scan completed without a result");
 
-            const result: ScanResult = {
-                when: new Date().toISOString(),
-                new: data.new_signals ?? 0,
-                used: data.api_calls_used ?? 0,
-                today: data.api_calls_today ?? 0,
-                mode: data.mode ?? mode,
-                errors: data.errors ?? [],
-                report: data.report ?? [],
-            };
-            setLastScan(result);
-            setReportOpen(true);
-            setBudgetToday(data.api_calls_today ?? 0);
-            await loadSignals();
-            if (mode === "latest" && soundOn && (data.new_signals ?? 0) > 0) playBeep();
-            lastSignalCountRef.current = (data.new_signals ?? 0);
-        } catch (e) {
-            setLastScan({
-                when: new Date().toISOString(), new: 0, used: 0, today: budgetToday,
-                mode, errors: [(e as Error).message], report: [],
-            });
-        } finally {
-            setCurrentFetch(null);
-            setScanning(false);
-        }
+      const result: ScanResult = {
+        when: new Date().toISOString(),
+        new: data.new_signals ?? 0,
+        used: data.api_calls_used ?? 0,
+        today: data.api_calls_today ?? 0,
+        mode: data.mode ?? mode,
+        errors: data.errors ?? [],
+        report: data.report ?? [],
+      };
+      setLastScan(result);
+      setReportOpen(true);
+      setBudgetToday(data.api_calls_today ?? 0);
+      await loadSignals();
+      if (mode === "latest" && soundOn && (data.new_signals ?? 0) > 0) playBeep();
+      lastSignalCountRef.current = (data.new_signals ?? 0);
+    } catch (e) {
+      setLastScan({
+        when: new Date().toISOString(), new: 0, used: 0, today: budgetToday,
+        mode, errors: [(e as Error).message], report: [],
+      });
+    } finally {
+      setCurrentFetch(null);
+      setScanning(false);
     }
+  }
 
-    // Server-side cron handles auto-scans every 15 min; no client interval needed.
+  // Server-side cron handles auto-scans every 15 min; no client interval needed.
 
-    // Manual status setter — user can click any tile at any time to correct outcome.
-    async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
-        const risk = Math.abs(s.entry - s.stop_loss);
-        let outcome_r: number | null = null;
-        if (risk > 0) {
-            if (status === "tp1") outcome_r = Math.abs(s.tp1 - s.entry) / risk;
-            else if (status === "tp2") outcome_r = Math.abs(s.tp2 - s.entry) / risk;
-            else if (status === "loss") outcome_r = -1;
-            else if (status === "be" || status === "expired") outcome_r = 0;
-        }
-        const update: TablesUpdate < "signals" > = {
-            status
-        };
-        if (status === "pending") {
-            update.outcome_r = null; update.closed_at = null; update.executed_at = null; update.partial_close = false;
-        } else if (status === "executed") {
-            update.outcome_r = null; update.closed_at = null;
-            update.executed_at = new Date().toISOString();
-        } else {
-            update.outcome_r = outcome_r;
-            update.closed_at = new Date().toISOString();
-        }
-        const {
-            error
-        } = await supabase.from("signals").update(update).eq("id", s.id);
-        if (error) {
-            console.error("setStatus failed", error); alert(`Failed to update status: ${error.message}`); return;
-        }
-        await loadSignals();
+  // Manual status setter — user can click any tile at any time to correct outcome.
+  async function setStatus(s: Signal, status: "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired") {
+    const risk = Math.abs(s.entry - s.stop_loss);
+    let outcome_r: number | null = null;
+    if (risk > 0) {
+      if (status === "tp1") outcome_r = Math.abs(s.tp1 - s.entry) / risk;
+      else if (status === "tp2") outcome_r = Math.abs(s.tp2 - s.entry) / risk;
+      else if (status === "loss") outcome_r = -1;
+      else if (status === "be" || status === "expired") outcome_r = 0;
     }
-    async function markPartialTp1Be(s: Signal) {
-        const risk = Math.abs(s.entry - s.stop_loss);
-        const tp1R = risk > 0 ? Math.abs(s.tp1 - s.entry) / risk: 0;
-        const blended = +(tp1R / 2).toFixed(2);
-        await supabase.from("signals")
-        .update({
-            status: "tp1", partial_close: true, outcome_r: blended, closed_at: new Date().toISOString()
-        })
-        .eq("id", s.id);
-        await loadSignals();
+    const update: TablesUpdate<"signals"> = { status };
+    if (status === "pending") {
+      update.outcome_r = null; update.closed_at = null; update.executed_at = null; update.partial_close = false;
+    } else if (status === "executed") {
+      update.outcome_r = null; update.closed_at = null;
+      update.executed_at = new Date().toISOString();
+    } else {
+      update.outcome_r = outcome_r;
+      update.closed_at = new Date().toISOString();
     }
+    const { error } = await supabase.from("signals").update(update).eq("id", s.id);
+    if (error) { console.error("setStatus failed", error); alert(`Failed to update status: ${error.message}`); return; }
+    await loadSignals();
+  }
+  async function markPartialTp1Be(s: Signal) {
+    const risk = Math.abs(s.entry - s.stop_loss);
+    const tp1R = risk > 0 ? Math.abs(s.tp1 - s.entry) / risk : 0;
+    const blended = +(tp1R / 2).toFixed(2);
+    await supabase.from("signals")
+      .update({ status: "tp1", partial_close: true, outcome_r: blended, closed_at: new Date().toISOString() })
+      .eq("id", s.id);
+    await loadSignals();
+  }
 
-    // Correlation / exposure check
-    function exposureCheck(s: Signal): string | null {
-        const open = signals.filter(x => stageOf(x) === 2);
-        if (open.length >= (appSettings.metaapi_max_trades ?? 3)) {
-            return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} concurrent open trades already`;
-        }
-        for (const [a, b] of CORRELATIONS) {
-            if (s.pair === a || s.pair === b) {
-                const conflict = open.find(x => (x.pair === a || x.pair === b) && x.direction === s.direction && x.id !== s.id);
-                if (conflict) return `Correlation conflict: ${conflict.pair} ${conflict.direction} already open`;
-            }
-        }
-        return null;
+  // Correlation / exposure check
+  function exposureCheck(s: Signal): string | null {
+    const open = signals.filter(x => stageOf(x) === 2);
+    if (open.length >= (appSettings.metaapi_max_trades ?? 3)) {
+      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} concurrent open trades already`;
     }
-
-    // Live news-risk check: any high-impact event within ±30min for a relevant currency.
-    function newsRiskCheck(s: Signal): string | null {
-        const ccys = s.pair === "XAU/USD" ? ["USD",
-            "XAU"]: s.pair === "BTC/USD" ? ["USD"]: [s.pair.slice(0, 3),
-            s.pair.slice(4, 7)];
-        const t = Date.now();
-        for (const e of todaysEvents) {
-            if (!ccys.includes(e.currency)) continue;
-            const dt = new Date(e.event_time).getTime();
-            const diff = Math.round((dt - t) / 60000);
-            if (Math.abs(diff) <= 30) {
-                return `${e.title} (${e.currency}) ${diff >= 0 ? `in ${diff}m`: `${-diff}m ago`}`;
-            }
-        }
-        return null;
-    }
-
-    const stats = useMemo(() => {
-        // Normalise setup name to family so Edge tab groups VERITAS variants etc.
-        const edgeFamily = (setupName: string): string => {
-            if (setupName.startsWith("VERITAS")) return "VERITAS";
-            if (setupName.startsWith("QSS")) return "QSS";
-            if (setupName.startsWith("PRISM")) return "PRISM";
-            if (setupName.includes("BOS Retest") && setupName.includes("EMA Pullback"))
-                return "BOS + EMA Pullback";
-            if (setupName.includes("BOS Retest") && setupName.includes("Session"))
-                return "BOS + Session Range";
-            if (setupName.includes("BOS Retest")) return "BOS Retest";
-            if (setupName.includes("EMA Pullback")) return "EMA Pullback";
-            if (setupName.includes("Session Range Break")) return "Session Range Break";
-            if (setupName.includes("OB+FVG") || setupName.includes("Order Block"))
-                return "OB / Order Block";
-            if (setupName.includes("CHOCH")) return "CHOCH";
-            return setupName;
-        };
-        const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
-        const bySetup: Record < string,
-        {
-            n: number; wins: number; rSum: number
-        } > = {};
-        for (const s of closed) {
-            const fam = edgeFamily(s.setup);
-            if (!bySetup[fam]) bySetup[fam] = {
-                n: 0,
-                wins: 0,
-                rSum: 0
-            };
-            bySetup[fam].n++;
-            bySetup[fam].rSum += s.outcome_r ?? 0;
-            if ((s.outcome_r ?? 0) > 0) bySetup[fam].wins++;
-        }
-
-        const summary = Object.entries(bySetup).map(([setup, v]) => ({
-            setup, n: v.n,
-            winRate: v.n ? (v.wins / v.n) * 100: 0,
-            avgR: v.n ? v.rSum / v.n: 0,
-            expectancy: v.n ? v.rSum / v.n: 0,
-        }));
-        let cum = 0;
-        const curve = [...closed]
-        .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
-        .map((s, i) => {
-            cum += s.outcome_r ?? 0; return {
-                i: i + 1, r: +cum.toFixed(2)
-            };
-        });
-        const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
-        return {
-            summary,
-            curve,
-            totalR: cum,
-            totalN: closed.length,
-            winRate: closed.length ? (wins / closed.length) * 100: 0
-        };
-    },
-        [signals]);
-
-    const pendingSignals = signals.filter((s) => stageOf(s) === 1);
-    const openSignals = signals.filter((s) => stageOf(s) === 2);
-    const budgetPct = Math.min(100,
-        (budgetToday / DAILY_BUDGET) * 100);
-
-    // Server cron projected budget — actual scans run at the app-level interval.
-    const autoCallsPerScan = 14;
-    const effectiveIntervalMin = appSettings.scan_interval_minutes || 15;
-    const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
-    const projectedDaily = scansPerDay * autoCallsPerScan;
-
-    // Risk exposure (open / In-Trade signals)
-    const openOnly = signals.filter((s) => stageOf(s) === 2);
-    const openRiskPct = openOnly.length * RISK_PER_TRADE_PCT;
-    const correlationWarnings: string[] = [];
     for (const [a, b] of CORRELATIONS) {
-        const sameDirOpen = openOnly.filter((s) => (s.pair === a || s.pair === b));
-        const longs = sameDirOpen.filter((s) => s.direction === "Long");
-        const shorts = sameDirOpen.filter((s) => s.direction === "Short");
-        if (longs.length >= 2) correlationWarnings.push(`${a} + ${b} both LONG — correlated exposure`);
-        if (shorts.length >= 2) correlationWarnings.push(`${a} + ${b} both SHORT — correlated exposure`);
+      if (s.pair === a || s.pair === b) {
+        const conflict = open.find(x => (x.pair === a || x.pair === b) && x.direction === s.direction && x.id !== s.id);
+        if (conflict) return `Correlation conflict: ${conflict.pair} ${conflict.direction} already open`;
+      }
     }
-    const lastCron = scanRuns.find((r) => r.source === "cron" && r.finished_at) ?? scanRuns.find((r) => r.source === "cron");
-    const nextCronAt = lastCron
-    ? new Date(new Date(lastCron.started_at).getTime() + CRON_INTERVAL_MIN * 60_000): null;
+    return null;
+  }
 
-    return (
-        <div className="min-h-screen scanline">
-            <div className="mx-auto max-w-6xl px-4 py-6">
-                <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-4">
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight">
-                            <span className="text-primary">▲</span> SCALPEDGE
-                        </h1>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            FX + GOLD SCALPING TERMINAL · 5M/15M · 1H BIAS · SMC + MFI
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <div className="text-right">
-                            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">
-                                API Budget
-                            </div>
-                            <div className="text-sm font-semibold">
-                                {budgetToday} / {DAILY_BUDGET}
-                            </div>
-                            <div className="w-32 h-1 mt-1 bg-secondary rounded overflow-hidden">
-                                <div className="h-full transition-all" style={ {
-                                    width: `${budgetPct}%`,
-                                    backgroundColor: budgetPct > 85 ? "var(--bear)": budgetPct > 60 ? "var(--chart-4)": "var(--bull)",
-                                }} />
-                            </div>
-                        </div>
-                        <button onClick={() => runScan("full")} disabled={scanning}
-                            className="px-5 py-3 bg-primary text-primary-foreground font-bold text-sm uppercase tracking-wider rounded hover:opacity-90 disabled:opacity-50 transition-opacity">
-                            {scanning ? "SCANNING…": "▶ SCAN"}
-                        </button>
-                    </div>
-                </header>
+  // Live news-risk check: any high-impact event within ±30min for a relevant currency.
+  function newsRiskCheck(s: Signal): string | null {
+    const ccys = s.pair === "XAU/USD" ? ["USD", "XAU"]
+      : s.pair === "BTC/USD" ? ["USD"]
+      : [s.pair.slice(0, 3), s.pair.slice(4, 7)];
+    const t = Date.now();
+    for (const e of todaysEvents) {
+      if (!ccys.includes(e.currency)) continue;
+      const dt = new Date(e.event_time).getTime();
+      const diff = Math.round((dt - t) / 60000);
+      if (Math.abs(diff) <= 30) {
+        return `${e.title} (${e.currency}) ${diff >= 0 ? `in ${diff}m` : `${-diff}m ago`}`;
+      }
+    }
+    return null;
+  }
 
-                { {
-                    /* Server-side cron status pill */
-                } < div className = "mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2 flex-wrap" >
-                {
-                    appSettings.paused ? (
-                        <>
-                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-bear" />
-                            <span className="text-bear font-bold">CRON PAUSED</span>
-                            <span className="text-muted-foreground normal-case">· toggle in Settings to resume</span>
-                        </>
-                    ): (
-                        <>
-                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                            SERVER CRON · every {effectiveIntervalMin}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on": "off"}
-                            {lastCron && (
-                                <span className="text-muted-foreground normal-case">
-                                    · last cron {timeAgo(lastCron.started_at)} ago
-                                    {nextCronAt && nextCronAt.getTime() > Date.now() && (
-                                        <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
-                                    )}
-                                </span>
-                            )}
-                        </>
-                    )}
-
-                {
-                    /* ─── ADDED MULTI-CHANNEL VISUAL HEALTH PIPELINE ─── */
-                }
-                {(() => {
-                    if (!appSettings.bridge_last_seen) return null;
-                    const lastSeenMs = new Date(appSettings.bridge_last_seen).getTime();
-                    const secondsAgo = Math.floor((Date.now() - lastSeenMs) / 1000);
-                    // 45s threshold provides a safe buffer window over your 20s MT4 polling cadence
-                    const isOnline = secondsAgo < 45;
-
-                    return (
-                        <div className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-border bg-card/60 shadow-sm">
-                            <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-bull animate-pulse": "bg-bear"}`} />
-                            <span className={`font-mono text-[9px] font-bold ${isOnline ? "text-bull": "text-bear"}`}>
-                                MT4 FREE BRIDGE: {isOnline ? "ONLINE": `OFFLINE (${secondsAgo}s ago)`}
-                            </span>
-                        </div>
-                    );
-                })()} < /div>
-
-
-                {
-                    scanning && (
-                        <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    Live Scan
-                                </div>
-                                {currentFetch && <div className="text-[10px] uppercase tracking-wider text-primary animate-pulse">
-                                    Now: {currentFetch}
-                                </div>
-                                }
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 text-xs font-mono">
-                                {PAIRS.flatMap((p) => scanTimeframes.map((tf) => {
-                                    const item = scanProgress[`${p}|${tf}`] ?? {
-                                        status: "pending" as ProgressStatus
-                                    };
-                                    const st = item.status;
-                                    const active = st === "fetching" || st === "waiting" || st === "rate_limited";
-                                    return (
-                                        <div key={`${p}|${tf}`} className="flex items-center gap-2 min-w-0" title={item.message}>
-                                            <span className={st === "done" || st === "cached" ? "text-bull": st === "error" || st === "rate_limited" ? "text-chart-4": active ? "text-primary animate-pulse": "text-muted-foreground/50"}>
-                                                {st === "done" ? "✓": st === "cached" ? "↺": st === "error" ? "!": active ? "◌": "·"}
-                                            </span>
-                                            <span className={st === "pending" ? "text-muted-foreground/60 truncate": "truncate"}>{p} {tf}</span>
-                                            {st === "cached" && <span className="text-[9px] text-bull uppercase">cached</span>}
-                                            {st === "fetching" && <span className="text-[9px] text-primary uppercase">fetching</span>}
-                                            {st === "waiting" && <span className="text-[9px] text-primary uppercase">queued</span>}
-                                            {st === "done" && <span className="text-[9px] text-bull uppercase">fresh</span>}
-                                            {st === "rate_limited" && <span className="text-[9px] text-chart-4 uppercase">429 retry</span>}
-                                        </div>
-                                    );
-                                }))}
-                            </div>
-                        </div>
-                    )}
-
-                {
-                    lastScan && !scanning && (
-                        <div className="mt-3 text-xs flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
-                            <span>LAST SCAN <span className="text-foreground">{timeAgo(lastScan.when)} ago</span></span>
-                            <span>MODE <span className="text-foreground uppercase">{lastScan.mode}</span></span>
-                            <span>NEW <span className="text-primary font-semibold">{lastScan.new}</span></span>
-                            <span>USED <span className="text-foreground">{lastScan.used}</span> credits</span>
-                            {lastScan.errors.length > 0 && (
-                                <span className="text-bear">{lastScan.errors.length} error(s): {lastScan.errors[0]}</span>
-                            )}
-                            {lastScan.report.length > 0 && (
-                                <button onClick={() => setReportOpen((o) => !o)}
-                                    className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider border border-border rounded hover:border-primary/40 hover:text-foreground">
-                                    {reportOpen ? "▾ Hide": "▸ Show"} Scan Report
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                {
-                    lastScan && reportOpen && lastScan.report.length > 0 && <ScanReport report={lastScan.report} />
-                } < nav className = "mt-6 flex gap-1 border-b border-border overflow-x-auto" >
-                {([
-                    ["signals",
-                        `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
-                    ["edge",
-                        "EDGE"],
-                    ["history",
-                        "HISTORY"],
-                    ["news",
-                        "NEWS"],
-                    ["health",
-                        "HEALTH"],
-                    ["settings",
-                        "SETTINGS"],
-                ] as const).map(([k, label]) => (
-                    <button key={k} onClick={() => setTab(k)}
-                        className={`px-4 py-2 text-xs uppercase tracking-wider font-semibold border-b-2 transition-colors whitespace-nowrap ${
-                        tab === k ? "border-primary text-primary": "border-transparent text-muted-foreground hover:text-foreground"
-                        }`}>
-                        {label}
-                    </button>
-                ))} < /nav>
-
-                {
-                    tab === "signals" && (
-                        <>
-                            <RiskExposureWidget
-                                openSignals={openOnly}
-                                openRiskPct={openRiskPct}
-                                correlationWarnings={correlationWarnings}
-                                maxTrades={appSettings.metaapi_max_trades ?? 3}
-                                />
-                            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
-                                exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck}
-                                appSettings={appSettings} onRefresh={loadSignals} />
-                        </>
-                    )}
-                {
-                    tab === "edge" && <EdgePanel stats={stats} />
-                }
-                {
-                    tab === "history" && <HistoryPanel signals={signals} />
-                }
-                {
-                    tab === "news" && (
-                        <NewsPanel
-                            events={newsEvents}
-                            date={newsDate}
-                            setDate={setNewsDate}
-                            pairs={PAIRS}
-                            onRefresh={refreshNewsCalendar}
-                            loading={newsLoading}
-                            refreshing={newsRefreshing}
-                            error={newsError}
-                            />
-                    )}
-                {
-                    tab === "health" && (
-                        <HealthPanel
-                            scanRuns={scanRuns}
-                            cacheRows={cacheRows}
-                            priceHealth={priceHealth}
-                            budgetToday={budgetToday}
-                            budgetTodayKey1={budgetTodayKey1}
-                            budgetTodayKey2={budgetTodayKey2}
-                            budgetTodayKey3={budgetTodayKey3}
-                            lastCron={lastCron ?? null}
-                            nextCronAt={nextCronAt}
-                            appSettings={appSettings}
-                            saveAppSettings={saveAppSettings}
-                            todaysEvents={todaysEvents}
-                            />
-                    )}
-                {
-                    tab === "settings" && (
-                        <SettingsPanel
-                            soundOn={soundOn} setSoundOn={setSoundOn}
-                            projectedDaily={projectedDaily}
-                            appSettings={appSettings}
-                            saveAppSettings={saveAppSettings}
-                            refreshNewsCalendar={refreshNewsCalendar}
-                            todaysEvents={todaysEvents}
-                            tdKeysConfigured={tdKeysConfigured}
-                            tdKeysExhausted={tdKeysExhausted}
-                            />
-                    )} < footer className = "mt-12 text-center text-[10px] text-muted-foreground uppercase tracking-widest" >
-                Not financial advice · Mechanical edge tracking · Spread-adjusted prices · 1H HTF aligned < /footer> < /div> < /div>
-            );
-            }
-
-            function ScanReport({ report }: { report: PairReport[] }) {
-            const [open, setOpen] = useState < Set < string>>(new Set());
-            const toggle = (pair: string) => {
-                setOpen((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(pair)) next.delete(pair);
-                    else next.add(pair);
-                    return next;
-                });
-            };
-
-            return (
-                <div className="mt-3 border border-border rounded bg-card/60 p-3 animate-fade-in">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-                        Scan Report · {report.length} pairs
-                    </div>
-                    <div className="space-y-2 text-xs">
-                        {report.map((p) => {
-                            const isOpen = open.has(p.pair);
-                            return (
-                                <div key={p.pair} className="border-b border-border/40 pb-2 last:border-b-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-bold">{p.pair}</span>
-                                        {p.cached && <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-secondary/60 text-muted-foreground">cached</span>}
-                                        {p.htf_bias && (
-                                            <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
-                                                p.htf_bias === "bull" ? "bg-bull/20 text-bull":
-                                                p.htf_bias === "bear" ? "bg-bear/20 text-bear": "bg-secondary/60 text-muted-foreground"
-                                                }`}>
-                                                1H {p.htf_bias}
-                                            </span>
-                                        )}
-                                        {p.candle_time && (
-                                            <span className="text-[10px] text-muted-foreground">
-                                                last 5m: {new Date(p.candle_time).toISOString().slice(11, 16)} UTC
-                                            </span>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={() => toggle(p.pair)}
-                                        className="mt-1.5 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-                                        >
-                                        {isOpen ? <ChevronDown size={12} />: <ChevronRight size={12} />}
-                                        Strategy Breakdown
-                                    </button>
-                                    {isOpen && (
-                                        <div className="mt-1.5 space-y-1 pl-2">
-                                            {p.checks.map((c, i) => (
-                                                <div key={i} className="flex items-center gap-2">
-                                                    <span
-                                                        className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
-                                                        c.status === "qualified"
-                                                        ? "bg-bull/20 text-bull": c.status === "filtered"
-                                                        ? "bg-chart-4/20 text-chart-4": "bg-muted text-muted-foreground"
-                                                        }`}
-                                                        >
-                                                        {c.status}
-                                                    </span>
-                                                    <span className="text-foreground/80">{c.setup}</span>
-                                                    {c.direction && <span className="text-muted-foreground">({c.direction})</span>}
-                                                    {c.reason && <span className="text-muted-foreground italic">— {c.reason}</span>}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            );
-            }
-
-            type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
-
-            function SignalList({
-            signals, onStatus, onPartial, exposureCheck, newsRiskCheck, appSettings, onRefresh,
-            }: {
-            signals: Signal[];
-            onStatus: (s: Signal,
-                status: StatusKey) => void;
-            onPartial: (s: Signal) => void;
-            exposureCheck: (s: Signal) => string | null;
-            newsRiskCheck: (s: Signal) => string | null;
-            appSettings: AppSettings;
-            onRefresh: () => void | Promise < void >;
-            }) {
-            const PAGE = 50;
-            const [page, setPage] = useState(0);
-            const totalPages = Math.max(1,
-                Math.ceil(signals.length / PAGE));
-            const cur = Math.min(page,
-                totalPages - 1);
-            const slice = signals.slice(cur * PAGE,
-                cur * PAGE + PAGE);
-            if (signals.length === 0) {
-                return (
-                    <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
-                        <div className="text-sm">
-                            NO SIGNALS YET
-                        </div>
-                        <div className="text-xs mt-1">
-                            Hit ▶ SCAN to scan all 7 pairs on 5m + 15m + 1H bias
-                        </div>
-                    </div>
-                );
-            }
-            return (
-                <div className="mt-4 space-y-2">
-                    {slice.map((s) => (
-                        <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
-                            warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s): null}
-                            newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s): null}
-                            appSettings={appSettings} onRefresh={onRefresh} />
-                    ))}
-                    {signals.length > PAGE && (
-                        <div className="flex items-center justify-between gap-3 pt-3 text-xs">
-                            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0}
-                                className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
-                                ← Prev
-                            </button>
-                            <span className="text-muted-foreground uppercase tracking-wider">
-                                Page {cur + 1} / {totalPages} · {signals.length} signals
-                            </span>
-                            <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={cur >= totalPages - 1}
-                                className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
-                                Next →
-                            </button>
-                        </div>
-                    )}
-                </div>
-            );
-            }
-
-            function SignalRow({
-            s,
-            onStatus,
-            onPartial,
-            warning,
-            newsRisk,
-            appSettings,
-            onRefresh,
-            }: {
-            s: Signal;
-            onStatus: (s: Signal, status: StatusKey) => void;
-            onPartial: (s: Signal) => void;
-            warning: string | null;
-            newsRisk: string | null;
-            appSettings: AppSettings;
-            onRefresh: () => void | Promise < void >;
-            }) {
-            const long = s.direction === "Long";
-            const stage = stageOf(s);
-            const orderType = s.order_type ?? (long ? "Buy Limit": "Sell Limit");
-            const spreadLabel = s.spread_pips != null
-            ? (isGold(s.pair) ? `$0.40 spread`: isBTC(s.pair) ? `$2.00 spread`: `${s.spread_pips}p spread`): null;
-
-            // Correlation blocks moving to In-Trade
-            const blockedExecute = warning && s.status === "pending";
-
-            // Retry eligibility — failed/skipped/never-executed, within 3h, auto-trade + pair both enabled.
-            const retryFn = useServerFn(retryExecutionFn);
-            const [retryState,
-                setRetryState] = useState <
-            {
-                kind: "idle"
-            } | {
-                kind: "loading"
-            } | {
-                kind: "sent"
-            } | {
-                kind: "error"; msg: string
-            } > ({
-                    kind: "idle"
-                });
-            const execStatus = s.metaapi_execution_status ?? null;
-            const retryStatusEligible =
-            ["failed",
-                "skipped",
-                "retrying"].includes(execStatus ?? "") || execStatus === null || execStatus === "none";
-            const isRetrying = execStatus === "retrying";
-            const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
-            const retryEligible =
-            retryStatusEligible &&
-            signalAgeMs < 3 * 60 * 60 * 1000 &&
-            !!appSettings.metaapi_auto_trade &&
-            (appSettings.pair_auto_execute?.[s.pair] !== false);
-
-            async function handleRetry() {
-                setRetryState({
-                    kind: "loading"
-                });
-                try {
-                    const res = await retryFn( {
-                        data: {
-                            signal_id: s.id
-                        }
-                    });
-                    if (res.ok) {
-                        setRetryState({
-                            kind: "sent"
-                        });
-                        setTimeout(() => {
-                            setRetryState({
-                                kind: "idle"
-                            }); void onRefresh();
-                        }, 3000);
-                    } else {
-                        setRetryState({
-                            kind: "error", msg: res.reason ?? "Retry failed"
-                        });
-                        setTimeout(() => setRetryState({
-                            kind: "idle"
-                        }), 5000);
-                    }
-                } catch (e: any) {
-                    setRetryState({
-                        kind: "error", msg: String(e?.message ?? e).slice(0, 200)
-                    });
-                    setTimeout(() => setRetryState({
-                        kind: "idle"
-                    }), 5000);
-                }
-            }
-
-            return (
-                <div className={`border rounded p-3 transition-colors ${
-                    stage === 3 ? "bg-card/40 border-border/60 opacity-75": stage === 2 ? "bg-card border-primary/40": "bg-card border-border hover:border-primary/40"
-                    }`}>
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`px-2 py-0.5 text-xs font-bold rounded ${long ? "bg-bull/15 text-bull": "bg-bear/15 text-bear"}`}>
-                                {long ? "▲ LONG": "▼ SHORT"}
-                            </span>
-                            <span className="font-bold text-base">{s.pair}</span>
-                            <span className="text-xs text-muted-foreground">{s.timeframe}</span>
-                            <span className="text-xs text-muted-foreground">·</span>
-                            <span className="text-xs text-foreground/80">{s.setup}</span>
-                            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-primary/15 text-primary uppercase tracking-wider">
-                                {orderType}
-                            </span>
-                            {s.htf_bias && s.htf_bias !== "neutral" && (
-                                <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
-                                    s.htf_bias === "bull" ? "bg-bull/15 text-bull": "bg-bear/15 text-bear"
-                                    }`}>1H {s.htf_bias}</span>
-                            )}
-                            {s.mfi_divergence && (
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary">MFI div</span>
-                            )}
-                            {s.news_flag && (
-                                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-destructive/20 text-destructive">NEWS</span>
-                            )}
-                            {s.partial_close && (
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4">partial</span>
-                            )}
-                            {s.metaapi_position_id && (
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary font-bold"
-                                    title={`Position ${s.metaapi_position_id}${s.metaapi_filled_price ? ` @ ${s.metaapi_filled_price}`: ""}`}>
-                                    ⚡ MT {s.metaapi_pnl != null ? `${s.metaapi_pnl >= 0 ? "+": ""}${s.metaapi_pnl.toFixed(2)}`: "live"}
-                                </span>
-                            )}
-                            {s.metaapi_execution_status === "failed" && (
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
-                                    MT FAILED
-                                </span>
-                            )}
-                            {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
-                                <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
-                                    ↳ {s.metaapi_execution_error}
-                                </span>
-                            )}
-                            {s.paper_status === "triggered" && (!s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">TRIGGERED</span>
-                            )}
-                            {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
-                                const ps = s.paper_status;
-                                const cls =
-                                ps === "tp1_hit" ? "bg-bull/20 text-bull":
-                                ps === "tp2_hit" ? "bg-bull/30 text-bull":
-                                ps === "sl_hit" ? "bg-destructive/20 text-destructive":
-                                "bg-muted text-muted-foreground";
-                                const label =
-                                ps === "tp1_hit" ? "TP1 ✓":
-                                ps === "tp2_hit" ? "TP2 ✓":
-                                ps === "sl_hit" ? "SL ✗":
-                                ps === "expired" ? "EXPIRED": "TRACKING";
-                                return (
-                                    <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${cls}`}
-                                        title={s.paper_hit ? `Hit at ${new Date(s.paper_hit).toLocaleString()}`: "Paper-tracked"}>
-                                        {label}
-                                    </span>
-                                );
-                            })()}
-                            {retryEligible && (
-                                <button
-                                    type="button"
-                                    onClick={handleRetry}
-                                    disabled={isRetrying || retryState.kind === "loading" || retryState.kind === "sent"}
-                                    title="Retry auto-execution. Only available within 3 hours of signal. All risk gates still apply."
-                                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded border uppercase tracking-wider transition-colors ${
-                                    retryState.kind === "sent"
-                                    ? "border-bull/60 text-bull bg-bull/10": retryState.kind === "error"
-                                    ? "border-destructive/60 text-destructive bg-destructive/10": isRetrying
-                                    ? "border-chart-4/60 text-chart-4 bg-chart-4/10 opacity-70 cursor-wait": "border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50"
-                                    }`}
-                                    >
-                                    {isRetrying ? (<span className="inline-flex items-center gap-1"><span className="animate-spin inline-block">⟳</span> RETRYING…</span>): retryState.kind === "loading" ? "⟳ …": retryState.kind === "sent" ? "✓ Sent": retryState.kind === "error" ? "✗ Failed": "↺ Retry"}
-                                </button>
-                            )}
-                            {retryState.kind === "error" && (
-                                <span className="text-[10px] text-destructive truncate max-w-[240px]" title={retryState.msg}>
-                                    ↳ {retryState.msg}
-                                </span>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs">
-                            {s.mfi_score != null && (<>
-                                <span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
-                            <span className="text-muted-foreground">SCORE</span>
-                            <span className="font-semibold">{s.session_score}</span>
-                            <span className="text-muted-foreground">CONF</span>
-                            <span className="font-semibold" style={ {
-                                color: s.confidence >= 75 ? "var(--bull)": s.confidence >= 60 ? "var(--chart-4)": "var(--muted-foreground)"
-                            }}>{s.confidence}%</span>
-                            <span className="text-muted-foreground">{timeAgo(s.created_at)}</span>
-                        </div>
-                    </div>
-
-                    <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
-                        <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
-                        {spreadLabel && <span>· {spreadLabel} applied</span>}
-                    </div>
-
-                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                        <Cell label="ENTRY" value={fmtPrice(s.entry, s.pair)} />
-                        <Cell label="SL" value={fmtPrice(s.stop_loss, s.pair)} color="bear" />
-                        <Cell label="TP1" value={fmtPrice(s.tp1, s.pair)} color="bull" />
-                        <Cell label="TP2" value={fmtPrice(s.tp2, s.pair)} color="bull" />
-                        <Cell label="R:R" value={`1 : ${s.rr.toFixed(1)}`} />
-                    </div>
-
-                    {warning && (
-                        <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
-                            ⚠ {warning}
-                        </div>
-                    )}
-                    {newsRisk && (
-                        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1">
-                            ⚠ News Risk · {newsRisk} — signal suppressed by 30-min blackout
-                        </div>
-                    )}
-
-                    {/* Manual status tiles — clickable at any time */}
-                    <div className="mt-3">
-                        <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                            Status — click to set
-                        </div>
-                        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                            <StatusTile label="Pending" active={s.status === "pending"} onClick={() => onStatus(s, "pending")} />
-                            <StatusTile label="In-Trade" active={s.status === "executed"} onClick={() => onStatus(s, "executed")}
-                                disabled={!!blockedExecute && s.status !== "executed"} tone="primary" />
-                            <StatusTile label="TP 1" active={s.status === "tp1" && !s.partial_close} onClick={() => onStatus(s, "tp1")} tone="bull" />
-                            <StatusTile label="TP 2" active={s.status === "tp2"} onClick={() => onStatus(s, "tp2")} tone="bull" />
-                            <StatusTile label="BE" active={s.status === "be"} onClick={() => onStatus(s, "be")} />
-                            <StatusTile label="SL" active={s.status === "loss"} onClick={() => onStatus(s, "loss")} tone="bear" />
-                            <StatusTile label="Expired" active={s.status === "expired"} onClick={() => onStatus(s, "expired")} />
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                            <button onClick={() => onPartial(s)}
-                                className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/15">
-                                TP1 + BE runner (partial)
-                            </button>
-                            {stage === 3 && s.outcome_r !== null && (
-                                <span className="text-xs font-bold" style={ {
-                                    color: s.outcome_r > 0 ? "var(--bull)": s.outcome_r < 0 ? "var(--bear)": "var(--muted-foreground)"
-                                }}>
-                                    {s.outcome_r > 0 ? "+": ""}{s.outcome_r.toFixed(2)}R
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            );
-            }
-
-            function StatusTile({
-            label,
-            active,
-            onClick,
-            tone,
-            disabled,
-            }: {
-            label: string; active: boolean; onClick: () => void;
-            tone?: "primary" | "bull" | "bear"; disabled?: boolean;
-            }) {
-            const toneColor = tone === "bull" ? "bull": tone === "bear" ? "bear": tone === "primary" ? "primary": "foreground";
-            const activeCls =
-            tone === "bull" ? "bg-bull/20 border-bull text-bull": tone === "bear" ? "bg-bear/20 border-bear text-bear": tone === "primary" ? "bg-primary/20 border-primary text-primary": "bg-secondary border-foreground text-foreground";
-            const idleCls =
-            tone === "bull" ? "border-border text-muted-foreground hover:border-bull hover:text-bull": tone === "bear" ? "border-border text-muted-foreground hover:border-bear hover:text-bear": tone === "primary" ? "border-border text-muted-foreground hover:border-primary hover:text-primary": "border-border text-muted-foreground hover:text-foreground";
-            return (
-                <button
-                    type="button"
-                    onClick={onClick}
-                    disabled={disabled}
-                    title={disabled ? "Blocked by correlation rule": `Set status to ${label}`}
-                    data-tone={toneColor}
-                    className={`px-2 py-1.5 text-[10px] uppercase tracking-wider font-semibold rounded border transition-colors ${
-                    active ? activeCls: idleCls
-                    } ${disabled ? "opacity-40 cursor-not-allowed": ""}`}
-                    >
-                    {label}
-                </button>
-            );
-            }
-
-
-            function Cell({ label,
-            value,
-            color }: { label: string; value: string; color?: "bull" | "bear" }) {
-            return (
-                <div className="flex flex-col bg-secondary/40 px-2 py-1 rounded">
-                    <span className="text-[9px] uppercase text-muted-foreground tracking-wider">{label}</span>
-                    <span className={`font-semibold ${color === "bull" ? "text-bull": color === "bear" ? "text-bear": ""}`}>{value}</span>
-                </div>
-            );
-            }
-
-            function SettingsPanel({
-            soundOn,
-            setSoundOn,
-            projectedDaily,
-            appSettings,
-            saveAppSettings,
-            refreshNewsCalendar,
-            todaysEvents,
-            tdKeysConfigured,
-            tdKeysExhausted,
-            }: {
-            soundOn: boolean; setSoundOn: (v: boolean) => void;
-            projectedDaily: number;
-            appSettings: AppSettings;
-            saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
-            refreshNewsCalendar: () => Promise < void >;
-            todaysEvents: EconomicEvent[];
-            tdKeysConfigured: {
-                k1: boolean; k2: boolean; k3: boolean
-            };
-            tdKeysExhausted: {
-                k1: boolean; k2: boolean; k3: boolean
-            };
-            }) {
-            void refreshNewsCalendar; void todaysEvents;
-            return (
-                <div className="mt-4 space-y-3">
-                    <div className="border border-border rounded bg-card p-4">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">
-                            Server-Side Scan Engine
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <div className="text-sm font-semibold">
-                                    {appSettings.paused ? "Scanner Paused": "Scanner Running"}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-0.5">
-                                    {appSettings.paused
-                                    ? "Cron job exits immediately. No API calls are made.": `Auto-scans every ${appSettings.scan_interval_minutes || 15} minutes server-side.`}
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => saveAppSettings( { paused: !appSettings.paused })}
-                                className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition-colors ${
-                                appSettings.paused
-                                ? "bg-bull/15 text-bull border-bull/40 hover:bg-bull/25": "bg-bear/15 text-bear border-bear/40 hover:bg-bear/25"
-                                }`}
-                                >
-                                {appSettings.paused ? "▶ Resume Scanner": "⏸ Pause Scanner"}
-                            </button>
-                        </div>
-                        <div className="mt-2 text-xs text-muted-foreground">
-                            Browser tab does not need to be open. Estimated{" "}
-                            <span className="text-foreground font-semibold">{projectedDaily}</span> API calls/day.
-                            Use ▶ SCAN at the top for an on-demand full scan.
-                        </div>
-                    </div>
-
-                    <TradingHoursPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-
-                    <div className="border border-border rounded bg-card p-4">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">
-                            TwelveData API Key
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <div className="text-sm font-semibold">
-                                    Active: Key #{appSettings.active_td_key}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-0.5">
-                                    Manually switch which TwelveData API key the scanner uses for all data fetches.
-                                </div>
-                            </div>
-                            <div className="flex gap-1 border border-border rounded overflow-hidden">
-                                {[1, 2, 3].map((k) => {
-                                    const active = appSettings.active_td_key === k;
-                                    const configured = k === 1 ? tdKeysConfigured.k1: k === 2 ? tdKeysConfigured.k2: tdKeysConfigured.k3;
-                                    const exhausted = k === 1 ? tdKeysExhausted.k1: k === 2 ? tdKeysExhausted.k2: tdKeysExhausted.k3;
-                                    const disabled = !configured;
-                                    return (
-                                        <button
-                                            key={k}
-                                            disabled={disabled}
-                                            title={!configured ? "TWELVEDATA_API_KEY_" + k + " not set in secrets": exhausted ? "Rate-limited today": ""}
-                                            onClick={() => {
-                                                if (disabled) return;
-                                                try { localStorage.setItem("active_td_key", String(k)); } catch { /* ignore */ }
-                                                saveAppSettings( { active_td_key: k });
-                                            }}
-                                            className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
-                                            !configured
-                                            ? "bg-transparent text-muted-foreground/40 cursor-not-allowed": active
-                                            ? "bg-primary text-primary-foreground": exhausted
-                                            ? "bg-transparent text-muted-foreground/60 hover:bg-muted": "bg-transparent text-muted-foreground hover:bg-muted"
-                                            }`}
-                                            >
-                                            Key {k}{!configured ? " · NOT CONFIGURED": active ? " ●": exhausted ? " ◌": ""}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-
-                    <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-
-                    <ScanEngineControlsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-
-
-
-
-                    <div className="border border-border rounded bg-card p-4">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">
-                            Notifications
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-sm">Sound on new signal (browser)</span>
-                            <Toggle on={soundOn} onChange={setSoundOn} />
-                        </div>
-                        <div className="mt-2 text-xs text-muted-foreground">
-                            Telegram alerts are sent server-side whenever a new signal is saved (if bot token + chat ID are configured).
-                        </div>
-                    </div>
-
-                    <div className="border border-border rounded bg-card p-4 text-xs text-muted-foreground space-y-1">
-                        <div className="text-[10px] uppercase tracking-wider mb-2">
-                            Risk Rules
-                        </div>
-                        <div>
-                            • Max {appSettings.metaapi_max_trades} concurrent open trades
-                        </div>
-                        <div>
-                            • EUR/USD ↔ GBP/USD: max 1 same-direction
-                        </div>
-                        <div>
-                            • GBP/JPY ↔ EUR/JPY: max 1 same-direction
-                        </div>
-                        <div>
-                            • XAU/USD: independent
-                        </div>
-                        <div>
-                            • Spreads: USD majors 1.2p · crosses 2.5p · XAU/USD $0.40 · BTC/USD $2.00
-                        </div>
-                    </div>
-                </div>
-            );
-            }
-
-            function TokenField({ configured, onSave }: { configured: boolean; onSave: (value: string) => Promise < void > }) {
-            const [editing, setEditing] = useState(!configured);
-            const [value, setValue] = useState("");
-            const [saving, setSaving] = useState(false);
-
-            useEffect(() => {
-                if (!configured) setEditing(true);
-            },
-                [configured]);
-
-            async function save() {
-                if (value.trim().length < 20) {
-                    alert("Token looks too short — paste the full MetaApi token.");
-                    return;
-                }
-                setSaving(true);
-                try {
-                    await onSave(value.trim());
-                    setValue("");
-                    setEditing(false);
-                } finally {
-                    setSaving(false);
-                }
-            }
-
-            return (
-                <div className="border border-border rounded bg-background/40 px-3 py-2">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            MetaApi Token
-                        </div>
-                        {configured && !editing && (
-                            <div className="flex items-center gap-2">
-                                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-bull/20 text-bull font-bold">Configured ✓</span>
-                                <button onClick={() => setEditing(true)}
-                                    className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border rounded hover:bg-muted/50">
-                                    Change
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                    {editing ? (
-                        <div className="flex items-center gap-2">
-                            <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)}
-                            placeholder="Paste MetaApi token (JWT)"
-                            className="flex-1 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-                        <button onClick={save} disabled={saving}
-                            className="text-[10px] uppercase tracking-wider px-3 py-1.5 border border-border rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
-                            {saving ? "Saving...": "Save"}
-                        </button>
-                        {configured && (
-                            <button onClick={() => { setEditing(false); setValue(""); }}
-                                className="text-[10px] uppercase tracking-wider px-2 py-1.5 border border-border rounded hover:bg-muted/50">
-                                Cancel
-                            </button>
-                        )}
-                    </div>
-                ): null}
-                <div className="text-[10px] text-muted-foreground mt-1">
-                    Stored privately in app settings. Falls back to the <code className="text-foreground">METAAPI_TOKEN</code> env secret if unset.
-                </div>
-            </div>
-        );
-        }
-
-        function VeritasParamsPanel({
-        appSettings,
-        saveAppSettings,
-        }: {
-        appSettings: AppSettings;
-        saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
-        }) {
-        const [vSL,
-            setVSL] = useState(appSettings?.veritas_sl_mult ?? 1.5);
-        const [vTP,
-            setVTP] = useState(appSettings?.veritas_tp_mult ?? 2.5);
-        const [vH,
-            setVH] = useState(appSettings?.veritas_min_hurst ?? 0.55);
-        const [vSNR,
-            setVSNR] = useState(appSettings?.veritas_min_snr ?? 40);
-        const [vConf,
-            setVConf] = useState(appSettings?.veritas_min_conf ?? 72);
-        const [vRR,
-            setVRR] = useState(appSettings?.veritas_min_rr ?? 1.60);
-
-        useEffect(() => {
-            if (!appSettings) return;
-            setVSL(appSettings.veritas_sl_mult ?? 1.5);
-            setVTP(appSettings.veritas_tp_mult ?? 2.5);
-            setVH(appSettings.veritas_min_hurst ?? 0.55);
-            setVSNR(appSettings.veritas_min_snr ?? 40);
-            setVConf(appSettings.veritas_min_conf ?? 72);
-            setVRR(appSettings.veritas_min_rr ?? 1.60);
-        },
-            [appSettings]);
-
-        const saveVeritas = (key: string,
-            value: number) => {
-            if (!isFinite(value)) return;
-            saveAppSettings( {
-                [key]: value
-            } as Partial < AppSettings >);
-        };
-
-        const fields: Array < {
-            label: string; key: string; val: number; set: (n: number) => void; min: number; max: number; step: number; hint: string
-        } > = [{
-                label: "SL MULT (×ATR)",
-                key: "veritas_sl_mult",
-                val: vSL,
-                set: setVSL,
-                min: 0.5,
-                max: 3,
-                step: 0.1,
-                hint: "Default 1.5"
-            },
-            {
-                label: "TP MULT (×ATR)",
-                key: "veritas_tp_mult",
-                val: vTP,
-                set: setVTP,
-                min: 1,
-                max: 5,
-                step: 0.1,
-                hint: "3.0 → RR 2.0"
-            },
-            {
-                label: "MIN HURST",
-                key: "veritas_min_hurst",
-                val: vH,
-                set: setVH,
-                min: 0.50,
-                max: 0.70,
-                step: 0.01,
-                hint: "0.57 recommended"
-            },
-            {
-                label: "MIN SNR",
-                key: "veritas_min_snr",
-                val: vSNR,
-                set: setVSNR,
-                min: 20,
-                max: 80,
-                step: 5,
-                hint: "40–50 ideal"
-            },
-            {
-                label: "MIN CONF",
-                key: "veritas_min_conf",
-                val: vConf,
-                set: setVConf,
-                min: 50,
-                max: 99,
-                step: 1,
-                hint: "72 floor"
-            },
-            {
-                label: "MIN R:R (VERITAS)",
-                key: "veritas_min_rr",
-                val: vRR,
-                set: setVRR,
-                min: 1,
-                max: 3,
-                step: 0.05,
-                hint: "1.85 with TP=3×"
-            },
-        ];
-
-        return (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {fields.map(({
-                    label, key, val, set, min, max, step, hint
-                }) => (
-                    <label key={key} className="text-xs">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                            {label}
-                        </div>
-                        <input
-                        type="number"
-                        step={step} min={min} max={max}
-                        className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-                        value={val}
-                        onChange={e => {
-                            const n = parseFloat(e.target.value);
-                            if (isFinite(n)) set(n);
-                        }}
-                        onBlur={e => {
-                            const n = Math.min(max, Math.max(min, parseFloat(e.target.value) || min));
-                            set(n);
-                            saveVeritas(key, n);
-                        }}
-                        />
-                    <div className="text-[10px] text-muted-foreground/70 mt-0.5">
-                        {hint}
-                    </div>
-                </label>
-                ))}
-        </div>
-    );
+  const stats = useMemo(() => {
+    // Normalise setup name to family so Edge tab groups VERITAS variants etc.
+    const edgeFamily = (setupName: string): string => {
+      if (setupName.startsWith("VERITAS")) return "VERITAS";
+      if (setupName.startsWith("QSS"))     return "QSS";
+      if (setupName.startsWith("PRISM"))   return "PRISM";
+      if (setupName.includes("BOS Retest") && setupName.includes("EMA Pullback"))
+        return "BOS + EMA Pullback";
+      if (setupName.includes("BOS Retest") && setupName.includes("Session"))
+        return "BOS + Session Range";
+      if (setupName.includes("BOS Retest")) return "BOS Retest";
+      if (setupName.includes("EMA Pullback")) return "EMA Pullback";
+      if (setupName.includes("Session Range Break")) return "Session Range Break";
+      if (setupName.includes("OB+FVG") || setupName.includes("Order Block"))
+        return "OB / Order Block";
+      if (setupName.includes("CHOCH")) return "CHOCH";
+      return setupName;
+    };
+    const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
+    const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
+    for (const s of closed) {
+      const fam = edgeFamily(s.setup);
+      if (!bySetup[fam]) bySetup[fam] = { n: 0, wins: 0, rSum: 0 };
+      bySetup[fam].n++;
+      bySetup[fam].rSum += s.outcome_r ?? 0;
+      if ((s.outcome_r ?? 0) > 0) bySetup[fam].wins++;
     }
 
-    type ScanGateKey =
-    | "metaapi_min_confidence" | "metaapi_min_rr" | "metaapi_min_adx"
-    | "metaapi_trail_lock_r" | "twelvedata_key_threshold"
-    | "metaapi_risk_per_trade_pct" | "metaapi_min_lot" | "metaapi_max_lot"
-    | "metaapi_max_trades" | "metaapi_expiry_hours" | "metaapi_max_daily_loss_pct"
-    | "metaapi_min_stop_points"
-    | "veritas_sl_mult" | "veritas_tp_mult" | "veritas_min_hurst"
-    | "veritas_min_snr" | "veritas_min_conf" | "veritas_min_rr";
+    const summary = Object.entries(bySetup).map(([setup, v]) => ({
+      setup, n: v.n,
+      winRate: v.n ? (v.wins / v.n) * 100 : 0,
+      avgR: v.n ? v.rSum / v.n : 0,
+      expectancy: v.n ? v.rSum / v.n : 0,
+    }));
+    let cum = 0;
+    const curve = [...closed]
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+      .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
+    const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
+    return { summary, curve, totalR: cum, totalN: closed.length, winRate: closed.length ? (wins / closed.length) * 100 : 0 };
+  }, [signals]);
 
-    function ScanEngineControlsPanel({
-    appSettings, saveAppSettings,
-    }: {
-    appSettings: AppSettings;
-    saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
-    }) {
-    const initial = useMemo < Record < ScanGateKey, number>>(() => ({
-        metaapi_min_confidence: appSettings?.metaapi_min_confidence ?? 82,
-        metaapi_min_rr: appSettings?.metaapi_min_rr ?? 2.0,
-        metaapi_min_adx: appSettings?.metaapi_min_adx ?? 20,
-        metaapi_trail_lock_r: appSettings?.metaapi_trail_lock_r ?? 0.5,
-        twelvedata_key_threshold: appSettings?.twelvedata_key_threshold ?? 700,
-        metaapi_risk_per_trade_pct: appSettings?.metaapi_risk_per_trade_pct ?? 3,
-        metaapi_min_lot: appSettings?.metaapi_min_lot ?? 0.1,
-        metaapi_max_lot: appSettings?.metaapi_max_lot ?? 1,
-        metaapi_max_trades: appSettings?.metaapi_max_trades ?? 5,
-        metaapi_expiry_hours: appSettings?.metaapi_expiry_hours ?? 12,
-        metaapi_max_daily_loss_pct: appSettings?.metaapi_max_daily_loss_pct ?? 50,
-        metaapi_min_stop_points: appSettings?.metaapi_min_stop_points ?? 0,
-        veritas_sl_mult: appSettings?.veritas_sl_mult ?? 1.5,
-        veritas_tp_mult: appSettings?.veritas_tp_mult ?? 2.5,
-        veritas_min_hurst: appSettings?.veritas_min_hurst ?? 0.55,
-        veritas_min_snr: appSettings?.veritas_min_snr ?? 40,
-        veritas_min_conf: appSettings?.veritas_min_conf ?? 72,
-        veritas_min_rr: appSettings?.veritas_min_rr ?? 1.60,
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), []);
+  const pendingSignals = signals.filter((s) => stageOf(s) === 1);
+  const openSignals = signals.filter((s) => stageOf(s) === 2);
+  const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
 
-    const [scanGates, setScanGates] = useState < Record < ScanGateKey, number>>(initial);
-    const [savedFlash, setSavedFlash] = useState < ScanGateKey | null > (null);
-    const [open, setOpen] = useState(true);
+  // Server cron projected budget — actual scans run at the app-level interval.
+  const autoCallsPerScan = 14;
+  const effectiveIntervalMin = appSettings.scan_interval_minutes || 15;
+  const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
+  const projectedDaily = scansPerDay * autoCallsPerScan;
 
-    useEffect(() => {
-        if (!appSettings) return;
-        setScanGates({
-            metaapi_min_confidence: appSettings.metaapi_min_confidence ?? 82,
-            metaapi_min_rr: appSettings.metaapi_min_rr ?? 2.0,
-            metaapi_min_adx: appSettings.metaapi_min_adx ?? 20,
-            metaapi_trail_lock_r: appSettings.metaapi_trail_lock_r ?? 0.5,
-            twelvedata_key_threshold: appSettings.twelvedata_key_threshold ?? 700,
-            metaapi_risk_per_trade_pct: appSettings.metaapi_risk_per_trade_pct ?? 3,
-            metaapi_min_lot: appSettings.metaapi_min_lot ?? 0.1,
-            metaapi_max_lot: appSettings.metaapi_max_lot ?? 1,
-            metaapi_max_trades: appSettings.metaapi_max_trades ?? 5,
-            metaapi_expiry_hours: appSettings.metaapi_expiry_hours ?? 12,
-            metaapi_max_daily_loss_pct: appSettings.metaapi_max_daily_loss_pct ?? 50,
-            metaapi_min_stop_points: appSettings.metaapi_min_stop_points ?? 0,
-            veritas_sl_mult: appSettings.veritas_sl_mult ?? 1.5,
-            veritas_tp_mult: appSettings.veritas_tp_mult ?? 2.5,
-            veritas_min_hurst: appSettings.veritas_min_hurst ?? 0.55,
-            veritas_min_snr: appSettings.veritas_min_snr ?? 40,
-            veritas_min_conf: appSettings.veritas_min_conf ?? 72,
-            veritas_min_rr: appSettings.veritas_min_rr ?? 1.60,
-        });
-    },
-        [appSettings]);
+  // Risk exposure (open / In-Trade signals)
+  const openOnly = signals.filter((s) => stageOf(s) === 2);
+  const openRiskPct = openOnly.length * RISK_PER_TRADE_PCT;
+  const correlationWarnings: string[] = [];
+  for (const [a, b] of CORRELATIONS) {
+    const sameDirOpen = openOnly.filter((s) => (s.pair === a || s.pair === b));
+    const longs = sameDirOpen.filter((s) => s.direction === "Long");
+    const shorts = sameDirOpen.filter((s) => s.direction === "Short");
+    if (longs.length >= 2) correlationWarnings.push(`${a} + ${b} both LONG — correlated exposure`);
+    if (shorts.length >= 2) correlationWarnings.push(`${a} + ${b} both SHORT — correlated exposure`);
+  }
+  const lastCron = scanRuns.find((r) => r.source === "cron" && r.finished_at) ?? scanRuns.find((r) => r.source === "cron");
+  const nextCronAt = lastCron
+    ? new Date(new Date(lastCron.started_at).getTime() + CRON_INTERVAL_MIN * 60_000)
+    : null;
 
-    const saveGate = async (key: ScanGateKey,
-        value: number) => {
-        if (!isFinite(value)) return;
-        setScanGates(prev => ({
-            ...prev, [key]: value
-        }));
-        try {
-            await saveAppSettings( {
-                [key]: value
-            } as Partial < AppSettings >);
-            setSavedFlash(key);
-            setTimeout(() => {
-                setSavedFlash(cur => (cur === key ? null: cur));
-            }, 2000);
-        } catch {
-            /* ignored — parent handles error */
-        }
-    };
-
-    type FieldDef = {
-        key: ScanGateKey; label: string; min: number; max: number; step: number; hint?: string
-    };
-    const group1: FieldDef[] = [{
-        key: "metaapi_min_confidence",
-        label: "MIN CONFIDENCE (%)",
-        min: 50,
-        max: 99,
-        step: 1,
-        hint: `Signals below this % are never saved or alerted. Currently: ${scanGates.metaapi_min_confidence}%`
-    },
-        {
-            key: "metaapi_min_rr",
-            label: "MIN R:R (GLOBAL)",
-            min: 1,
-            max: 4,
-            step: 0.05,
-            hint: "VERITAS uses its own R:R gate below. All other setups use this value."
-        },
-        {
-            key: "metaapi_min_adx",
-            label: "MIN ADX (TREND)",
-            min: 0,
-            max: 50,
-            step: 1,
-            hint: "EMA Pullback + BOS Retest skip when 15M ADX is below this. 0 = disabled."
-        },
-        {
-            key: "metaapi_trail_lock_r",
-            label: "TRAIL LOCK-IN (R)",
-            min: 0,
-            max: 1,
-            step: 0.05,
-            hint: "After TP1 hit, Order B SL moves to entry + this fraction of 1R. 0 = breakeven only."
-        },
-        {
-            key: "twelvedata_key_threshold",
-            label: "API KEY THRESHOLD",
-            min: 100,
-            max: 800,
-            step: 50,
-            hint: "Switch to next TwelveData key at this many daily calls. 700 = 100-call safety buffer."
-        },
-    ];
-    const group2: FieldDef[] = [{
-        key: "metaapi_risk_per_trade_pct",
-        label: "RISK PER TRADE (%)",
-        min: 0.1,
-        max: 10,
-        step: 0.1
-    },
-        {
-            key: "metaapi_min_lot",
-            label: "MIN LOT",
-            min: 0.01,
-            max: 1,
-            step: 0.01
-        },
-        {
-            key: "metaapi_max_lot",
-            label: "MAX LOT",
-            min: 0.1,
-            max: 10,
-            step: 0.1
-        },
-        {
-            key: "metaapi_max_trades",
-            label: "MAX OPEN TRADES",
-            min: 1,
-            max: 20,
-            step: 1
-        },
-        {
-            key: "metaapi_expiry_hours",
-            label: "PENDING EXPIRY (HRS)",
-            min: 1,
-            max: 72,
-            step: 1,
-            hint: "Pending limit/stop orders cancel after this."
-        },
-        {
-            key: "metaapi_max_daily_loss_pct",
-            label: "MAX DAILY LOSS (%)",
-            min: 1,
-            max: 100,
-            step: 1
-        },
-        {
-            key: "metaapi_min_stop_points",
-            label: "MIN STOP DIST (PTS)",
-            min: 0,
-            max: 500,
-            step: 1,
-            hint: "Blocks orders where SL is closer than this to entry. 0 = disabled. 25 = RoboForex XAU guard."
-        },
-    ];
-    const group3: FieldDef[] = [{
-        key: "veritas_sl_mult",
-        label: "SL MULT (×ATR)",
-        min: 0.5,
-        max: 3,
-        step: 0.1,
-        hint: "Default 1.5"
-    },
-        {
-            key: "veritas_tp_mult",
-            label: "TP MULT (×ATR)",
-            min: 1,
-            max: 5,
-            step: 0.1,
-            hint: "3.0 → RR 2.0"
-        },
-        {
-            key: "veritas_min_hurst",
-            label: "MIN HURST",
-            min: 0.50,
-            max: 0.70,
-            step: 0.01,
-            hint: "0.57 recommended"
-        },
-        {
-            key: "veritas_min_snr",
-            label: "MIN SNR",
-            min: 20,
-            max: 80,
-            step: 5,
-            hint: "40–50 ideal"
-        },
-        {
-            key: "veritas_min_conf",
-            label: "MIN CONF (VERITAS)",
-            min: 50,
-            max: 99,
-            step: 1,
-            hint: "72 floor"
-        },
-        {
-            key: "veritas_min_rr",
-            label: "MIN R:R (VERITAS)",
-            min: 1,
-            max: 3,
-            step: 0.05,
-            hint: "1.85 with TP=3×"
-        },
-    ];
-
-    const renderField = (f: FieldDef) => {
-        const val = scanGates[f.key];
-        const flashing = savedFlash === f.key;
-        return (
-            <label key={f.key} className="text-xs relative">
-                <div className="flex items-center justify-between mb-1">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {f.label}
-                    </div>
-                    {flashing && (
-                        <span className="text-[9px] uppercase tracking-wider text-bull font-bold">✓ saved</span>
-                    )}
-                </div>
-                <input
-                type="number"
-                step={f.step} min={f.min} max={f.max}
-                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-                value={val}
-                onChange={e => {
-                    const n = parseFloat(e.target.value);
-                    if (isFinite(n)) setScanGates(p => ({ ...p, [f.key]: n }));
-                }}
-                onBlur={e => {
-                    const n = Math.min(f.max, Math.max(f.min, parseFloat(e.target.value) || f.min));
-                    saveGate(f.key, n);
-                }}
-                />
-            {f.hint && <div className="text-[10px] text-muted-foreground/70 mt-0.5">
-                {f.hint}
+  return (
+    <div className="min-h-screen scanline">
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              <span className="text-primary">▲</span> SCALPEDGE
+            </h1>
+            <p className="text-xs text-muted-foreground mt-1">
+              FX + GOLD SCALPING TERMINAL · 5M/15M · 1H BIAS · SMC + MFI
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-[10px] uppercase text-muted-foreground tracking-wider">API Budget</div>
+              <div className="text-sm font-semibold">{budgetToday} / {DAILY_BUDGET}</div>
+              <div className="w-32 h-1 mt-1 bg-secondary rounded overflow-hidden">
+                <div className="h-full transition-all" style={{
+                  width: `${budgetPct}%`,
+                  backgroundColor: budgetPct > 85 ? "var(--bear)" : budgetPct > 60 ? "var(--chart-4)" : "var(--bull)",
+                }}/>
+              </div>
             </div>
-            }
-        </label>
-    );
-};
+            <button onClick={() => runScan("full")} disabled={scanning}
+              className="px-5 py-3 bg-primary text-primary-foreground font-bold text-sm uppercase tracking-wider rounded hover:opacity-90 disabled:opacity-50 transition-opacity">
+              {scanning ? "SCANNING…" : "▶ SCAN"}
+            </button>
+          </div>
+        </header>
 
-const renderGroup = (title: string,
-    helper: string,
-    fields: FieldDef[]) => (
-    <div className="pt-3 mt-3 border-t border-border/60">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-primary/90">
-            {title}
-        </div>
-        <div className="text-[10px] text-muted-foreground mb-2">
-            {helper}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {fields.map(renderField)}
-        </div>
-    </div>
-);
-
-return (
-    <div className="border border-border rounded bg-card p-4">
-        <button
-            type="button"
-            onClick={() => setOpen(o => !o)}
-            className="w-full flex items-center justify-between text-left"
-            >
-            <div>
-                <div className="text-[10px] uppercase tracking-widest text-primary font-bold">
-                    Scan Engine Controls
-                </div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">
-                    Every gate that affects scan-signals in one place. Changes take effect on the next scan cycle (within 15 min). No redeploy needed.
-                </div>
-            </div>
-            <span className={`text-muted-foreground text-sm transition-transform ${open ? "rotate-180": ""}`}>▾</span>
-        </button>
-
-        {open && (
+        {/* Server-side cron status pill */}
+        <div className="mt-3 text-[10px] uppercase tracking-wider text-primary flex items-center gap-2 flex-wrap">
+          {appSettings.paused ? (
             <>
-                {/* CURRENT LIVE VALUES status strip */}
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded bg-background/60 border border-border/60 text-[10px] font-mono text-muted-foreground">
-                    <span>Conf gate: <span className="text-foreground">{scanGates.metaapi_min_confidence}%</span></span>
-                    <span className="text-border">│</span>
-                    <span>R:R gate: <span className="text-foreground">{scanGates.metaapi_min_rr}</span></span>
-                    <span className="text-border">│</span>
-                    <span>ADX filter: <span className="text-foreground">{scanGates.metaapi_min_adx}</span></span>
-                    <span className="text-border">│</span>
-                    <span>Trail: <span className="text-foreground">+{scanGates.metaapi_trail_lock_r}R</span></span>
-                    <span className="text-border">│</span>
-                    <span>Key threshold: <span className="text-foreground">{scanGates.twelvedata_key_threshold}/800</span></span>
-                </div>
-
-                {renderGroup(
-                    "Signal Quality Gates",
-                    "Applied in scan-signals before any signal is saved or alerted. Takes effect on next scan cycle.",
-                    group1,
-                )}
-                {renderGroup(
-                    "Risk & Execution Gates",
-                    "Applied in metaapi-execute before placing orders.",
-                    group2,
-                )}
-                {renderGroup(
-                    "VERITAS Strategy Parameters",
-                    "Controls VERITAS signal generation thresholds. Changes take effect on next scan cycle.",
-                    group3,
-                )}
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-bear" />
+              <span className="text-bear font-bold">CRON PAUSED</span>
+              <span className="text-muted-foreground normal-case">· toggle in Settings to resume</span>
             </>
+          ) : (
+            <>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              SERVER CRON · every {effectiveIntervalMin}m · {appSettings.trading_hours_start_utc}–{appSettings.trading_hours_end_utc} UTC · key #{appSettings.active_td_key} · ~{projectedDaily} calls/day · sound {soundOn ? "on" : "off"}
+              {lastCron && (
+                <span className="text-muted-foreground normal-case">
+                  · last cron {timeAgo(lastCron.started_at)} ago
+                  {nextCronAt && nextCronAt.getTime() > Date.now() && (
+                    <> · next in ~{Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m</>
+                  )}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+
+        {scanning && (
+          <div className="mt-4 border border-border rounded bg-card p-3 animate-fade-in">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live Scan</div>
+              {currentFetch && <div className="text-[10px] uppercase tracking-wider text-primary animate-pulse">Now: {currentFetch}</div>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 text-xs font-mono">
+              {PAIRS.flatMap((p) => scanTimeframes.map((tf) => {
+                const item = scanProgress[`${p}|${tf}`] ?? { status: "pending" as ProgressStatus };
+                const st = item.status;
+                const active = st === "fetching" || st === "waiting" || st === "rate_limited";
+                return (
+                  <div key={`${p}|${tf}`} className="flex items-center gap-2 min-w-0" title={item.message}>
+                    <span className={st === "done" || st === "cached" ? "text-bull" : st === "error" || st === "rate_limited" ? "text-chart-4" : active ? "text-primary animate-pulse" : "text-muted-foreground/50"}>
+                      {st === "done" ? "✓" : st === "cached" ? "↺" : st === "error" ? "!" : active ? "◌" : "·"}
+                    </span>
+                    <span className={st === "pending" ? "text-muted-foreground/60 truncate" : "truncate"}>{p} {tf}</span>
+                    {st === "cached" && <span className="text-[9px] text-bull uppercase">cached</span>}
+                    {st === "fetching" && <span className="text-[9px] text-primary uppercase">fetching</span>}
+                    {st === "waiting" && <span className="text-[9px] text-primary uppercase">queued</span>}
+                    {st === "done" && <span className="text-[9px] text-bull uppercase">fresh</span>}
+                    {st === "rate_limited" && <span className="text-[9px] text-chart-4 uppercase">429 retry</span>}
+                  </div>
+                );
+              }))}
+            </div>
+          </div>
         )}
+
+        {lastScan && !scanning && (
+          <div className="mt-3 text-xs flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
+            <span>LAST SCAN <span className="text-foreground">{timeAgo(lastScan.when)} ago</span></span>
+            <span>MODE <span className="text-foreground uppercase">{lastScan.mode}</span></span>
+            <span>NEW <span className="text-primary font-semibold">{lastScan.new}</span></span>
+            <span>USED <span className="text-foreground">{lastScan.used}</span> credits</span>
+            {lastScan.errors.length > 0 && (
+              <span className="text-bear">{lastScan.errors.length} error(s): {lastScan.errors[0]}</span>
+            )}
+            {lastScan.report.length > 0 && (
+              <button onClick={() => setReportOpen((o) => !o)}
+                className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider border border-border rounded hover:border-primary/40 hover:text-foreground">
+                {reportOpen ? "▾ Hide" : "▸ Show"} Scan Report
+              </button>
+            )}
+          </div>
+        )}
+
+        {lastScan && reportOpen && lastScan.report.length > 0 && <ScanReport report={lastScan.report} />}
+
+        <nav className="mt-6 flex gap-1 border-b border-border overflow-x-auto">
+          {([
+            ["signals", `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
+            ["edge", "EDGE"],
+            ["history", "HISTORY"],
+            ["news", "NEWS"],
+            ["health", "HEALTH"],
+            ["settings", "SETTINGS"],
+          ] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`px-4 py-2 text-xs uppercase tracking-wider font-semibold border-b-2 transition-colors whitespace-nowrap ${
+                tab === k ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {tab === "signals" && (
+          <>
+            <RiskExposureWidget
+              openSignals={openOnly}
+              openRiskPct={openRiskPct}
+              correlationWarnings={correlationWarnings}
+              maxTrades={appSettings.metaapi_max_trades ?? 3}
+            />
+            <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
+              exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck}
+              appSettings={appSettings} onRefresh={loadSignals} />
+          </>
+        )}
+        {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "history" && <HistoryPanel signals={signals} />}
+        {tab === "news" && (
+          <NewsPanel
+            events={newsEvents}
+            date={newsDate}
+            setDate={setNewsDate}
+            pairs={PAIRS}
+            onRefresh={refreshNewsCalendar}
+            loading={newsLoading}
+            refreshing={newsRefreshing}
+            error={newsError}
+          />
+        )}
+        {tab === "health" && (
+          <HealthPanel
+            scanRuns={scanRuns}
+            cacheRows={cacheRows}
+            priceHealth={priceHealth}
+            budgetToday={budgetToday}
+            budgetTodayKey1={budgetTodayKey1}
+            budgetTodayKey2={budgetTodayKey2}
+            budgetTodayKey3={budgetTodayKey3}
+            lastCron={lastCron ?? null}
+            nextCronAt={nextCronAt}
+            appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
+            todaysEvents={todaysEvents}
+          />
+        )}
+        {tab === "settings" && (
+          <SettingsPanel
+            soundOn={soundOn} setSoundOn={setSoundOn}
+            projectedDaily={projectedDaily}
+            appSettings={appSettings}
+            saveAppSettings={saveAppSettings}
+            refreshNewsCalendar={refreshNewsCalendar}
+            todaysEvents={todaysEvents}
+            tdKeysConfigured={tdKeysConfigured}
+            tdKeysExhausted={tdKeysExhausted}
+          />
+        )}
+
+        <footer className="mt-12 text-center text-[10px] text-muted-foreground uppercase tracking-widest">
+          Not financial advice · Mechanical edge tracking · Spread-adjusted prices · 1H HTF aligned
+        </footer>
+      </div>
     </div>
-);
+  );
+}
+
+function ScanReport({ report }: { report: PairReport[] }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (pair: string) => {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(pair)) next.delete(pair);
+      else next.add(pair);
+      return next;
+    });
+  };
+
+  return (
+    <div className="mt-3 border border-border rounded bg-card/60 p-3 animate-fade-in">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+        Scan Report · {report.length} pairs
+      </div>
+      <div className="space-y-2 text-xs">
+        {report.map((p) => {
+          const isOpen = open.has(p.pair);
+          return (
+            <div key={p.pair} className="border-b border-border/40 pb-2 last:border-b-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold">{p.pair}</span>
+                {p.cached && <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-secondary/60 text-muted-foreground">cached</span>}
+                {p.htf_bias && (
+                  <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
+                    p.htf_bias === "bull" ? "bg-bull/20 text-bull" :
+                    p.htf_bias === "bear" ? "bg-bear/20 text-bear" : "bg-secondary/60 text-muted-foreground"
+                  }`}>
+                    1H {p.htf_bias}
+                  </span>
+                )}
+                {p.candle_time && (
+                  <span className="text-[10px] text-muted-foreground">
+                    last 5m: {new Date(p.candle_time).toISOString().slice(11, 16)} UTC
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => toggle(p.pair)}
+                className="mt-1.5 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                Strategy Breakdown
+              </button>
+              {isOpen && (
+                <div className="mt-1.5 space-y-1 pl-2">
+                  {p.checks.map((c, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span
+                        className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
+                          c.status === "qualified"
+                            ? "bg-bull/20 text-bull"
+                            : c.status === "filtered"
+                            ? "bg-chart-4/20 text-chart-4"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                      <span className="text-foreground/80">{c.setup}</span>
+                      {c.direction && <span className="text-muted-foreground">({c.direction})</span>}
+                      {c.reason && <span className="text-muted-foreground italic">— {c.reason}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type StatusKey = "pending" | "executed" | "tp1" | "tp2" | "be" | "loss" | "expired";
+
+function SignalList({
+  signals, onStatus, onPartial, exposureCheck, newsRiskCheck, appSettings, onRefresh,
+}: {
+  signals: Signal[];
+  onStatus: (s: Signal, status: StatusKey) => void;
+  onPartial: (s: Signal) => void;
+  exposureCheck: (s: Signal) => string | null;
+  newsRiskCheck: (s: Signal) => string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
+}) {
+  const PAGE = 50;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(signals.length / PAGE));
+  const cur = Math.min(page, totalPages - 1);
+  const slice = signals.slice(cur * PAGE, cur * PAGE + PAGE);
+  if (signals.length === 0) {
+    return (
+      <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
+        <div className="text-sm">NO SIGNALS YET</div>
+        <div className="text-xs mt-1">Hit ▶ SCAN to scan all 7 pairs on 5m + 15m + 1H bias</div>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 space-y-2">
+      {slice.map((s) => (
+        <SignalRow key={s.id} s={s} onStatus={onStatus} onPartial={onPartial}
+          warning={s.status === "pending" || s.status === "executed" ? exposureCheck(s) : null}
+          newsRisk={s.status === "pending" || s.status === "executed" ? newsRiskCheck(s) : null}
+          appSettings={appSettings} onRefresh={onRefresh} />
+      ))}
+      {signals.length > PAGE && (
+        <div className="flex items-center justify-between gap-3 pt-3 text-xs">
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            ← Prev
+          </button>
+          <span className="text-muted-foreground uppercase tracking-wider">
+            Page {cur + 1} / {totalPages} · {signals.length} signals
+          </span>
+          <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={cur >= totalPages - 1}
+            className="px-3 py-1.5 border border-border rounded uppercase tracking-wider disabled:opacity-40 hover:border-primary/40">
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalRow({
+  s, onStatus, onPartial, warning, newsRisk, appSettings, onRefresh,
+}: {
+  s: Signal;
+  onStatus: (s: Signal, status: StatusKey) => void;
+  onPartial: (s: Signal) => void;
+  warning: string | null;
+  newsRisk: string | null;
+  appSettings: AppSettings;
+  onRefresh: () => void | Promise<void>;
+}) {
+  const long = s.direction === "Long";
+  const stage = stageOf(s);
+  const orderType = s.order_type ?? (long ? "Buy Limit" : "Sell Limit");
+  const spreadLabel = s.spread_pips != null
+    ? (isGold(s.pair) ? `$0.40 spread` : isBTC(s.pair) ? `$2.00 spread` : `${s.spread_pips}p spread`)
+    : null;
+
+  // Correlation blocks moving to In-Trade
+  const blockedExecute = warning && s.status === "pending";
+
+  // Retry eligibility — failed/skipped/never-executed, within 3h, auto-trade + pair both enabled.
+  const retryFn = useServerFn(retryExecutionFn);
+  const [retryState, setRetryState] = useState<
+    { kind: "idle" } | { kind: "loading" } | { kind: "sent" } | { kind: "error"; msg: string }
+  >({ kind: "idle" });
+  const execStatus = s.metaapi_execution_status ?? null;
+  const retryStatusEligible =
+    ["failed", "skipped", "retrying"].includes(execStatus ?? "") || execStatus === null || execStatus === "none";
+  const isRetrying = execStatus === "retrying";
+  const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
+  const retryEligible =
+    retryStatusEligible &&
+    signalAgeMs < 3 * 60 * 60 * 1000 &&
+    !!appSettings.metaapi_auto_trade &&
+    (appSettings.pair_auto_execute?.[s.pair] !== false);
+
+  async function handleRetry() {
+    setRetryState({ kind: "loading" });
+    try {
+      const res = await retryFn({ data: { signal_id: s.id } });
+      if (res.ok) {
+        setRetryState({ kind: "sent" });
+        setTimeout(() => { setRetryState({ kind: "idle" }); void onRefresh(); }, 3000);
+      } else {
+        setRetryState({ kind: "error", msg: res.reason ?? "Retry failed" });
+        setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+      }
+    } catch (e: any) {
+      setRetryState({ kind: "error", msg: String(e?.message ?? e).slice(0, 200) });
+      setTimeout(() => setRetryState({ kind: "idle" }), 5000);
+    }
+  }
+
+  return (
+    <div className={`border rounded p-3 transition-colors ${
+      stage === 3 ? "bg-card/40 border-border/60 opacity-75"
+      : stage === 2 ? "bg-card border-primary/40"
+      : "bg-card border-border hover:border-primary/40"
+    }`}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`px-2 py-0.5 text-xs font-bold rounded ${long ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"}`}>
+            {long ? "▲ LONG" : "▼ SHORT"}
+          </span>
+          <span className="font-bold text-base">{s.pair}</span>
+          <span className="text-xs text-muted-foreground">{s.timeframe}</span>
+          <span className="text-xs text-muted-foreground">·</span>
+          <span className="text-xs text-foreground/80">{s.setup}</span>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-primary/15 text-primary uppercase tracking-wider">
+            {orderType}
+          </span>
+          {s.htf_bias && s.htf_bias !== "neutral" && (
+            <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
+              s.htf_bias === "bull" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
+            }`}>1H {s.htf_bias}</span>
+          )}
+          {s.mfi_divergence && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary">MFI div</span>
+          )}
+          {s.news_flag && (
+            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-destructive/20 text-destructive">NEWS</span>
+          )}
+          {s.partial_close && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4">partial</span>
+          )}
+          {s.metaapi_position_id && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary font-bold"
+              title={`Position ${s.metaapi_position_id}${s.metaapi_filled_price ? ` @ ${s.metaapi_filled_price}` : ""}`}>
+              ⚡ MT {s.metaapi_pnl != null ? `${s.metaapi_pnl >= 0 ? "+" : ""}${s.metaapi_pnl.toFixed(2)}` : "live"}
+            </span>
+          )}
+          {s.metaapi_execution_status === "failed" && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
+              MT FAILED
+            </span>
+          )}
+          {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
+            <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
+              ↳ {s.metaapi_execution_error}
+            </span>
+          )}
+          {s.paper_status === "triggered" && (!s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">TRIGGERED</span>
+          )}
+          {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
+            const ps = s.paper_status;
+            const cls =
+              ps === "tp1_hit" ? "bg-bull/20 text-bull" :
+              ps === "tp2_hit" ? "bg-bull/30 text-bull" :
+              ps === "sl_hit" ? "bg-destructive/20 text-destructive" :
+              "bg-muted text-muted-foreground";
+            const label =
+              ps === "tp1_hit" ? "TP1 ✓" :
+              ps === "tp2_hit" ? "TP2 ✓" :
+              ps === "sl_hit" ? "SL ✗" :
+              ps === "expired" ? "EXPIRED" : "TRACKING";
+            return (
+              <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${cls}`}
+                title={s.paper_hit ? `Hit at ${new Date(s.paper_hit).toLocaleString()}` : "Paper-tracked"}>
+                {label}
+              </span>
+            );
+          })()}
+          {retryEligible && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={isRetrying || retryState.kind === "loading" || retryState.kind === "sent"}
+              title="Retry auto-execution. Only available within 3 hours of signal. All risk gates still apply."
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded border uppercase tracking-wider transition-colors ${
+                retryState.kind === "sent"
+                  ? "border-bull/60 text-bull bg-bull/10"
+                  : retryState.kind === "error"
+                  ? "border-destructive/60 text-destructive bg-destructive/10"
+                  : isRetrying
+                  ? "border-chart-4/60 text-chart-4 bg-chart-4/10 opacity-70 cursor-wait"
+                  : "border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50"
+              }`}
+            >
+              {isRetrying ? (<span className="inline-flex items-center gap-1"><span className="animate-spin inline-block">⟳</span> RETRYING…</span>)
+                : retryState.kind === "loading" ? "⟳ …"
+                : retryState.kind === "sent" ? "✓ Sent"
+                : retryState.kind === "error" ? "✗ Failed"
+                : "↺ Retry"}
+            </button>
+          )}
+          {retryState.kind === "error" && (
+            <span className="text-[10px] text-destructive truncate max-w-[240px]" title={retryState.msg}>
+              ↳ {retryState.msg}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          {s.mfi_score != null && (<><span className="text-muted-foreground">MFI</span><span className="font-semibold">{s.mfi_score}</span></>)}
+          <span className="text-muted-foreground">SCORE</span>
+          <span className="font-semibold">{s.session_score}</span>
+          <span className="text-muted-foreground">CONF</span>
+          <span className="font-semibold" style={{
+            color: s.confidence >= 75 ? "var(--bull)" : s.confidence >= 60 ? "var(--chart-4)" : "var(--muted-foreground)"
+          }}>{s.confidence}%</span>
+          <span className="text-muted-foreground">{timeAgo(s.created_at)}</span>
+        </div>
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
+        <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
+        {spreadLabel && <span>· {spreadLabel} applied</span>}
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+        <Cell label="ENTRY" value={fmtPrice(s.entry, s.pair)} />
+        <Cell label="SL" value={fmtPrice(s.stop_loss, s.pair)} color="bear" />
+        <Cell label="TP1" value={fmtPrice(s.tp1, s.pair)} color="bull" />
+        <Cell label="TP2" value={fmtPrice(s.tp2, s.pair)} color="bull" />
+        <Cell label="R:R" value={`1 : ${s.rr.toFixed(1)}`} />
+      </div>
+
+      {warning && (
+        <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+          ⚠ {warning}
+        </div>
+      )}
+      {newsRisk && (
+        <div className="mt-2 text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1">
+          ⚠ News Risk · {newsRisk} — signal suppressed by 30-min blackout
+        </div>
+      )}
+
+      {/* Manual status tiles — clickable at any time */}
+      <div className="mt-3">
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Status — click to set</div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+          <StatusTile label="Pending"  active={s.status === "pending"}  onClick={() => onStatus(s, "pending")} />
+          <StatusTile label="In-Trade" active={s.status === "executed"} onClick={() => onStatus(s, "executed")}
+            disabled={!!blockedExecute && s.status !== "executed"} tone="primary" />
+          <StatusTile label="TP 1"     active={s.status === "tp1" && !s.partial_close} onClick={() => onStatus(s, "tp1")} tone="bull" />
+          <StatusTile label="TP 2"     active={s.status === "tp2"}     onClick={() => onStatus(s, "tp2")} tone="bull" />
+          <StatusTile label="BE"       active={s.status === "be"}      onClick={() => onStatus(s, "be")} />
+          <StatusTile label="SL"       active={s.status === "loss"}    onClick={() => onStatus(s, "loss")} tone="bear" />
+          <StatusTile label="Expired"  active={s.status === "expired"} onClick={() => onStatus(s, "expired")} />
+        </div>
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+          <button onClick={() => onPartial(s)}
+            className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/15">
+            TP1 + BE runner (partial)
+          </button>
+          {stage === 3 && s.outcome_r !== null && (
+            <span className="text-xs font-bold" style={{
+              color: s.outcome_r > 0 ? "var(--bull)" : s.outcome_r < 0 ? "var(--bear)" : "var(--muted-foreground)"
+            }}>
+              {s.outcome_r > 0 ? "+" : ""}{s.outcome_r.toFixed(2)}R
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusTile({
+  label, active, onClick, tone, disabled,
+}: {
+  label: string; active: boolean; onClick: () => void;
+  tone?: "primary" | "bull" | "bear"; disabled?: boolean;
+}) {
+  const toneColor = tone === "bull" ? "bull" : tone === "bear" ? "bear" : tone === "primary" ? "primary" : "foreground";
+  const activeCls =
+    tone === "bull" ? "bg-bull/20 border-bull text-bull"
+    : tone === "bear" ? "bg-bear/20 border-bear text-bear"
+    : tone === "primary" ? "bg-primary/20 border-primary text-primary"
+    : "bg-secondary border-foreground text-foreground";
+  const idleCls =
+    tone === "bull" ? "border-border text-muted-foreground hover:border-bull hover:text-bull"
+    : tone === "bear" ? "border-border text-muted-foreground hover:border-bear hover:text-bear"
+    : tone === "primary" ? "border-border text-muted-foreground hover:border-primary hover:text-primary"
+    : "border-border text-muted-foreground hover:text-foreground";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? "Blocked by correlation rule" : `Set status to ${label}`}
+      data-tone={toneColor}
+      className={`px-2 py-1.5 text-[10px] uppercase tracking-wider font-semibold rounded border transition-colors ${
+        active ? activeCls : idleCls
+      } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+
+function Cell({ label, value, color }: { label: string; value: string; color?: "bull" | "bear" }) {
+  return (
+    <div className="flex flex-col bg-secondary/40 px-2 py-1 rounded">
+      <span className="text-[9px] uppercase text-muted-foreground tracking-wider">{label}</span>
+      <span className={`font-semibold ${color === "bull" ? "text-bull" : color === "bear" ? "text-bear" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function SettingsPanel({
+  soundOn, setSoundOn, projectedDaily,
+  appSettings, saveAppSettings, refreshNewsCalendar, todaysEvents,
+  tdKeysConfigured, tdKeysExhausted,
+}: {
+  soundOn: boolean; setSoundOn: (v: boolean) => void;
+  projectedDaily: number;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  refreshNewsCalendar: () => Promise<void>;
+  todaysEvents: EconomicEvent[];
+  tdKeysConfigured: { k1: boolean; k2: boolean; k3: boolean };
+  tdKeysExhausted: { k1: boolean; k2: boolean; k3: boolean };
+}) {
+  void refreshNewsCalendar; void todaysEvents;
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Server-Side Scan Engine</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              {appSettings.paused ? "Scanner Paused" : "Scanner Running"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {appSettings.paused
+                ? "Cron job exits immediately. No API calls are made."
+                : `Auto-scans every ${appSettings.scan_interval_minutes || 15} minutes server-side.`}
+            </div>
+          </div>
+          <button
+            onClick={() => saveAppSettings({ paused: !appSettings.paused })}
+            className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition-colors ${
+              appSettings.paused
+                ? "bg-bull/15 text-bull border-bull/40 hover:bg-bull/25"
+                : "bg-bear/15 text-bear border-bear/40 hover:bg-bear/25"
+            }`}
+          >
+            {appSettings.paused ? "▶ Resume Scanner" : "⏸ Pause Scanner"}
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Browser tab does not need to be open. Estimated{" "}
+          <span className="text-foreground font-semibold">{projectedDaily}</span> API calls/day.
+          Use ▶ SCAN at the top for an on-demand full scan.
+        </div>
+      </div>
+
+      <TradingHoursPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">TwelveData API Key</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              Active: Key #{appSettings.active_td_key}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Manually switch which TwelveData API key the scanner uses for all data fetches.
+            </div>
+          </div>
+          <div className="flex gap-1 border border-border rounded overflow-hidden">
+            {[1, 2, 3].map((k) => {
+              const active = appSettings.active_td_key === k;
+              const configured = k === 1 ? tdKeysConfigured.k1 : k === 2 ? tdKeysConfigured.k2 : tdKeysConfigured.k3;
+              const exhausted = k === 1 ? tdKeysExhausted.k1 : k === 2 ? tdKeysExhausted.k2 : tdKeysExhausted.k3;
+              const disabled = !configured;
+              return (
+                <button
+                  key={k}
+                  disabled={disabled}
+                  title={!configured ? "TWELVEDATA_API_KEY_" + k + " not set in secrets" : exhausted ? "Rate-limited today" : ""}
+                  onClick={() => {
+                    if (disabled) return;
+                    try { localStorage.setItem("active_td_key", String(k)); } catch { /* ignore */ }
+                    saveAppSettings({ active_td_key: k });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                    !configured
+                      ? "bg-transparent text-muted-foreground/40 cursor-not-allowed"
+                      : active
+                        ? "bg-primary text-primary-foreground"
+                        : exhausted
+                          ? "bg-transparent text-muted-foreground/60 hover:bg-muted"
+                          : "bg-transparent text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Key {k}{!configured ? " · NOT CONFIGURED" : active ? " ●" : exhausted ? " ◌" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+      <ScanEngineControlsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
+
+
+
+
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Notifications</div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm">Sound on new signal (browser)</span>
+          <Toggle on={soundOn} onChange={setSoundOn} />
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Telegram alerts are sent server-side whenever a new signal is saved (if bot token + chat ID are configured).
+        </div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4 text-xs text-muted-foreground space-y-1">
+        <div className="text-[10px] uppercase tracking-wider mb-2">Risk Rules</div>
+        <div>• Max {appSettings.metaapi_max_trades} concurrent open trades</div>
+        <div>• EUR/USD ↔ GBP/USD: max 1 same-direction</div>
+        <div>• GBP/JPY ↔ EUR/JPY: max 1 same-direction</div>
+        <div>• XAU/USD: independent</div>
+        <div>• Spreads: USD majors 1.2p · crosses 2.5p · XAU/USD $0.40 · BTC/USD $2.00</div>
+      </div>
+    </div>
+  );
+}
+
+function TokenField({ configured, onSave }: { configured: boolean; onSave: (value: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(!configured);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (!configured) setEditing(true); }, [configured]);
+
+  async function save() {
+    if (value.trim().length < 20) {
+      alert("Token looks too short — paste the full MetaApi token.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(value.trim());
+      setValue("");
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded bg-background/40 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Token</div>
+        {configured && !editing && (
+          <div className="flex items-center gap-2">
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-bull/20 text-bull font-bold">Configured ✓</span>
+            <button onClick={() => setEditing(true)}
+              className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border rounded hover:bg-muted/50">
+              Change
+            </button>
+          </div>
+        )}
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-2">
+          <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)}
+            placeholder="Paste MetaApi token (JWT)"
+            className="flex-1 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+          <button onClick={save} disabled={saving}
+            className="text-[10px] uppercase tracking-wider px-3 py-1.5 border border-border rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            {saving ? "Saving..." : "Save"}
+          </button>
+          {configured && (
+            <button onClick={() => { setEditing(false); setValue(""); }}
+              className="text-[10px] uppercase tracking-wider px-2 py-1.5 border border-border rounded hover:bg-muted/50">
+              Cancel
+            </button>
+          )}
+        </div>
+      ) : null}
+      <div className="text-[10px] text-muted-foreground mt-1">
+        Stored privately in app settings. Falls back to the <code className="text-foreground">METAAPI_TOKEN</code> env secret if unset.
+      </div>
+    </div>
+  );
+}
+
+function VeritasParamsPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const [vSL,   setVSL]   = useState(appSettings?.veritas_sl_mult    ?? 1.5);
+  const [vTP,   setVTP]   = useState(appSettings?.veritas_tp_mult    ?? 2.5);
+  const [vH,    setVH]    = useState(appSettings?.veritas_min_hurst  ?? 0.55);
+  const [vSNR,  setVSNR]  = useState(appSettings?.veritas_min_snr    ?? 40);
+  const [vConf, setVConf] = useState(appSettings?.veritas_min_conf   ?? 72);
+  const [vRR,   setVRR]   = useState(appSettings?.veritas_min_rr     ?? 1.60);
+
+  useEffect(() => {
+    if (!appSettings) return;
+    setVSL(  appSettings.veritas_sl_mult    ?? 1.5);
+    setVTP(  appSettings.veritas_tp_mult    ?? 2.5);
+    setVH(   appSettings.veritas_min_hurst  ?? 0.55);
+    setVSNR( appSettings.veritas_min_snr    ?? 40);
+    setVConf(appSettings.veritas_min_conf   ?? 72);
+    setVRR(  appSettings.veritas_min_rr     ?? 1.60);
+  }, [appSettings]);
+
+  const saveVeritas = (key: string, value: number) => {
+    if (!isFinite(value)) return;
+    saveAppSettings({ [key]: value } as Partial<AppSettings>);
+  };
+
+  const fields: Array<{ label: string; key: string; val: number; set: (n: number) => void; min: number; max: number; step: number; hint: string }> = [
+    { label: "SL MULT (×ATR)",    key: "veritas_sl_mult",   val: vSL,   set: setVSL,   min: 0.5,  max: 3,    step: 0.1,  hint: "Default 1.5" },
+    { label: "TP MULT (×ATR)",    key: "veritas_tp_mult",   val: vTP,   set: setVTP,   min: 1,    max: 5,    step: 0.1,  hint: "3.0 → RR 2.0" },
+    { label: "MIN HURST",         key: "veritas_min_hurst", val: vH,    set: setVH,    min: 0.50, max: 0.70, step: 0.01, hint: "0.57 recommended" },
+    { label: "MIN SNR",           key: "veritas_min_snr",   val: vSNR,  set: setVSNR,  min: 20,   max: 80,   step: 5,    hint: "40–50 ideal" },
+    { label: "MIN CONF",          key: "veritas_min_conf",  val: vConf, set: setVConf, min: 50,   max: 99,   step: 1,    hint: "72 floor" },
+    { label: "MIN R:R (VERITAS)", key: "veritas_min_rr",    val: vRR,   set: setVRR,   min: 1,    max: 3,    step: 0.05, hint: "1.85 with TP=3×" },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {fields.map(({ label, key, val, set, min, max, step, hint }) => (
+        <label key={key} className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+          <input
+            type="number"
+            step={step} min={min} max={max}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            value={val}
+            onChange={e => {
+              const n = parseFloat(e.target.value);
+              if (isFinite(n)) set(n);
+            }}
+            onBlur={e => {
+              const n = Math.min(max, Math.max(min, parseFloat(e.target.value) || min));
+              set(n);
+              saveVeritas(key, n);
+            }}
+          />
+          <div className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</div>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+type ScanGateKey =
+  | "metaapi_min_confidence" | "metaapi_min_rr" | "metaapi_min_adx"
+  | "metaapi_trail_lock_r" | "twelvedata_key_threshold"
+  | "metaapi_risk_per_trade_pct" | "metaapi_min_lot" | "metaapi_max_lot"
+  | "metaapi_max_trades" | "metaapi_expiry_hours" | "metaapi_max_daily_loss_pct"
+  | "metaapi_min_stop_points"
+  | "veritas_sl_mult" | "veritas_tp_mult" | "veritas_min_hurst"
+  | "veritas_min_snr" | "veritas_min_conf" | "veritas_min_rr";
+
+function ScanEngineControlsPanel({
+  appSettings, saveAppSettings,
+}: {
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const initial = useMemo<Record<ScanGateKey, number>>(() => ({
+    metaapi_min_confidence:      appSettings?.metaapi_min_confidence      ?? 82,
+    metaapi_min_rr:              appSettings?.metaapi_min_rr              ?? 2.0,
+    metaapi_min_adx:             appSettings?.metaapi_min_adx             ?? 20,
+    metaapi_trail_lock_r:        appSettings?.metaapi_trail_lock_r        ?? 0.5,
+    twelvedata_key_threshold:    appSettings?.twelvedata_key_threshold    ?? 700,
+    metaapi_risk_per_trade_pct:  appSettings?.metaapi_risk_per_trade_pct  ?? 3,
+    metaapi_min_lot:             appSettings?.metaapi_min_lot             ?? 0.1,
+    metaapi_max_lot:             appSettings?.metaapi_max_lot             ?? 1,
+    metaapi_max_trades:          appSettings?.metaapi_max_trades          ?? 5,
+    metaapi_expiry_hours:        appSettings?.metaapi_expiry_hours        ?? 12,
+    metaapi_max_daily_loss_pct:  appSettings?.metaapi_max_daily_loss_pct  ?? 50,
+    metaapi_min_stop_points:     appSettings?.metaapi_min_stop_points     ?? 0,
+    veritas_sl_mult:             appSettings?.veritas_sl_mult             ?? 1.5,
+    veritas_tp_mult:             appSettings?.veritas_tp_mult             ?? 2.5,
+    veritas_min_hurst:           appSettings?.veritas_min_hurst           ?? 0.55,
+    veritas_min_snr:             appSettings?.veritas_min_snr             ?? 40,
+    veritas_min_conf:            appSettings?.veritas_min_conf            ?? 72,
+    veritas_min_rr:              appSettings?.veritas_min_rr              ?? 1.60,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
+  const [scanGates, setScanGates] = useState<Record<ScanGateKey, number>>(initial);
+  const [savedFlash, setSavedFlash] = useState<ScanGateKey | null>(null);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (!appSettings) return;
+    setScanGates({
+      metaapi_min_confidence:      appSettings.metaapi_min_confidence      ?? 82,
+      metaapi_min_rr:              appSettings.metaapi_min_rr              ?? 2.0,
+      metaapi_min_adx:             appSettings.metaapi_min_adx             ?? 20,
+      metaapi_trail_lock_r:        appSettings.metaapi_trail_lock_r        ?? 0.5,
+      twelvedata_key_threshold:    appSettings.twelvedata_key_threshold    ?? 700,
+      metaapi_risk_per_trade_pct:  appSettings.metaapi_risk_per_trade_pct  ?? 3,
+      metaapi_min_lot:             appSettings.metaapi_min_lot             ?? 0.1,
+      metaapi_max_lot:             appSettings.metaapi_max_lot             ?? 1,
+      metaapi_max_trades:          appSettings.metaapi_max_trades          ?? 5,
+      metaapi_expiry_hours:        appSettings.metaapi_expiry_hours        ?? 12,
+      metaapi_max_daily_loss_pct:  appSettings.metaapi_max_daily_loss_pct  ?? 50,
+      metaapi_min_stop_points:     appSettings.metaapi_min_stop_points     ?? 0,
+      veritas_sl_mult:             appSettings.veritas_sl_mult             ?? 1.5,
+      veritas_tp_mult:             appSettings.veritas_tp_mult             ?? 2.5,
+      veritas_min_hurst:           appSettings.veritas_min_hurst           ?? 0.55,
+      veritas_min_snr:             appSettings.veritas_min_snr             ?? 40,
+      veritas_min_conf:            appSettings.veritas_min_conf            ?? 72,
+      veritas_min_rr:              appSettings.veritas_min_rr              ?? 1.60,
+    });
+  }, [appSettings]);
+
+  const saveGate = async (key: ScanGateKey, value: number) => {
+    if (!isFinite(value)) return;
+    setScanGates(prev => ({ ...prev, [key]: value }));
+    try {
+      await saveAppSettings({ [key]: value } as Partial<AppSettings>);
+      setSavedFlash(key);
+      setTimeout(() => {
+        setSavedFlash(cur => (cur === key ? null : cur));
+      }, 2000);
+    } catch { /* ignored — parent handles error */ }
+  };
+
+  type FieldDef = { key: ScanGateKey; label: string; min: number; max: number; step: number; hint?: string };
+  const group1: FieldDef[] = [
+    { key: "metaapi_min_confidence", label: "MIN CONFIDENCE (%)", min: 50, max: 99, step: 1,    hint: `Signals below this % are never saved or alerted. Currently: ${scanGates.metaapi_min_confidence}%` },
+    { key: "metaapi_min_rr",         label: "MIN R:R (GLOBAL)",   min: 1,  max: 4,  step: 0.05, hint: "VERITAS uses its own R:R gate below. All other setups use this value." },
+    { key: "metaapi_min_adx",        label: "MIN ADX (TREND)",    min: 0,  max: 50, step: 1,    hint: "EMA Pullback + BOS Retest skip when 15M ADX is below this. 0 = disabled." },
+    { key: "metaapi_trail_lock_r",   label: "TRAIL LOCK-IN (R)",  min: 0,  max: 1,  step: 0.05, hint: "After TP1 hit, Order B SL moves to entry + this fraction of 1R. 0 = breakeven only." },
+    { key: "twelvedata_key_threshold", label: "API KEY THRESHOLD", min: 100, max: 800, step: 50, hint: "Switch to next TwelveData key at this many daily calls. 700 = 100-call safety buffer." },
+  ];
+  const group2: FieldDef[] = [
+    { key: "metaapi_risk_per_trade_pct", label: "RISK PER TRADE (%)",   min: 0.1,  max: 10,  step: 0.1 },
+    { key: "metaapi_min_lot",            label: "MIN LOT",              min: 0.01, max: 1,   step: 0.01 },
+    { key: "metaapi_max_lot",            label: "MAX LOT",              min: 0.1,  max: 10,  step: 0.1 },
+    { key: "metaapi_max_trades",         label: "MAX OPEN TRADES",      min: 1,    max: 20,  step: 1 },
+    { key: "metaapi_expiry_hours",       label: "PENDING EXPIRY (HRS)", min: 1,    max: 72,  step: 1,  hint: "Pending limit/stop orders cancel after this." },
+    { key: "metaapi_max_daily_loss_pct", label: "MAX DAILY LOSS (%)",   min: 1,    max: 100, step: 1 },
+    { key: "metaapi_min_stop_points",    label: "MIN STOP DIST (PTS)",  min: 0,    max: 500, step: 1,  hint: "Blocks orders where SL is closer than this to entry. 0 = disabled. 25 = RoboForex XAU guard." },
+  ];
+  const group3: FieldDef[] = [
+    { key: "veritas_sl_mult",   label: "SL MULT (×ATR)",    min: 0.5,  max: 3,    step: 0.1,  hint: "Default 1.5" },
+    { key: "veritas_tp_mult",   label: "TP MULT (×ATR)",    min: 1,    max: 5,    step: 0.1,  hint: "3.0 → RR 2.0" },
+    { key: "veritas_min_hurst", label: "MIN HURST",         min: 0.50, max: 0.70, step: 0.01, hint: "0.57 recommended" },
+    { key: "veritas_min_snr",   label: "MIN SNR",           min: 20,   max: 80,   step: 5,    hint: "40–50 ideal" },
+    { key: "veritas_min_conf",  label: "MIN CONF (VERITAS)",min: 50,   max: 99,   step: 1,    hint: "72 floor" },
+    { key: "veritas_min_rr",    label: "MIN R:R (VERITAS)", min: 1,    max: 3,    step: 0.05, hint: "1.85 with TP=3×" },
+  ];
+
+  const renderField = (f: FieldDef) => {
+    const val = scanGates[f.key];
+    const flashing = savedFlash === f.key;
+    return (
+      <label key={f.key} className="text-xs relative">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{f.label}</div>
+          {flashing && (
+            <span className="text-[9px] uppercase tracking-wider text-bull font-bold">✓ saved</span>
+          )}
+        </div>
+        <input
+          type="number"
+          step={f.step} min={f.min} max={f.max}
+          className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          value={val}
+          onChange={e => {
+            const n = parseFloat(e.target.value);
+            if (isFinite(n)) setScanGates(p => ({ ...p, [f.key]: n }));
+          }}
+          onBlur={e => {
+            const n = Math.min(f.max, Math.max(f.min, parseFloat(e.target.value) || f.min));
+            saveGate(f.key, n);
+          }}
+        />
+        {f.hint && <div className="text-[10px] text-muted-foreground/70 mt-0.5">{f.hint}</div>}
+      </label>
+    );
+  };
+
+  const renderGroup = (title: string, helper: string, fields: FieldDef[]) => (
+    <div className="pt-3 mt-3 border-t border-border/60">
+      <div className="text-[11px] font-bold uppercase tracking-widest text-primary/90">{title}</div>
+      <div className="text-[10px] text-muted-foreground mb-2">{helper}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {fields.map(renderField)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-primary font-bold">Scan Engine Controls</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Every gate that affects scan-signals in one place. Changes take effect on the next scan cycle (within 15 min). No redeploy needed.
+          </div>
+        </div>
+        <span className={`text-muted-foreground text-sm transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+
+      {open && (
+        <>
+          {/* CURRENT LIVE VALUES status strip */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded bg-background/60 border border-border/60 text-[10px] font-mono text-muted-foreground">
+            <span>Conf gate: <span className="text-foreground">{scanGates.metaapi_min_confidence}%</span></span>
+            <span className="text-border">│</span>
+            <span>R:R gate: <span className="text-foreground">{scanGates.metaapi_min_rr}</span></span>
+            <span className="text-border">│</span>
+            <span>ADX filter: <span className="text-foreground">{scanGates.metaapi_min_adx}</span></span>
+            <span className="text-border">│</span>
+            <span>Trail: <span className="text-foreground">+{scanGates.metaapi_trail_lock_r}R</span></span>
+            <span className="text-border">│</span>
+            <span>Key threshold: <span className="text-foreground">{scanGates.twelvedata_key_threshold}/800</span></span>
+          </div>
+
+          {renderGroup(
+            "Signal Quality Gates",
+            "Applied in scan-signals before any signal is saved or alerted. Takes effect on next scan cycle.",
+            group1,
+          )}
+          {renderGroup(
+            "Risk & Execution Gates",
+            "Applied in metaapi-execute before placing orders.",
+            group2,
+          )}
+          {renderGroup(
+            "VERITAS Strategy Parameters",
+            "Controls VERITAS signal generation thresholds. Changes take effect on next scan cycle.",
+            group3,
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function MetaApiPanel({
 
-appSettings, saveAppSettings,
+  appSettings, saveAppSettings,
 }: {
-appSettings: AppSettings;
-saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
 }) {
-const [accountId, setAccountId] = useState(appSettings.metaapi_account_id ?? "");
-const [region, setRegion] = useState(appSettings.metaapi_region);
-const [status, setStatus] = useState < {
-    ok: boolean; reason?: string; account?: any
-} | null > (null);
-const [testing, setTesting] = useState(false);
-const [testTrading, setTestTrading] = useState(false);
-const [testTradePair, setTestTradePair] = useState("BTC/USD");
+  const [accountId, setAccountId] = useState(appSettings.metaapi_account_id ?? "");
+  const [region, setRegion] = useState(appSettings.metaapi_region);
+  const [status, setStatus] = useState<{ ok: boolean; reason?: string; account?: any } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testTrading, setTestTrading] = useState(false);
+  const [testTradePair, setTestTradePair] = useState("BTC/USD");
 
-const [testTradeResult, setTestTradeResult] = useState < {
+  const [testTradeResult, setTestTradeResult] = useState<{
     ok: boolean;
-    steps: Array < {
-        label: string; detail: string; ok: boolean; error?: string
-    } >;
+    steps: Array<{ label: string; detail: string; ok: boolean; error?: string }>;
     summary: string;
-} | null > (null);
-const [checkingSymbols, setCheckingSymbols] = useState(false);
-const [symbolsResult, setSymbolsResult] = useState < {
+  } | null>(null);
+  const [checkingSymbols, setCheckingSymbols] = useState(false);
+  const [symbolsResult, setSymbolsResult] = useState<{
     ok: boolean;
     reason?: string;
     found: string[];
     notFound: string[];
-    matches: Record < string, string[] >;
+    matches: Record<string, string[]>;
     all: string[];
     count: number;
-} | null > (null);
+  } | null>(null);
 
-// Test Strategy panel state
-const TEST_STRAT_PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
-const TEST_STRAT_SETUPS = ["EMA Pullback", "BOS Retest", "VERITAS", "QSS", "PRISM"];
-const [testStratPair, setTestStratPair] = useState("XAU/USD");
-const [testStratSetups, setTestStratSetups] = useState < string[] > (["VERITAS",
-    "QSS",
-    "PRISM"]);
-const [testStratRunning, setTestStratRunning] = useState(false);
-const [testStratResult, setTestStratResult] = useState < {
+  // Test Strategy panel state
+  const TEST_STRAT_PAIRS = ["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"];
+  const TEST_STRAT_SETUPS = ["EMA Pullback","BOS Retest","VERITAS","QSS","PRISM"];
+  const [testStratPair, setTestStratPair] = useState("XAU/USD");
+  const [testStratSetups, setTestStratSetups] = useState<string[]>(["VERITAS","QSS","PRISM"]);
+  const [testStratRunning, setTestStratRunning] = useState(false);
+  const [testStratResult, setTestStratResult] = useState<{
     scanned_at: string;
     pair: string;
-    rows: Array < {
-        setup: string; qualified: boolean; reason?: string; debug?: string;
-        signal?: {
-            direction?: string; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; rr?: number; confidence?: number; order_type?: string
-        };
-    } >;
-} | null > (null);
+    rows: Array<{
+      setup: string; qualified: boolean; reason?: string; debug?: string;
+      signal?: { direction?: string; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; rr?: number; confidence?: number; order_type?: string };
+    }>;
+  } | null>(null);
 
 
-useEffect(() => {
-    setAccountId(appSettings.metaapi_account_id ?? "");
-},
-    [appSettings.metaapi_account_id]);
-useEffect(() => {
-    setRegion(appSettings.metaapi_region);
-},
-    [appSettings.metaapi_region]);
+  useEffect(() => { setAccountId(appSettings.metaapi_account_id ?? ""); }, [appSettings.metaapi_account_id]);
+  useEffect(() => { setRegion(appSettings.metaapi_region); }, [appSettings.metaapi_region]);
 
-async function ping() {
+  async function ping() {
     setTesting(true);
     try {
-        const j = await pingMetaApiFn( {
-            data: {
-                mode: "connection"
-            }
-        });
-        setStatus(j as any);
+      const j = await pingMetaApiFn({ data: { mode: "connection" } });
+      setStatus(j as any);
     } catch (e) {
-        setStatus({
-            ok: false,
-            reason: (e as Error).message
-        });
+      setStatus({ ok: false, reason: (e as Error).message });
     } finally {
-        setTesting(false);
+      setTesting(false);
     }
-}
+  }
 
-// Poll connection status every 30s
-useEffect(() => {
+  // Poll connection status every 30s
+  useEffect(() => {
     if (!appSettings.metaapi_account_id) return;
     ping();
     const t = setInterval(ping, 30000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-},
-    [appSettings.metaapi_account_id,
-        appSettings.metaapi_region]);
+  }, [appSettings.metaapi_account_id, appSettings.metaapi_region]);
 
-const connected = !!status?.ok;
-const acct = status?.account;
+  const connected = !!status?.ok;
+  const acct = status?.account;
 
-return (
+  return (
     <div className="border border-border rounded bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                MetaApi Auto-Trading
-            </div>
-            <div className="flex items-center gap-2">
-                {(() => {
-                    const live = appSettings.metaapi_active_mode === "live";
-                    return (
-                        <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${
-                            live ? "bg-chart-4/20 text-chart-4": "bg-bull/20 text-bull"
-                            }`}>
-                            {live ? "LIVE": "DEMO"}
-                        </span>
-                    );
-                })()}
-                <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded font-bold ${
-                    connected ? "bg-bull/20 text-bull": "bg-bear/20 text-bear"
-                    }`}>
-                    {connected ? "● CONNECTED": "○ DISCONNECTED"}
-                </span>
-            </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MetaApi Auto-Trading</div>
+        <div className="flex items-center gap-2">
+          {(() => {
+            const live = appSettings.metaapi_active_mode === "live";
+            return (
+              <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${
+                live ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull"
+              }`}>
+                {live ? "LIVE" : "DEMO"}
+              </span>
+            );
+          })()}
+          <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded font-bold ${
+            connected ? "bg-bull/20 text-bull" : "bg-bear/20 text-bear"
+          }`}>
+            {connected ? "● CONNECTED" : "○ DISCONNECTED"}
+          </span>
         </div>
+      </div>
 
-        {/* Trading mode switcher */}
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-            <div>
-                <div className="text-sm font-semibold">
-                    Trading Mode
-                </div>
-                <div className="text-xs text-muted-foreground">
-                    Switch the broker connection between demo and live accounts.
-                </div>
-            </div>
-            <div className="inline-flex rounded border border-border overflow-hidden">
-                {(["demo", "live"] as const).map((m) => {
-                    const active = appSettings.metaapi_active_mode === m;
-                    return (
-                        <button key={m}
-                            onClick={() => saveAppSettings( { metaapi_active_mode: m } as any)}
-                            className={`px-3 py-1.5 text-xs uppercase tracking-wider font-bold ${
-                            active
-                            ? (m === "live" ? "bg-chart-4/20 text-chart-4": "bg-bull/20 text-bull"): "text-muted-foreground hover:bg-muted/40"
-                            }`}>
-                            {m}
-                        </button>
-                    );
-                })}
-            </div>
+      {/* Trading mode switcher */}
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div>
+          <div className="text-sm font-semibold">Trading Mode</div>
+          <div className="text-xs text-muted-foreground">Switch the broker connection between demo and live accounts.</div>
         </div>
+        <div className="inline-flex rounded border border-border overflow-hidden">
+          {(["demo", "live"] as const).map((m) => {
+            const active = appSettings.metaapi_active_mode === m;
+            return (
+              <button key={m}
+                onClick={() => saveAppSettings({ metaapi_active_mode: m } as any)}
+                className={`px-3 py-1.5 text-xs uppercase tracking-wider font-bold ${
+                  active
+                    ? (m === "live" ? "bg-chart-4/20 text-chart-4" : "bg-bull/20 text-bull")
+                    : "text-muted-foreground hover:bg-muted/40"
+                }`}>
+                {m}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-        {!connected && status?.reason && (
-            <div className="text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">
-                {status.reason}
-            </div>
-        )}
-        {connected && acct && (
-            <div className="text-[11px] text-muted-foreground grid grid-cols-3 gap-2">
-                <div>
-                    Broker: <span className="text-foreground">{acct.broker ?? "—"}</span>
-                </div>
-                <div>
-                    Balance: <span className="text-foreground">{Number(acct.balance ?? 0).toFixed(2)} {acct.currency ?? ""}</span>
-                </div>
-                <div>
-                    Equity: <span className="text-foreground">{Number(acct.equity ?? 0).toFixed(2)}</span>
-                </div>
-            </div>
-        )}
+      {!connected && status?.reason && (
+        <div className="text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">{status.reason}</div>
+      )}
+      {connected && acct && (
+        <div className="text-[11px] text-muted-foreground grid grid-cols-3 gap-2">
+          <div>Broker: <span className="text-foreground">{acct.broker ?? "—"}</span></div>
+          <div>Balance: <span className="text-foreground">{Number(acct.balance ?? 0).toFixed(2)} {acct.currency ?? ""}</span></div>
+          <div>Equity: <span className="text-foreground">{Number(acct.equity ?? 0).toFixed(2)}</span></div>
+        </div>
+      )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <label className="text-xs">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Account ID
-                </div>
-                <input value={accountId} onChange={(e) => setAccountId(e.target.value)}
-                onBlur={() => { if (accountId !== (appSettings.metaapi_account_id ?? "")) saveAppSettings( { metaapi_account_id: accountId || null }); }}
-                placeholder="e.g. 12abc34d-5678-..." className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Account ID</div>
+          <input value={accountId} onChange={(e) => setAccountId(e.target.value)}
+            onBlur={() => { if (accountId !== (appSettings.metaapi_account_id ?? "")) saveAppSettings({ metaapi_account_id: accountId || null }); }}
+            placeholder="e.g. 12abc34d-5678-..." className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
         </label>
         <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                Region
-            </div>
-            <select value={region} onChange={(e) => { setRegion(e.target.value); saveAppSettings( { metaapi_region: e.target.value }); }}
-                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
-                <option value="new-york">new-york</option>
-                <option value="london">london</option>
-                <option value="singapore">singapore</option>
-            </select>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Region</div>
+          <select value={region} onChange={(e) => { setRegion(e.target.value); saveAppSettings({ metaapi_region: e.target.value }); }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
+            <option value="new-york">new-york</option>
+            <option value="london">london</option>
+            <option value="singapore">singapore</option>
+          </select>
         </label>
-    </div>
+      </div>
 
-    <label className="text-xs block">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-            Broker Symbol Suffix
-        </div>
+      <label className="text-xs block">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Broker Symbol Suffix</div>
         <input
-        value={appSettings.metaapi_symbol_suffix}
-        onChange={(e) => {
+          value={appSettings.metaapi_symbol_suffix}
+          onChange={(e) => {
             const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
-            saveAppSettings( { metaapi_symbol_suffix: cleaned });
-        }}
-        placeholder="e.g. 'm' for Exness (leave blank for none)"
-        className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            saveAppSettings({ metaapi_symbol_suffix: cleaned });
+          }}
+          placeholder="e.g. 'm' for Exness (leave blank for none)"
+          className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
         />
-    <div className="text-[10px] text-muted-foreground mt-1">
-        Appended to every symbol sent to MetaApi (e.g. <code>EURUSD</code> → <code>EURUSD{appSettings.metaapi_symbol_suffix || "m"}</code>). Required for brokers that suffix symbols.
-    </div>
-</label>
-
-<TokenField
-    configured={appSettings.metaapi_token_configured}
-    onSave={async (value) => {
-        await saveAppSettings( { metaapi_token: value } as any);
-        // Refresh status after token change so connected badge updates.
-        setTimeout(() => { ping(); }, 250);
-    }}
-    />
-
-{appSettings.metaapi_active_mode === "live" && (
-    <div className="border border-chart-4/40 rounded bg-chart-4/5 p-3 space-y-2">
-        <div className="text-[10px] uppercase tracking-wider text-chart-4 font-bold">
-            Live Account
+        <div className="text-[10px] text-muted-foreground mt-1">
+          Appended to every symbol sent to MetaApi (e.g. <code>EURUSD</code> → <code>EURUSD{appSettings.metaapi_symbol_suffix || "m"}</code>). Required for brokers that suffix symbols.
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      </label>
+
+      <TokenField
+        configured={appSettings.metaapi_token_configured}
+        onSave={async (value) => {
+          await saveAppSettings({ metaapi_token: value } as any);
+          // Refresh status after token change so connected badge updates.
+          setTimeout(() => { ping(); }, 250);
+        }}
+      />
+
+      {appSettings.metaapi_active_mode === "live" && (
+        <div className="border border-chart-4/40 rounded bg-chart-4/5 p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-chart-4 font-bold">Live Account</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="text-xs">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Live Account ID
-                </div>
-                <input
-                defaultValue={appSettings.metaapi_live_configured ? "(configured)": ""}
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Account ID</div>
+              <input
+                defaultValue={appSettings.metaapi_live_configured ? "(configured)" : ""}
                 onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== "(configured)") saveAppSettings( { metaapi_account_id_live: v } as any);
+                  const v = e.target.value.trim();
+                  if (v && v !== "(configured)") saveAppSettings({ metaapi_account_id_live: v } as any);
                 }}
                 placeholder="e.g. 12abc34d-5678-..."
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-                />
-        </label>
-        <label className="text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                Live Region
-            </div>
-            <select
+              />
+            </label>
+            <label className="text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Region</div>
+              <select
                 value={appSettings.metaapi_region_live}
-                onChange={(e) => saveAppSettings( { metaapi_region_live: e.target.value } as any)}
+                onChange={(e) => saveAppSettings({ metaapi_region_live: e.target.value } as any)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs">
                 <option value="new-york">new-york</option>
                 <option value="london">london</option>
                 <option value="singapore">singapore</option>
-            </select>
-        </label>
-    </div>
-    <label className="text-xs block">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-            Live Symbol Suffix
+              </select>
+            </label>
+          </div>
+          <label className="text-xs block">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Live Symbol Suffix</div>
+            <input
+              value={appSettings.metaapi_symbol_suffix_live}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
+                saveAppSettings({ metaapi_symbol_suffix_live: cleaned } as any);
+              }}
+              placeholder="e.g. 'm' for Exness (leave blank for none)"
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            />
+          </label>
+          <TokenField
+            configured={appSettings.metaapi_live_token_configured}
+            onSave={async (value) => {
+              await saveAppSettings({ metaapi_token_live: value } as any);
+              setTimeout(() => { ping(); }, 250);
+            }}
+          />
+          <label className="flex items-start gap-2 text-xs cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={!!appSettings.metaapi_is_cent_account_live}
+              onChange={(e) => saveAppSettings({ metaapi_is_cent_account_live: e.target.checked } as any)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account (Live)</span>
+              <span className="block text-muted-foreground mt-0.5">
+                Enable for Exness Standard Cent (USC) live accounts. Adjusts pip values for correct lot sizing.
+              </span>
+            </span>
+          </label>
         </div>
+      )}
+
+      {/* Pair auto-execute toggles */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Pair Auto-Execute</div>
+          <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"].map((p) => {
+            const cfg = appSettings.pair_auto_execute ?? {};
+            const on = cfg[p] !== false;
+            return (
+              <label key={p} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
+                <span className="font-mono">{p}</span>
+                <Toggle on={on} onChange={(v) => saveAppSettings({ pair_auto_execute: { ...cfg, [p]: v } } as any)} />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Setup auto-execute toggles */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Setup Auto-Execute</div>
+          <div className="text-[11px] text-muted-foreground">Disabled setups are still scanned and paper-tracked — just not auto-executed.</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {["EMA Pullback","BOS Retest","Session Range Break","VERITAS","OB+FVG","Order Block","CHOCH","QSS","PRISM"].map((name) => {
+            const defaults: Record<string, boolean> = {
+              "EMA Pullback": true, "BOS Retest": true, "Session Range Break": true, "VERITAS": false,
+              "OB+FVG": false, "Order Block": false, "CHOCH": false, "QSS": false, "PRISM": false,
+            };
+            const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
+            const isNew = name === "QSS" || name === "PRISM";
+            const cfg = appSettings.setup_auto_execute ?? {};
+            const on = cfg[name] !== undefined ? cfg[name] : defaults[name];
+            return (
+              <label key={name} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
+                <span className="flex items-center gap-1 min-w-0">
+                  <span className="font-mono truncate" title={name}>{name}</span>
+                  {lowSample && (
+                    <span
+                      className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-4/20 text-chart-4 uppercase tracking-wider shrink-0"
+                      title="Low sample size — unproven setup. Enable at your own risk."
+                    >⚠ Low</span>
+                  )}
+                  {isNew && (
+                    <span
+                      className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-2/20 text-chart-2 uppercase tracking-wider shrink-0"
+                      title="New setup — paper track first before enabling auto-execute."
+                    >⚠ New — paper first</span>
+                  )}
+                </span>
+                <Toggle on={on} onChange={(v) => saveAppSettings({ setup_auto_execute: { ...cfg, [name]: v } } as any)} />
+              </label>
+            );
+          })}
+
+        </div>
+      </div>
+
+
+
+
+
+
+      <div className="flex items-center justify-between border-t border-border pt-3">
+        <div>
+          <div className="text-sm font-semibold">Auto-execute new signals</div>
+          <div className="text-xs text-muted-foreground">Only signals meeting the thresholds below will be fired automatically.</div>
+        </div>
+        <Toggle on={appSettings.metaapi_auto_trade} onChange={(v) => saveAppSettings({ metaapi_auto_trade: v })} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Confidence (%)</div>
+          <input type="number" min={50} max={99} step={1} value={appSettings.metaapi_min_confidence}
+            onChange={(e) => saveAppSettings({ metaapi_min_confidence: Math.max(50, Math.min(99, Number(e.target.value) || 75)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min R:R</div>
+          <input type="number" min={1} max={10} step={0.1} value={appSettings.metaapi_min_rr}
+            onChange={(e) => saveAppSettings({ metaapi_min_rr: Math.max(1, Math.min(10, Number(e.target.value) || 2)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Risk Per Trade (%)</div>
+          <input type="number" min={0.1} max={10} step={0.1} value={appSettings.metaapi_risk_per_trade_pct}
+            onChange={(e) => saveAppSettings({ metaapi_risk_per_trade_pct: Math.max(0.1, Math.min(10, Number(e.target.value) || 2)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Lot</div>
+          <input type="number" min={0.01} max={1} step={0.01} value={appSettings.metaapi_min_lot}
+            onChange={(e) => saveAppSettings({ metaapi_min_lot: Math.max(0.01, Math.min(1, Number(e.target.value) || 0.01)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Lot</div>
+          <input type="number" min={0.01} max={10} step={0.01} value={appSettings.metaapi_max_lot}
+            onChange={(e) => saveAppSettings({ metaapi_max_lot: Math.max(0.01, Math.min(10, Number(e.target.value) || 0.10)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">API Key Switch Threshold</div>
+          <input
+            type="number" min={100} max={800} step={10}
+            defaultValue={appSettings.twelvedata_key_threshold ?? 750}
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              const v = Math.max(100, Math.min(800, Math.round(n)));
+              saveAppSettings({ twelvedata_key_threshold: v });
+            }}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          />
+          <div className="text-[10px] text-muted-foreground mt-1">Daily calls per key before rotating K1 → K2 → K3. Resets midnight UTC.</div>
+        </label>
+      </div>
+
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Open Trades</div>
+          <input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
+            onChange={(e) => saveAppSettings({ metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pending Expiry (hours)</div>
+          <input type="number" min={1} max={168} step={1} value={appSettings.metaapi_expiry_hours}
+            onChange={(e) => saveAppSettings({ metaapi_expiry_hours: Math.max(1, Math.min(168, Number(e.target.value) || 24)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+        <label className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Daily Loss (%)</div>
+          <input type="number" min={0.1} max={100} step={0.1} value={appSettings.metaapi_max_daily_loss_pct}
+            onChange={(e) => saveAppSettings({ metaapi_max_daily_loss_pct: Math.max(0.1, Math.min(100, Number(e.target.value) || 5)) })}
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+        </label>
+      </div>
+
+
+
+
+
+
+      <label className="flex items-start gap-2 text-xs cursor-pointer">
         <input
-        value={appSettings.metaapi_symbol_suffix_live}
-        onChange={(e) => {
-            const cleaned = e.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
-            saveAppSettings( { metaapi_symbol_suffix_live: cleaned } as any);
-        }}
-        placeholder="e.g. 'm' for Exness (leave blank for none)"
-        className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+          type="checkbox"
+          checked={!!appSettings.metaapi_is_cent_account}
+          onChange={(e) => saveAppSettings({ metaapi_is_cent_account: e.target.checked })}
+          className="mt-0.5"
         />
-</label>
-<TokenField
-    configured={appSettings.metaapi_live_token_configured}
-    onSave={async (value) => {
-        await saveAppSettings( { metaapi_token_live: value } as any);
-        setTimeout(() => { ping(); }, 250);
-    }}
-    />
-<label className="flex items-start gap-2 text-xs cursor-pointer pt-1">
-    <input
-    type="checkbox"
-    checked={!!appSettings.metaapi_is_cent_account_live}
-    onChange={(e) => saveAppSettings( { metaapi_is_cent_account_live: e.target.checked } as any)}
-    className="mt-0.5"
-    />
-<span>
-    <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account (Live)</span>
-    <span className="block text-muted-foreground mt-0.5">
-        Enable for Exness Standard Cent (USC) live accounts. Adjusts pip values for correct lot sizing.
-    </span>
-</span>
-</label>
-</div>
-)}
+        <span>
+          <span className="font-bold uppercase tracking-wider text-[10px]">Cent Account</span>
+          <span className="block text-muted-foreground mt-0.5">
+            Enable for Exness Standard Cent (USC) accounts. Adjusts pip values for correct lot sizing.
+          </span>
+        </span>
+      </label>
 
-{/* Pair auto-execute toggles */}
-<div className="border-t border-border pt-3 space-y-2">
-<div>
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-Pair Auto-Execute
-</div>
-<div className="text-[11px] text-muted-foreground">
-Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.
-</div>
-</div>
-<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-{["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"].map((p) => {
-const cfg = appSettings.pair_auto_execute ?? {};
-const on = cfg[p] !== false;
-return (
-<label key={p} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
-<span className="font-mono">{p}</span>
-<Toggle on={on} onChange={(v) => saveAppSettings( { pair_auto_execute: { ...cfg, [p]: v } } as any)} />
-</label>
-);
-})}
-</div>
-</div>
+      <div className="space-y-2">
 
-{/* Setup auto-execute toggles */}
-<div className="border-t border-border pt-3 space-y-2">
-<div>
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-Setup Auto-Execute
-</div>
-<div className="text-[11px] text-muted-foreground">
-Disabled setups are still scanned and paper-tracked — just not auto-executed.
-</div>
-</div>
-<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-{["EMA Pullback", "BOS Retest", "Session Range Break", "VERITAS", "OB+FVG", "Order Block", "CHOCH", "QSS", "PRISM"].map((name) => {
-const defaults: Record < string,
-boolean > = {
-"EMA Pullback": true,
-"BOS Retest": true,
-"Session Range Break": true,
-"VERITAS": false,
-"OB+FVG": false,
-"Order Block": false,
-"CHOCH": false,
-"QSS": false,
-"PRISM": false,
-};
-const lowSample = name === "OB+FVG" || name === "Order Block" || name === "CHOCH";
-const isNew = name === "QSS" || name === "PRISM";
-const cfg = appSettings.setup_auto_execute ?? {};
-const on = cfg[name] !== undefined ? cfg[name]: defaults[name];
-return (
-<label key={name} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
-<span className="flex items-center gap-1 min-w-0">
-<span className="font-mono truncate" title={name}>{name}</span>
-{lowSample && (
-<span
-className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-4/20 text-chart-4 uppercase tracking-wider shrink-0"
-title="Low sample size — unproven setup. Enable at your own risk."
->⚠ Low</span>
-)}
-{isNew && (
-<span
-className="px-1 py-0.5 text-[8px] font-bold rounded bg-chart-2/20 text-chart-2 uppercase tracking-wider shrink-0"
-title="New setup — paper track first before enabling auto-execute."
->⚠ New — paper first</span>
-)}
-</span>
-<Toggle on={on} onChange={(v) => saveAppSettings( { setup_auto_execute: { ...cfg, [name]: v } } as any)} />
-</label>
-);
-})}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={ping} disabled={testing || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
+            {testing ? "Testing…" : "Test Connection"}
+          </button>
+          <select
+            value={testTradePair}
+            onChange={(e) => setTestTradePair(e.target.value)}
+            disabled={testTrading}
+            className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
+          >
+            {["BTC/USD","XAU/USD","ETH/USD","XRP/USD","EUR/USD","GBP/USD","GBP/JPY","USD/JPY","AUD/USD","AUD/JPY"].map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <button
+            onClick={async () => {
+              setTestTrading(true);
+              setTestTradeResult(null);
+              try {
+                const r = await testTradeMetaApiFn({ data: { pair: testTradePair } });
+                setTestTradeResult(r as any);
+              } catch (e) {
+                setTestTradeResult({
+                  ok: false, steps: [],
+                  summary: `Test failed: ${(e as Error).message}`,
+                });
+              } finally {
+                setTestTrading(false);
+              }
+            }}
+            disabled={testTrading || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {testTrading && (
+              <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            )}
+            {testTrading ? "Running…" : "Run Test Trade"}
+          </button>
+          <button
+            onClick={async () => {
+              setCheckingSymbols(true);
+              setSymbolsResult(null);
+              try {
+                const r = await checkSymbolsMetaApiFn({});
+                setSymbolsResult(r as any);
+              } catch (e) {
+                setSymbolsResult({
+                  ok: false, reason: (e as Error).message,
+                  found: [], notFound: [], matches: {}, all: [], count: 0,
+                });
+              } finally {
+                setCheckingSymbols(false);
+              }
+            }}
+            disabled={checkingSymbols || !accountId}
+            className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-2/60 text-chart-2 hover:bg-chart-2/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {checkingSymbols && (
+              <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            )}
+            {checkingSymbols ? "Checking…" : "Check Symbols"}
+          </button>
+          {appSettings.metaapi_connected_at && (
+            <span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
+          )}
 
-</div>
-</div>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Places a real minimum-lot market order on the selected pair and immediately closes it. Uses live account — confirm demo mode before running.
+        </div>
 
 
+        {testTradeResult && (
+          <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-1.5">
+            {testTradeResult.steps.map((s, i) => (
+              <div key={i} className="text-xs">
+                <div className="flex items-start gap-2">
+                  <span className={s.ok ? "text-bull" : "text-bear"}>{s.ok ? "✅" : "❌"}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold">{s.label}</div>
+                    {s.detail && (
+                      <div className="font-mono text-[10px] text-muted-foreground break-all">{s.detail}</div>
+                    )}
+                    {s.error && (
+                      <div className="text-[11px] text-bear mt-0.5">{s.error}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className={`pt-2 border-t border-border text-xs font-bold ${testTradeResult.ok ? "text-bull" : "text-bear"}`}>
+              {testTradeResult.summary}
+            </div>
+          </div>
+        )}
 
+        {symbolsResult && (
+          <div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-2 text-xs">
+            {!symbolsResult.ok ? (
+              <div className="text-bear">❌ {symbolsResult.reason ?? "symbols check failed"}</div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-bull font-bold">✅ Found:</span>{" "}
+                  <span className="font-mono break-all">
+                    {symbolsResult.found.length > 0 ? symbolsResult.found.join(", ") : "(none)"}
+                  </span>
+                </div>
+                {symbolsResult.notFound.length > 0 && (
+                  <div>
+                    <span className="text-chart-4 font-bold">⚠️ Not found:</span>{" "}
+                    <span className="font-mono break-all">{symbolsResult.notFound.join(", ")}</span>
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border">
+                  Use the exact suffix shown above in your Broker Symbol Suffix field. Broker exposes {symbolsResult.count} symbols total.
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
+        {/* ─── TEST STRATEGY ─────────────────────────────────────── */}
+        <div className="mt-4 pt-4 border-t border-border">
+          <div className="text-[11px] uppercase tracking-wider font-bold text-chart-4 mb-1">Test Strategy</div>
+          <div className="text-[10px] text-muted-foreground mb-3">
+            Runs strategy logic on live candle data without saving signals, placing orders, or sending alerts.
+            Use to confirm a strategy is detecting patterns correctly before enabling auto-execute.
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={testStratPair}
+              onChange={(e) => setTestStratPair(e.target.value)}
+              disabled={testStratRunning}
+              className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
+            >
+              {TEST_STRAT_PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <div className="flex items-center gap-3 flex-wrap text-xs">
+              {TEST_STRAT_SETUPS.map((s) => {
+                const checked = testStratSetups.includes(s);
+                return (
+                  <label key={s} className="inline-flex items-center gap-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={testStratRunning}
+                      onChange={(e) => {
+                        setTestStratSetups((prev) =>
+                          e.target.checked ? [...prev, s] : prev.filter((x) => x !== s)
+                        );
+                      }}
+                    />
+                    <span className="uppercase tracking-wider text-[11px]">{s}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <button
+              onClick={async () => {
+                if (testStratSetups.length === 0) return;
+                setTestStratRunning(true);
+                setTestStratResult(null);
+                try {
+                  const { data, error } = await supabase.functions.invoke("scan-signals", {
+                    body: { mode: "test_strategy", pairs: [testStratPair], setups: testStratSetups },
+                  });
+                  if (error) throw error;
+                  const pairResults = (data?.results?.[testStratPair] ?? {}) as Record<string, any>;
+                  const rows = testStratSetups.map((s) => pairResults[s] ?? { setup: s, qualified: false, reason: "No result returned" });
+                  setTestStratResult({
+                    scanned_at: data?.scanned_at ?? new Date().toISOString(),
+                    pair: testStratPair,
+                    rows,
+                  });
+                } catch (e) {
+                  setTestStratResult({
+                    scanned_at: new Date().toISOString(),
+                    pair: testStratPair,
+                    rows: [{ setup: "ERROR", qualified: false, reason: (e as Error).message }],
+                  });
+                } finally {
+                  setTestStratRunning(false);
+                }
+              }}
+              disabled={testStratRunning || testStratSetups.length === 0}
+              className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border-2 border-chart-4 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {testStratRunning && (
+                <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              )}
+              {testStratRunning ? "Running…" : "Run Strategy Test"}
+            </button>
+          </div>
 
+          {testStratResult && (
+            <div className="mt-3 border border-border rounded bg-background/50 p-3 space-y-1.5 text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground pb-1.5 border-b border-border">
+                Tested at {new Date(testStratResult.scanned_at).toISOString().slice(11, 19)} UTC on {testStratResult.pair}
+              </div>
+              {testStratResult.rows.map((r, i) => (
+                <div key={i} className="font-mono text-[11px]">
+                  {r.qualified && r.signal ? (
+                    <span className="text-bull">
+                      ✅ <span className="font-bold">{r.setup}</span> — {r.signal.direction}
+                      {" | Entry: "}{r.signal.entry}
+                      {" | SL: "}{r.signal.stop_loss}
+                      {" | TP1: "}{r.signal.tp1}
+                      {" | TP2: "}{r.signal.tp2}
+                      {r.signal.rr != null && <> {" | R:R "}{r.signal.rr}</>}
+                      {r.signal.confidence != null && <> {" | Confidence: "}{r.signal.confidence}%</>}
+                      {r.signal.order_type && <> {" | Order type: "}{r.signal.order_type}</>}
+                      {r.debug && <span className="text-muted-foreground"> {" | "}{r.debug}</span>}
+                    </span>
+                  ) : (
+                    <span className="text-bear">
+                      ❌ <span className="font-bold">{r.setup}</span>
+                      {" | "}<span className="text-muted-foreground">{r.reason ?? "Not qualified"}</span>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-<div className="flex items-center justify-between border-t border-border pt-3">
-<div>
-<div className="text-sm font-semibold">
-Auto-execute new signals
-</div>
-<div className="text-xs text-muted-foreground">
-Only signals meeting the thresholds below will be fired automatically.
-</div>
-</div>
-<Toggle on={appSettings.metaapi_auto_trade} onChange={(v) => saveAppSettings( { metaapi_auto_trade: v })} />
-</div>
-
-<div className="grid grid-cols-3 gap-2">
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Min Confidence (%)
-</div>
-<input type="number" min={50} max={99} step={1} value={appSettings.metaapi_min_confidence}
-onChange={(e) => saveAppSettings( { metaapi_min_confidence: Math.max(50, Math.min(99, Number(e.target.value) || 75)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Min R:R
-</div>
-<input type="number" min={1} max={10} step={0.1} value={appSettings.metaapi_min_rr}
-onChange={(e) => saveAppSettings( { metaapi_min_rr: Math.max(1, Math.min(10, Number(e.target.value) || 2)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Risk Per Trade (%)
-</div>
-<input type="number" min={0.1} max={10} step={0.1} value={appSettings.metaapi_risk_per_trade_pct}
-onChange={(e) => saveAppSettings( { metaapi_risk_per_trade_pct: Math.max(0.1, Math.min(10, Number(e.target.value) || 2)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-</div>
-
-<div className="grid grid-cols-3 gap-2">
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Min Lot
-</div>
-<input type="number" min={0.01} max={1} step={0.01} value={appSettings.metaapi_min_lot}
-onChange={(e) => saveAppSettings( { metaapi_min_lot: Math.max(0.01, Math.min(1, Number(e.target.value) || 0.01)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Max Lot
-</div>
-<input type="number" min={0.01} max={10} step={0.01} value={appSettings.metaapi_max_lot}
-onChange={(e) => saveAppSettings( { metaapi_max_lot: Math.max(0.01, Math.min(10, Number(e.target.value) || 0.10)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-</div>
-
-<div className="grid grid-cols-3 gap-2">
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-API Key Switch Threshold
-</div>
-<input
-type="number" min={100} max={800} step={10}
-defaultValue={appSettings.twelvedata_key_threshold ?? 750}
-onBlur={(e) => {
-const n = Number(e.target.value);
-if (!Number.isFinite(n)) return;
-const v = Math.max(100, Math.min(800, Math.round(n)));
-saveAppSettings( { twelvedata_key_threshold: v });
-}}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
-/>
-<div className="text-[10px] text-muted-foreground mt-1">
-Daily calls per key before rotating K1 → K2 → K3. Resets midnight UTC.
-</div>
-</label>
-</div>
-
-
-<div className="grid grid-cols-3 gap-2">
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Max Open Trades
-</div>
-<input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
-onChange={(e) => saveAppSettings( { metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Pending Expiry (hours)
-</div>
-<input type="number" min={1} max={168} step={1} value={appSettings.metaapi_expiry_hours}
-onChange={(e) => saveAppSettings( { metaapi_expiry_hours: Math.max(1, Math.min(168, Number(e.target.value) || 24)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-<label className="text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-Max Daily Loss (%)
-</div>
-<input type="number" min={0.1} max={100} step={0.1} value={appSettings.metaapi_max_daily_loss_pct}
-onChange={(e) => saveAppSettings( { metaapi_max_daily_loss_pct: Math.max(0.1, Math.min(100, Number(e.target.value) || 5)) })}
-className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-</label>
-</div>
-
-
-
-
-
-
-<label className="flex items-start gap-2 text-xs cursor-pointer">
-<input
-type="checkbox"
-checked={!!appSettings.metaapi_is_cent_account}
-onChange={(e) => saveAppSettings( { metaapi_is_cent_account: e.target.checked })}
-className="mt-0.5"
-/>
-<span>
-<span className="font-bold uppercase tracking-wider text-[10px]">Cent Account</span>
-<span className="block text-muted-foreground mt-0.5">
-Enable for Exness Standard Cent (USC) accounts. Adjusts pip values for correct lot sizing.
-</span>
-</span>
-</label>
-
-<div className="space-y-2">
-
-<div className="flex items-center gap-2 flex-wrap">
-<button onClick={ping} disabled={testing || !accountId}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
-{testing ? "Testing…": "Test Connection"}
-</button>
-<select
-value={testTradePair}
-onChange={(e) => setTestTradePair(e.target.value)}
-disabled={testTrading}
-className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
->
-{["BTC/USD",
-"XAU/USD",
-"ETH/USD",
-"XRP/USD",
-"EUR/USD",
-"GBP/USD",
-"GBP/JPY",
-"USD/JPY",
-"AUD/USD",
-"AUD/JPY"].map((p) => (
-<option key={p} value={p}>{p}</option>
-))}
-</select>
-<button
-onClick={async () => {
-setTestTrading(true);
-setTestTradeResult(null);
-try {
-const r = await testTradeMetaApiFn( { data: { pair: testTradePair } });
-setTestTradeResult(r as any);
-} catch (e) {
-setTestTradeResult({
-ok: false, steps: [],
-summary: `Test failed: ${(e as Error).message}`,
-});
-} finally {
-setTestTrading(false);
-}
-}}
-disabled={testTrading || !accountId}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
->
-{testTrading && (
-<span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-)}
-{testTrading ? "Running…": "Run Test Trade"}
-</button>
-<button
-onClick={async () => {
-setCheckingSymbols(true);
-setSymbolsResult(null);
-try {
-const r = await checkSymbolsMetaApiFn( {});
-setSymbolsResult(r as any);
-} catch (e) {
-setSymbolsResult({
-ok: false, reason: (e as Error).message,
-found: [], notFound: [], matches: {}, all: [], count: 0,
-});
-} finally {
-setCheckingSymbols(false);
-}
-}}
-disabled={checkingSymbols || !accountId}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-2/60 text-chart-2 hover:bg-chart-2/10 disabled:opacity-50 inline-flex items-center gap-1.5"
->
-{checkingSymbols && (
-<span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-)}
-{checkingSymbols ? "Checking…": "Check Symbols"}
-</button>
-{appSettings.metaapi_connected_at && (
-<span className="text-[10px] text-muted-foreground">last ping: {timeAgo(appSettings.metaapi_connected_at)}</span>
-)}
-
-</div>
-<div className="text-[10px] text-muted-foreground">
-Places a real minimum-lot market order on the selected pair and immediately closes it. Uses live account — confirm demo mode before running.
-</div>
-
-
-{testTradeResult && (
-<div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-1.5">
-{testTradeResult.steps.map((s, i) => (
-<div key={i} className="text-xs">
-<div className="flex items-start gap-2">
-<span className={s.ok ? "text-bull": "text-bear"}>{s.ok ? "✅": "❌"}</span>
-<div className="flex-1 min-w-0">
-<div className="font-bold">
-{s.label}
-</div>
-{s.detail && (
-<div className="font-mono text-[10px] text-muted-foreground break-all">
-{s.detail}
-</div>
-)}
-{s.error && (
-<div className="text-[11px] text-bear mt-0.5">
-{s.error}
-</div>
-)}
-</div>
-</div>
-</div>
-))}
-<div className={`pt-2 border-t border-border text-xs font-bold ${testTradeResult.ok ? "text-bull": "text-bear"}`}>
-{testTradeResult.summary}
-</div>
-</div>
-)}
-
-{symbolsResult && (
-<div className="mt-2 border border-border rounded bg-background/50 p-3 space-y-2 text-xs">
-{!symbolsResult.ok ? (
-<div className="text-bear">
-❌ {symbolsResult.reason ?? "symbols check failed"}
-</div>
-): (
-<>
-<div>
-<span className="text-bull font-bold">✅ Found:</span>{" "}
-<span className="font-mono break-all">
-{symbolsResult.found.length > 0 ? symbolsResult.found.join(", "): "(none)"}
-</span>
-</div>
-{symbolsResult.notFound.length > 0 && (
-<div>
-<span className="text-chart-4 font-bold">⚠️ Not found:</span>{" "}
-<span className="font-mono break-all">{symbolsResult.notFound.join(", ")}</span>
-</div>
-)}
-<div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border">
-Use the exact suffix shown above in your Broker Symbol Suffix field. Broker exposes {symbolsResult.count} symbols total.
-</div>
-</>
-)}
-</div>
-)}
-
-{/* ─── TEST STRATEGY ─────────────────────────────────────── */}
-<div className="mt-4 pt-4 border-t border-border">
-<div className="text-[11px] uppercase tracking-wider font-bold text-chart-4 mb-1">
-Test Strategy
-</div>
-<div className="text-[10px] text-muted-foreground mb-3">
-Runs strategy logic on live candle data without saving signals, placing orders, or sending alerts.
-Use to confirm a strategy is detecting patterns correctly before enabling auto-execute.
-</div>
-<div className="flex items-center gap-2 flex-wrap">
-<select
-value={testStratPair}
-onChange={(e) => setTestStratPair(e.target.value)}
-disabled={testStratRunning}
-className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
->
-{TEST_STRAT_PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
-</select>
-<div className="flex items-center gap-3 flex-wrap text-xs">
-{TEST_STRAT_SETUPS.map((s) => {
-const checked = testStratSetups.includes(s);
-return (
-<label key={s} className="inline-flex items-center gap-1 cursor-pointer select-none">
-<input
-type="checkbox"
-checked={checked}
-disabled={testStratRunning}
-onChange={(e) => {
-setTestStratSetups((prev) =>
-e.target.checked ? [...prev, s]: prev.filter((x) => x !== s)
-);
-}}
-/>
-<span className="uppercase tracking-wider text-[11px]">{s}</span>
-</label>
-);
-})}
-</div>
-<button
-onClick={async () => {
-if (testStratSetups.length === 0) return;
-setTestStratRunning(true);
-setTestStratResult(null);
-try {
-const { data,
-error } = await supabase.functions.invoke("scan-signals", {
-body: { mode: "test_strategy", pairs: [testStratPair], setups: testStratSetups },
-});
-if (error) throw error;
-const pairResults = (data?.results?.[testStratPair] ?? {}) as Record < string,
-any >;
-const rows = testStratSetups.map((s) => pairResults[s] ?? { setup: s, qualified: false, reason: "No result returned" });
-setTestStratResult({
-scanned_at: data?.scanned_at ?? new Date().toISOString(),
-pair: testStratPair,
-rows,
-});
-} catch (e) {
-setTestStratResult({
-scanned_at: new Date().toISOString(),
-pair: testStratPair,
-rows: [{ setup: "ERROR", qualified: false, reason: (e as Error).message }],
-});
-} finally {
-setTestStratRunning(false);
-}
-}}
-disabled={testStratRunning || testStratSetups.length === 0}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border-2 border-chart-4 text-chart-4 hover:bg-chart-4/10 disabled:opacity-50 inline-flex items-center gap-1.5"
->
-{testStratRunning && (
-<span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-)}
-{testStratRunning ? "Running…": "Run Strategy Test"}
-</button>
-</div>
-
-{testStratResult && (
-<div className="mt-3 border border-border rounded bg-background/50 p-3 space-y-1.5 text-xs">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground pb-1.5 border-b border-border">
-Tested at {new Date(testStratResult.scanned_at).toISOString().slice(11, 19)} UTC on {testStratResult.pair}
-</div>
-{testStratResult.rows.map((r, i) => (
-<div key={i} className="font-mono text-[11px]">
-{r.qualified && r.signal ? (
-<span className="text-bull">
-✅ <span className="font-bold">{r.setup}</span> — {r.signal.direction}
-{" | Entry: "}{r.signal.entry}
-{" | SL: "}{r.signal.stop_loss}
-{" | TP1: "}{r.signal.tp1}
-{" | TP2: "}{r.signal.tp2}
-{r.signal.rr != null && <> {" | R:R "}{r.signal.rr}</>}
-{r.signal.confidence != null && <> {" | Confidence: "}{r.signal.confidence}%</>}
-{r.signal.order_type && <> {" | Order type: "}{r.signal.order_type}</>}
-{r.debug && <span className="text-muted-foreground"> {" | "}{r.debug}</span>}
-</span>
-): (
-<span className="text-bear">
-❌ <span className="font-bold">{r.setup}</span>
-{" | "}<span className="text-muted-foreground">{r.reason ?? "Not qualified"}</span>
-</span>
-)}
-</div>
-))}
-</div>
-)}
-</div>
-
-</div>
-</div>
-);
+      </div>
+    </div>
+  );
 }
 
 
 
 function RiskExposureWidget({
-openSignals, openRiskPct, correlationWarnings, maxTrades,
+  openSignals, openRiskPct, correlationWarnings, maxTrades,
 }: {
-openSignals: Signal[];
-openRiskPct: number;
-correlationWarnings: string[];
-maxTrades: number;
+  openSignals: Signal[];
+  openRiskPct: number;
+  correlationWarnings: string[];
+  maxTrades: number;
 }) {
-const overCap = openSignals.length >= maxTrades;
-const meterPct = Math.min(100,
-(openSignals.length / maxTrades) * 100);
-const meterColor = overCap ? "var(--bear)": openSignals.length >= 2 ? "var(--chart-4)": "var(--bull)";
-return (
-<div className="mt-4 border border-border rounded bg-card p-3">
-<div className="flex items-center justify-between gap-3 flex-wrap">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-Open Risk Exposure
-</div>
-<div className="text-xs text-muted-foreground">
-Notional <span className="text-foreground">${NOTIONAL_ACCOUNT.toLocaleString()}</span>
-{" · "}{RISK_PER_TRADE_PCT}% per trade
-</div>
-</div>
-<div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Open Trades
-</div>
-<div className="font-semibold text-base" style={ { color: overCap ? "var(--bear)": "var(--foreground)" }}>
-{openSignals.length} / {maxTrades}
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Total Risk
-</div>
-<div className="font-semibold text-base">
-{openRiskPct.toFixed(1)}%
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-$ At Risk
-</div>
-<div className="font-semibold text-base">
-${((openRiskPct / 100) * NOTIONAL_ACCOUNT).toFixed(0)}
-</div>
-</div>
-</div>
-<div className="mt-2 w-full h-1 bg-secondary rounded overflow-hidden">
-<div className="h-full transition-all" style={ { width: `${meterPct}%`,
-backgroundColor: meterColor }} />
-</div>
-{correlationWarnings.length > 0 && (
-<div className="mt-2 space-y-1">
-{correlationWarnings.map((w, i) => (
-<div key={i} className="text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
-⚠ {w}
-</div>
-))}
-</div>
-)}
-{openSignals.length > 0 && (
-<div className="mt-2 flex flex-wrap gap-1.5">
-{openSignals.map((s) => (
-<span key={s.id} className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-s.direction === "Long" ? "bg-bull/15 text-bull": "bg-bear/15 text-bear"
-}`}>
-{s.direction === "Long" ? "▲": "▼"} {s.pair}
-</span>
-))}
-</div>
-)}
-</div>
-);
+  const overCap = openSignals.length >= maxTrades;
+  const meterPct = Math.min(100, (openSignals.length / maxTrades) * 100);
+  const meterColor = overCap ? "var(--bear)" : openSignals.length >= 2 ? "var(--chart-4)" : "var(--bull)";
+  return (
+    <div className="mt-4 border border-border rounded bg-card p-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Open Risk Exposure</div>
+        <div className="text-xs text-muted-foreground">
+          Notional <span className="text-foreground">${NOTIONAL_ACCOUNT.toLocaleString()}</span>
+          {" · "}{RISK_PER_TRADE_PCT}% per trade
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Open Trades</div>
+          <div className="font-semibold text-base" style={{ color: overCap ? "var(--bear)" : "var(--foreground)" }}>
+            {openSignals.length} / {maxTrades}
+          </div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Total Risk</div>
+          <div className="font-semibold text-base">{openRiskPct.toFixed(1)}%</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">$ At Risk</div>
+          <div className="font-semibold text-base">
+            ${((openRiskPct / 100) * NOTIONAL_ACCOUNT).toFixed(0)}
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 w-full h-1 bg-secondary rounded overflow-hidden">
+        <div className="h-full transition-all" style={{ width: `${meterPct}%`, backgroundColor: meterColor }} />
+      </div>
+      {correlationWarnings.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {correlationWarnings.map((w, i) => (
+            <div key={i} className="text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+              ⚠ {w}
+            </div>
+          ))}
+        </div>
+      )}
+      {openSignals.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {openSignals.map((s) => (
+            <span key={s.id} className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+              s.direction === "Long" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
+            }`}>
+              {s.direction === "Long" ? "▲" : "▼"} {s.pair}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function HealthPanel({
-scanRuns, cacheRows, priceHealth, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
-appSettings, saveAppSettings, todaysEvents,
+  scanRuns, cacheRows, priceHealth, budgetToday, budgetTodayKey1, budgetTodayKey2, budgetTodayKey3, lastCron, nextCronAt,
+  appSettings, saveAppSettings, todaysEvents,
 }: {
-scanRuns: ScanRun[];
-cacheRows: CacheRow[];
-priceHealth: PriceHealthRow[];
-budgetToday: number;
-budgetTodayKey1: number;
-budgetTodayKey2: number;
-budgetTodayKey3: number;
-lastCron: ScanRun | null;
-nextCronAt: Date | null;
-appSettings: AppSettings;
-saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
-todaysEvents: EconomicEvent[];
+  scanRuns: ScanRun[];
+  cacheRows: CacheRow[];
+  priceHealth: PriceHealthRow[];
+  budgetToday: number;
+  budgetTodayKey1: number;
+  budgetTodayKey2: number;
+  budgetTodayKey3: number;
+  lastCron: ScanRun | null;
+  nextCronAt: Date | null;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  todaysEvents: EconomicEvent[];
 }) {
-void todaysEvents;
-const scanInterval = [5, 15, 30].includes(appSettings.scan_interval_minutes) ? appSettings.scan_interval_minutes: 15;
-// Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
-const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000: Infinity;
-const lastOk = lastCron?.ok ?? false;
-const status: "green" | "amber" | "red" =
-lastCron && lastOk && lastCronAgeMin < 20 ? "green": lastCron && lastCronAgeMin < 40 ? "amber": "red";
-const statusColor = status === "green" ? "var(--bull)": status === "amber" ? "var(--chart-4)": "var(--bear)";
-const statusLabel = status === "green" ? "HEALTHY": status === "amber" ? "DEGRADED": "STALLED";
-const budgetPct = Math.min(100,
-(budgetToday / DAILY_BUDGET) * 100);
+  void todaysEvents;
+  const scanInterval = [5, 15, 30].includes(appSettings.scan_interval_minutes) ? appSettings.scan_interval_minutes : 15;
+  // Status: green if last cron < 20min ago & ok; amber if < 40min; red otherwise
+  const lastCronAgeMin = lastCron ? (Date.now() - new Date(lastCron.started_at).getTime()) / 60000 : Infinity;
+  const lastOk = lastCron?.ok ?? false;
+  const status: "green" | "amber" | "red" =
+    lastCron && lastOk && lastCronAgeMin < 20 ? "green"
+    : lastCron && lastCronAgeMin < 40 ? "amber"
+    : "red";
+  const statusColor = status === "green" ? "var(--bull)" : status === "amber" ? "var(--chart-4)" : "var(--bear)";
+  const statusLabel = status === "green" ? "HEALTHY" : status === "amber" ? "DEGRADED" : "STALLED";
+  const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
 
-// Group cache rows by pair
-const cacheByPair: Record < string, Record < string, string>> = {};
-for (const c of cacheRows) {
-if (!cacheByPair[c.pair]) cacheByPair[c.pair] = {};
-cacheByPair[c.pair][c.timeframe] = c.fetched_at;
-}
+  // Group cache rows by pair
+  const cacheByPair: Record<string, Record<string, string>> = {};
+  for (const c of cacheRows) {
+    if (!cacheByPair[c.pair]) cacheByPair[c.pair] = {};
+    cacheByPair[c.pair][c.timeframe] = c.fetched_at;
+  }
 
-return (
-<div className="mt-4 space-y-3">
-<BrokerHealthCard />
-<SymbolKeepaliveCard appSettings={appSettings} />
+  return (
+    <div className="mt-4 space-y-3">
+      <BrokerHealthCard />
+      <SymbolKeepaliveCard appSettings={appSettings} />
 
 
-<div className="border border-border rounded bg-card p-4">
-<div className="flex items-center justify-between flex-wrap gap-2">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-Scan Engine Status
-</div>
-<div className="flex items-center gap-2">
-<span className="inline-block w-2 h-2 rounded-full animate-pulse" style={ { backgroundColor: statusColor }} />
-<span className="text-xs font-bold tracking-wider" style={ { color: statusColor }}>{statusLabel}</span>
-</div>
-</div>
-<div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Last Cron
-</div>
-<div className="font-semibold">
-{lastCron ? `${timeAgo(lastCron.started_at)} ago`: "—"}
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Next Cron
-</div>
-<div className="font-semibold">
-{nextCronAt
-? (nextCronAt.getTime() > Date.now()
-? `~${Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m`: "due now"): "—"}
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-API Today
-</div>
-<div className="font-semibold">
-{budgetToday} / {DAILY_BUDGET}
-</div>
-<div className="w-full h-1 mt-1 bg-secondary rounded overflow-hidden">
-<div className="h-full" style={ {
-width: `${budgetPct}%`,
-backgroundColor: budgetPct > 85 ? "var(--bear)": budgetPct > 60 ? "var(--chart-4)": "var(--bull)",
-}} />
-</div>
-<div className="mt-1 text-[9px] text-muted-foreground tracking-wider flex justify-between gap-2">
-<span>K1 <span className="text-foreground font-semibold">{budgetTodayKey1}</span></span>
-<span>K2 <span className="text-foreground font-semibold">{budgetTodayKey2}</span></span>
-<span>K3 <span className="text-foreground font-semibold">{budgetTodayKey3}</span></span>
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">
-Scan Interval
-</div>
-<div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
-{([5, 15, 30] as const).map((opt) => {
-const active = scanInterval === opt;
-return (
-<button
-key={opt}
-type="button"
-onClick={() => { if (!active) saveAppSettings( { scan_interval_minutes: opt }); }}
-className={`px-2 py-1 transition-colors ${active ? "bg-primary text-primary-foreground": "bg-secondary/60 text-muted-foreground hover:text-foreground"}`}
->
-{opt} min
-</button>
-);
-})}
-</div>
-<div className="text-[9px] text-muted-foreground tracking-wider mt-1">
-5 min = fastest, highest API usage · 15 min = balanced (recommended) · 30 min = lowest API usage
-</div>
-</div>
-</div>
-</div>
+      <div className="border border-border rounded bg-card p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Scan Engine Status</div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusColor }} />
+            <span className="text-xs font-bold tracking-wider" style={{ color: statusColor }}>{statusLabel}</span>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Cron</div>
+            <div className="font-semibold">{lastCron ? `${timeAgo(lastCron.started_at)} ago` : "—"}</div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Next Cron</div>
+            <div className="font-semibold">
+              {nextCronAt
+                ? (nextCronAt.getTime() > Date.now()
+                    ? `~${Math.max(0, Math.ceil((nextCronAt.getTime() - Date.now()) / 60000))}m`
+                    : "due now")
+                : "—"}
+            </div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider">API Today</div>
+            <div className="font-semibold">{budgetToday} / {DAILY_BUDGET}</div>
+            <div className="w-full h-1 mt-1 bg-secondary rounded overflow-hidden">
+              <div className="h-full" style={{
+                width: `${budgetPct}%`,
+                backgroundColor: budgetPct > 85 ? "var(--bear)" : budgetPct > 60 ? "var(--chart-4)" : "var(--bull)",
+              }}/>
+            </div>
+            <div className="mt-1 text-[9px] text-muted-foreground tracking-wider flex justify-between gap-2">
+              <span>K1 <span className="text-foreground font-semibold">{budgetTodayKey1}</span></span>
+              <span>K2 <span className="text-foreground font-semibold">{budgetTodayKey2}</span></span>
+              <span>K3 <span className="text-foreground font-semibold">{budgetTodayKey3}</span></span>
+            </div>
+          </div>
+          <div className="bg-secondary/40 px-2 py-1.5 rounded">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wider mb-1">Scan Interval</div>
+            <div className="inline-flex rounded border border-border overflow-hidden text-[10px] font-semibold">
+              {([5, 15, 30] as const).map((opt) => {
+                const active = scanInterval === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { if (!active) saveAppSettings({ scan_interval_minutes: opt }); }}
+                    className={`px-2 py-1 transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-secondary/60 text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {opt} min
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[9px] text-muted-foreground tracking-wider mt-1">5 min = fastest, highest API usage · 15 min = balanced (recommended) · 30 min = lowest API usage</div>
+          </div>
+        </div>
+      </div>
 
-<div className="border border-border rounded bg-card p-4">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Per-Pair Cache Freshness
-</div>
-<div className="space-y-1 text-xs font-mono">
-{(() => {
-const visiblePairs = PAIRS.filter((p) => {
-const at = cacheByPair[p]?.["5m"];
-if (!at) return false;
-const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
-return ageMin < 120;
-});
-if (visiblePairs.length === 0) {
-return <div className="text-muted-foreground">
-No pairs scanned in the last 2 hours.
-</div>;
-}
-return visiblePairs.map((p) => (
-<div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
-<span className="font-bold w-20">{p}</span>
-{(["1m", "5m", "15m", "1h"] as const).map((tf) => {
-const at = cacheByPair[p]?.[tf];
-// 1m is only fetched for VERITAS pairs — hide for all others.
-if (tf === "1m" && (!VERITAS_PAIRS_UI.has(p) || !at)) return null;
-const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000: null;
-const ttl = tf === "1m" ? 3: tf === "5m" ? 4.5: tf === "15m" ? 15: 60;
-const fresh = ageMin !== null && ageMin < ttl;
-return (
-<span key={tf} className="flex items-center gap-1">
-<span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
-<span className={ageMin === null ? "text-muted-foreground/60": fresh ? "text-bull": "text-chart-4"}>
-{ageMin === null ? "—": `${ageMin.toFixed(1)}m`}
-</span>
-</span>
-);
-})}
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Per-Pair Cache Freshness</div>
+        <div className="space-y-1 text-xs font-mono">
+          {(() => {
+            const visiblePairs = PAIRS.filter((p) => {
+              const at = cacheByPair[p]?.["5m"];
+              if (!at) return false;
+              const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
+              return ageMin < 120;
+            });
+            if (visiblePairs.length === 0) {
+              return <div className="text-muted-foreground">No pairs scanned in the last 2 hours.</div>;
+            }
+            return visiblePairs.map((p) => (
+              <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+                <span className="font-bold w-20">{p}</span>
+                {(["1m", "5m", "15m", "1h"] as const).map((tf) => {
+                  const at = cacheByPair[p]?.[tf];
+                  // 1m is only fetched for VERITAS pairs — hide for all others.
+                  if (tf === "1m" && (!VERITAS_PAIRS_UI.has(p) || !at)) return null;
+                  const ageMin = at ? (Date.now() - new Date(at).getTime()) / 60000 : null;
+                  const ttl = tf === "1m" ? 3 : tf === "5m" ? 4.5 : tf === "15m" ? 15 : 60;
+                  const fresh = ageMin !== null && ageMin < ttl;
+                  return (
+                    <span key={tf} className="flex items-center gap-1">
+                      <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
+                      <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
+                        {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+                      </span>
+                    </span>
+                  );
+                })}
 
-</div>
-));
-})()}
-</div>
-<div className="text-[10px] text-muted-foreground mt-2">
-Pairs not scanned in the last 2 hours are hidden.
-</div>
-</div>
+              </div>
+            ));
+          })()}
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-2">Pairs not scanned in the last 2 hours are hidden.</div>
+      </div>
 
-<div className="border border-border rounded bg-card p-4">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Price &amp; Candle Health (active pairs)
-</div>
-<div className="space-y-1 text-xs font-mono">
-{(() => {
-const activePairs = PAIRS.filter((p) => appSettings.pair_auto_execute?.[p] !== false);
-const byPair: Record < string, Record < string, PriceHealthRow>> = {};
-for (const r of priceHealth) {
-if (!byPair[r.pair]) byPair[r.pair] = {};
-byPair[r.pair][r.timeframe] = r;
-}
-if (activePairs.length === 0) {
-return <div className="text-muted-foreground">
-No pairs currently active.
-</div>;
-}
-return activePairs.map((p) => {
-const row5m = byPair[p]?.["5m"];
-const price = row5m ? Number(row5m.last_close): null;
-const priceStr = price === null ? "—": price >= 1000 ? price.toFixed(2): price >= 10 ? price.toFixed(4): price.toFixed(5);
-return (
-<div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
-<span className="font-bold w-20">{p}</span>
-<span className="w-24 text-foreground">{priceStr}</span>
-{(["1m", "5m", "15m", "1h"] as const).map((tf) => {
-const r = byPair[p]?.[tf];
-if (tf === "1m" && !VERITAS_PAIRS_UI.has(p)) return null;
-const ageMin = r ? (Date.now() - new Date(r.fetched_at).getTime()) / 60000: null;
-const ttl = tf === "1m" ? 3: tf === "5m" ? 4.5: tf === "15m" ? 15: 60;
-const fresh = ageMin !== null && ageMin < ttl;
-const count = r?.candle_count ?? 0;
-const minRequired = 65;
-const countLow = count > 0 && count < minRequired;
-return (
-<span key={tf} className="flex items-center gap-1">
-<span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
-<span className={ageMin === null ? "text-muted-foreground/60": fresh ? "text-bull": "text-chart-4"}>
-{ageMin === null ? "—": `${ageMin.toFixed(1)}m`}
-</span>
-<span className={countLow ? "text-bear": "text-muted-foreground"}>
-({count || "—"})
-</span>
-</span>
-);
-})}
-</div>
-);
-});
-})()}
-</div>
-<div className="text-[10px] text-muted-foreground mt-2">
-Price from latest 5m close. Candle count in parentheses — red means below the ~65 minimum most strategies need.
-</div>
-</div>
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Price &amp; Candle Health (active pairs)</div>
+        <div className="space-y-1 text-xs font-mono">
+          {(() => {
+            const activePairs = PAIRS.filter((p) => appSettings.pair_auto_execute?.[p] !== false);
+            const byPair: Record<string, Record<string, PriceHealthRow>> = {};
+            for (const r of priceHealth) {
+              if (!byPair[r.pair]) byPair[r.pair] = {};
+              byPair[r.pair][r.timeframe] = r;
+            }
+            if (activePairs.length === 0) {
+              return <div className="text-muted-foreground">No pairs currently active.</div>;
+            }
+            return activePairs.map((p) => {
+              const row5m = byPair[p]?.["5m"];
+              const price = row5m ? Number(row5m.last_close) : null;
+              const priceStr = price === null ? "—"
+                : price >= 1000 ? price.toFixed(2)
+                : price >= 10 ? price.toFixed(4)
+                : price.toFixed(5);
+              return (
+                <div key={p} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+                  <span className="font-bold w-20">{p}</span>
+                  <span className="w-24 text-foreground">{priceStr}</span>
+                  {(["1m", "5m", "15m", "1h"] as const).map((tf) => {
+                    const r = byPair[p]?.[tf];
+                    if (tf === "1m" && !VERITAS_PAIRS_UI.has(p)) return null;
+                    const ageMin = r ? (Date.now() - new Date(r.fetched_at).getTime()) / 60000 : null;
+                    const ttl = tf === "1m" ? 3 : tf === "5m" ? 4.5 : tf === "15m" ? 15 : 60;
+                    const fresh = ageMin !== null && ageMin < ttl;
+                    const count = r?.candle_count ?? 0;
+                    const minRequired = 65;
+                    const countLow = count > 0 && count < minRequired;
+                    return (
+                      <span key={tf} className="flex items-center gap-1">
+                        <span className="text-muted-foreground text-[10px] uppercase">{tf}</span>
+                        <span className={ageMin === null ? "text-muted-foreground/60" : fresh ? "text-bull" : "text-chart-4"}>
+                          {ageMin === null ? "—" : `${ageMin.toFixed(1)}m`}
+                        </span>
+                        <span className={countLow ? "text-bear" : "text-muted-foreground"}>
+                          ({count || "—"})
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-2">Price from latest 5m close. Candle count in parentheses — red means below the ~65 minimum most strategies need.</div>
+      </div>
 
-<div className="border border-border rounded bg-card p-4">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Recent Scan Runs (last 20)
-</div>
-<div className="space-y-1 text-xs font-mono">
-{scanRuns.length === 0 && <div className="text-muted-foreground">
-No scan runs recorded yet.
-</div>
-}
-{scanRuns.map((r) => (
-<div key={r.id} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
-<span className={r.ok ? "text-bull": "text-bear"}>{r.ok ? "✓": "✗"}</span>
-<span className="text-foreground">{new Date(r.started_at).toISOString().slice(11, 19)} UTC</span>
-<span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-secondary/60 text-muted-foreground">{r.source}</span>
-<span className="text-[10px] uppercase text-muted-foreground">{r.mode}</span>
-<span>new <span className="text-primary font-semibold">{r.new_signals}</span></span>
-<span>used <span className="text-foreground">{r.api_calls_used}</span></span>
-{Array.isArray(r.errors) && r.errors.length > 0 && (
-<span className="text-bear truncate max-w-md">⚠ {String(r.errors[0]).slice(0,
-80)}</span>
-)}
-</div>
-))}
-</div>
-</div>
-</div>
-);
+      <div className="border border-border rounded bg-card p-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Recent Scan Runs (last 20)</div>
+        <div className="space-y-1 text-xs font-mono">
+          {scanRuns.length === 0 && <div className="text-muted-foreground">No scan runs recorded yet.</div>}
+          {scanRuns.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 flex-wrap border-b border-border/40 py-1 last:border-b-0">
+              <span className={r.ok ? "text-bull" : "text-bear"}>{r.ok ? "✓" : "✗"}</span>
+              <span className="text-foreground">{new Date(r.started_at).toISOString().slice(11, 19)} UTC</span>
+              <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-secondary/60 text-muted-foreground">{r.source}</span>
+              <span className="text-[10px] uppercase text-muted-foreground">{r.mode}</span>
+              <span>new <span className="text-primary font-semibold">{r.new_signals}</span></span>
+              <span>used <span className="text-foreground">{r.api_calls_used}</span></span>
+              {Array.isArray(r.errors) && r.errors.length > 0 && (
+                <span className="text-bear truncate max-w-md">⚠ {String(r.errors[0]).slice(0, 80)}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function BrokerHealthCard() {
-const [state, setState] = useState < {
-status: "connected" | "reconnecting" | "error" | "loading";
-state?: string;
-connectionStatus?: string;
-redeployed?: boolean;
-reason?: string;
-checkedAt?: number;
-} > ({
-status: "loading"
-});
-const [reconnecting, setReconnecting] = useState(false);
+  const [state, setState] = useState<{
+    status: "connected" | "reconnecting" | "error" | "loading";
+    state?: string;
+    connectionStatus?: string;
+    redeployed?: boolean;
+    reason?: string;
+    checkedAt?: number;
+  }>({ status: "loading" });
+  const [reconnecting, setReconnecting] = useState(false);
 
-async function check() {
-try {
-const r = await healthCheckMetaApiFn( {
-data: {}
-});
-setState({
-...r, checkedAt: Date.now()
-});
-} catch (e) {
-setState({
-status: "error", reason: (e as Error).message, checkedAt: Date.now()
-});
-}
-}
+  async function check() {
+    try {
+      const r = await healthCheckMetaApiFn({ data: {} });
+      setState({ ...r, checkedAt: Date.now() });
+    } catch (e) {
+      setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
+    }
+  }
 
-async function forceReconnect() {
-setReconnecting(true);
-try {
-const r = await healthCheckMetaApiFn( {
-data: {
-force: true
-}
-});
-setState({
-...r, checkedAt: Date.now()
-});
-} catch (e) {
-setState({
-status: "error", reason: (e as Error).message, checkedAt: Date.now()
-});
-} finally {
-setReconnecting(false);
-}
-}
+  async function forceReconnect() {
+    setReconnecting(true);
+    try {
+      const r = await healthCheckMetaApiFn({ data: { force: true } });
+      setState({ ...r, checkedAt: Date.now() });
+    } catch (e) {
+      setState({ status: "error", reason: (e as Error).message, checkedAt: Date.now() });
+    } finally {
+      setReconnecting(false);
+    }
+  }
 
-useEffect(() => {
-check();
-const t = setInterval(check, 60_000);
-return () => clearInterval(t);
-}, []);
+  useEffect(() => {
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
-const s = state.status;
-const color = s === "connected" ? "var(--bull)": s === "reconnecting" ? "var(--chart-4)": s === "loading" ? "var(--muted-foreground)": "var(--bear)";
-const label = s === "connected" ? "CONNECTED": s === "reconnecting" ? "RECONNECTING": s === "loading" ? "CHECKING…": "ERROR";
+  const s = state.status;
+  const color = s === "connected" ? "var(--bull)"
+    : s === "reconnecting" ? "var(--chart-4)"
+    : s === "loading" ? "var(--muted-foreground)"
+    : "var(--bear)";
+  const label = s === "connected" ? "CONNECTED"
+    : s === "reconnecting" ? "RECONNECTING"
+    : s === "loading" ? "CHECKING…"
+    : "ERROR";
 
-return (
-<div className="border border-border rounded bg-card p-4">
-<div className="flex items-center justify-between flex-wrap gap-2">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-Broker Connection
-</div>
-<div className="flex items-center gap-2">
-<span className="inline-block w-2 h-2 rounded-full animate-pulse" style={ { backgroundColor: color }} />
-<span className="text-xs font-bold tracking-wider" style={ { color }}>{label}</span>
-</div>
-</div>
-<div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-State
-</div>
-<div className="font-semibold">
-{state.state ?? "—"}
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Connection
-</div>
-<div className="font-semibold">
-{state.connectionStatus ?? "—"}
-</div>
-</div>
-<div className="bg-secondary/40 px-2 py-1.5 rounded">
-<div className="text-[9px] uppercase text-muted-foreground tracking-wider">
-Last Check
-</div>
-<div className="font-semibold">
-{state.checkedAt ? `${timeAgo(new Date(state.checkedAt).toISOString())} ago`: "—"}
-</div>
-</div>
-</div>
-{state.reason && s !== "connected" && (
-<div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">
-{state.reason}
-</div>
-)}
-{state.redeployed && (
-<div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
-Redeploy triggered — broker will be back online in ~30s.
-</div>
-)}
-<div className="mt-3 flex items-center gap-2">
-<button
-onClick={forceReconnect}
-disabled={reconnecting}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
-{reconnecting ? "Reconnecting…": "Force Reconnect"}
-</button>
-<button
-onClick={check}
-disabled={reconnecting}
-className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
-Recheck
-</button>
-</div>
-</div>
-);
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Broker Connection</div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+          <span className="text-xs font-bold tracking-wider" style={{ color }}>{label}</span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">State</div>
+          <div className="font-semibold">{state.state ?? "—"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Connection</div>
+          <div className="font-semibold">{state.connectionStatus ?? "—"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Check</div>
+          <div className="font-semibold">{state.checkedAt ? `${timeAgo(new Date(state.checkedAt).toISOString())} ago` : "—"}</div>
+        </div>
+      </div>
+      {state.reason && s !== "connected" && (
+        <div className="mt-2 text-[11px] text-bear bg-bear/10 border border-bear/30 rounded px-2 py-1">
+          {state.reason}
+        </div>
+      )}
+      {state.redeployed && (
+        <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
+          Redeploy triggered — broker will be back online in ~30s.
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={forceReconnect}
+          disabled={reconnecting}
+          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
+          {reconnecting ? "Reconnecting…" : "Force Reconnect"}
+        </button>
+        <button
+          onClick={check}
+          disabled={reconnecting}
+          className="px-3 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
+          Recheck
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function SymbolKeepaliveCard({ appSettings }: { appSettings: AppSettings }) {
-const activePairs = useMemo(
-() => Object.entries(appSettings.pair_auto_execute ?? {})
-.filter(([, on]) => on)
-.map(([p]) => p),
-[appSettings.pair_auto_execute],
-);
+  const activePairs = useMemo(
+    () => Object.entries(appSettings.pair_auto_execute ?? {})
+      .filter(([, on]) => on)
+      .map(([p]) => p),
+    [appSettings.pair_auto_execute],
+  );
 
-type Entry = {
-ok: boolean; bid?: number; loading: boolean; symbol?: string; recovered?: boolean
-};
-const [subResults, setSubResults] = useState < Record < string, Entry>>({});
-const [checkedAt, setCheckedAt] = useState < number | undefined > ();
-const [running, setRunning] = useState(false);
-const [forceSubscribeLoading, setForceSubscribeLoading] = useState(false);
-const [forceSummary, setForceSummary] = useState < {
-recovered: number; total: number
-} | undefined > ();
-const runIdRef = useRef(0);
+  type Entry = { ok: boolean; bid?: number; loading: boolean; symbol?: string; recovered?: boolean };
+  const [subResults, setSubResults] = useState<Record<string, Entry>>({});
+  const [checkedAt, setCheckedAt] = useState<number | undefined>();
+  const [running, setRunning] = useState(false);
+  const [forceSubscribeLoading, setForceSubscribeLoading] = useState(false);
+  const [forceSummary, setForceSummary] = useState<{ recovered: number; total: number } | undefined>();
+  const runIdRef = useRef(0);
 
-async function refresh() {
-const myRun = ++runIdRef.current;
-setRunning(true);
-// Seed everyone as loading immediately so the panel renders the full grid.
-const initial: Record < string, Entry > = {};
-for (const p of activePairs) initial[p] = {
-ok: false,
-loading: true
-};
-setSubResults(initial);
+  async function refresh() {
+    const myRun = ++runIdRef.current;
+    setRunning(true);
+    // Seed everyone as loading immediately so the panel renders the full grid.
+    const initial: Record<string, Entry> = {};
+    for (const p of activePairs) initial[p] = { ok: false, loading: true };
+    setSubResults(initial);
 
-for (const pair of activePairs) {
-if (runIdRef.current !== myRun) return; // cancelled by newer refresh
-try {
-const r = await checkSubscriptionFn( {
-data: {
-pair
-}
-});
-if (runIdRef.current !== myRun) return;
-setSubResults((prev) => ({
-...prev,
-[pair]: {
-ok: r.ok, bid: r.bid, loading: false, symbol: r.symbol
-},
-}));
-} catch {
-if (runIdRef.current !== myRun) return;
-setSubResults((prev) => ({
-...prev, [pair]: {
-ok: false, loading: false
-}
-}));
-}
-}
-if (runIdRef.current === myRun) {
-setCheckedAt(Date.now());
-setRunning(false);
-}
-}
+    for (const pair of activePairs) {
+      if (runIdRef.current !== myRun) return; // cancelled by newer refresh
+      try {
+        const r = await checkSubscriptionFn({ data: { pair } });
+        if (runIdRef.current !== myRun) return;
+        setSubResults((prev) => ({
+          ...prev,
+          [pair]: { ok: r.ok, bid: r.bid, loading: false, symbol: r.symbol },
+        }));
+      } catch {
+        if (runIdRef.current !== myRun) return;
+        setSubResults((prev) => ({ ...prev, [pair]: { ok: false, loading: false } }));
+      }
+    }
+    if (runIdRef.current === myRun) {
+      setCheckedAt(Date.now());
+      setRunning(false);
+    }
+  }
 
-async function handleForceSubscribe() {
-if (forceSubscribeLoading) return;
-setForceSubscribeLoading(true);
-setForceSummary(undefined);
-// Cancel any in-flight refresh by bumping the run id, then seed pulsing state.
-runIdRef.current += 1;
-const pulsing: Record < string,
-Entry > = {};
-for (const p of activePairs) pulsing[p] = {
-ok: false,
-loading: true
-};
-setSubResults(pulsing);
-try {
-const res = await forceSubscribeMetaApiFn();
-const next: Record < string,
-Entry > = {};
-for (const p of activePairs) next[p] = {
-ok: false,
-loading: false
-};
-for (const r of res.keepalive ?? []) {
-next[r.pair] = {
-ok: r.ok,
-bid: r.bid,
-loading: false,
-symbol: r.symbol,
-recovered: r.recovered
-};
-}
-setSubResults(next);
-setForceSummary({
-recovered: res.recovered, total: res.total
-});
-setCheckedAt(Date.now());
-} catch {
-const next: Record < string,
-Entry > = {};
-for (const p of activePairs) next[p] = {
-ok: false,
-loading: false
-};
-setSubResults(next);
-setForceSummary({
-recovered: 0, total: activePairs.length
-});
-} finally {
-setForceSubscribeLoading(false);
-}
-}
+  async function handleForceSubscribe() {
+    if (forceSubscribeLoading) return;
+    setForceSubscribeLoading(true);
+    setForceSummary(undefined);
+    // Cancel any in-flight refresh by bumping the run id, then seed pulsing state.
+    runIdRef.current += 1;
+    const pulsing: Record<string, Entry> = {};
+    for (const p of activePairs) pulsing[p] = { ok: false, loading: true };
+    setSubResults(pulsing);
+    try {
+      const res = await forceSubscribeMetaApiFn();
+      const next: Record<string, Entry> = {};
+      for (const p of activePairs) next[p] = { ok: false, loading: false };
+      for (const r of res.keepalive ?? []) {
+        next[r.pair] = { ok: r.ok, bid: r.bid, loading: false, symbol: r.symbol, recovered: r.recovered };
+      }
+      setSubResults(next);
+      setForceSummary({ recovered: res.recovered, total: res.total });
+      setCheckedAt(Date.now());
+    } catch {
+      const next: Record<string, Entry> = {};
+      for (const p of activePairs) next[p] = { ok: false, loading: false };
+      setSubResults(next);
+      setForceSummary({ recovered: 0, total: activePairs.length });
+    } finally {
+      setForceSubscribeLoading(false);
+    }
+  }
 
-useEffect(() => {
-refresh();
-const t = setInterval(refresh, 60_000);
-return () => clearInterval(t);
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [activePairs.join(",")]);
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 60_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePairs.join(",")]);
 
-return (
-<div className="border border-border rounded bg-card p-4">
-<div className="flex items-center justify-between flex-wrap gap-2">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-Symbol Subscriptions
-</div>
-<div className="flex items-center gap-2">
-<span className="text-[10px] text-muted-foreground">
-{checkedAt ? `${timeAgo(new Date(checkedAt).toISOString())} ago`: running ? "checking…": "—"}
-</span>
-<button
-onClick={refresh}
-disabled={running || forceSubscribeLoading}
-className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
-{running ? "…": "Refresh"}
-</button>
-<button
-onClick={handleForceSubscribe}
-disabled={forceSubscribeLoading}
-title="Retry hard recovery. Use when pairs show ❌ after a normal ping. Takes ~30–45 seconds."
-className="text-xs px-2 py-1 border border-amber-500 text-amber-400 rounded hover:bg-amber-500/10 disabled:opacity-50">
-{forceSubscribeLoading ? "⚡ Subscribing...": "⚡ FORCE SUBSCRIBE"}
-</button>
-</div>
-</div>
-{forceSubscribeLoading && (
-<div className="mt-2 text-[11px] text-amber-400 animate-pulse">
-Re-deploying terminal and re-subscribing all pairs… this may take up to 45 seconds.
-</div>
-)}
-<div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-{activePairs.length === 0 && (
-<div className="text-muted-foreground col-span-full text-[11px]">
-No active pairs configured for auto-execute.
-</div>
-)}
-{activePairs.map((pair) => {
-const k = subResults[pair] ?? {
-ok: false, loading: true
-};
-const pulse = k.loading && forceSubscribeLoading ? "animate-pulse": "";
-return (
-<div key={pair} className={`bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2 ${pulse}`}>
-<span className="flex items-center gap-1.5">
-<span className={k.loading ? "text-muted-foreground": k.ok ? "text-bull": "text-bear"}>
-{k.loading ? "⏳": k.ok ? "✅": "❌"}
-</span>
-<span className="font-semibold">{pair}</span>
-{k.recovered && !k.loading && k.ok && (
-<span className="text-[10px] text-amber-400" title="Recovered via force subscribe">↺</span>
-)}
-{k.symbol && <span className="text-[10px] text-muted-foreground">{k.symbol}</span>}
-</span>
-<span className={k.ok ? "text-foreground": "text-muted-foreground/60"}>
-{k.bid != null ? k.bid.toFixed(5): k.loading ? "…": "—"}
-</span>
-</div>
-);
-})}
-</div>
-{forceSummary && (
-<div className={`mt-2 text-[11px] font-semibold ${forceSummary.recovered === forceSummary.total ? "text-bull": forceSummary.recovered === 0 ? "text-bear": "text-amber-400"}`}>
-Recovered {forceSummary.recovered} / {forceSummary.total} pairs
-</div>
-)}
-<div className="text-[10px] text-muted-foreground mt-2">
-Probes one pair at a time. Background keepalive runs on the cron cycle.
-</div>
-<div className="text-[10px] text-amber-400/70 mt-1">
-Forces terminal redeploy + reconnect. Use when pairs show ❌ after normal ping. Takes ~30–45 seconds.
-</div>
-</div>
-);
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Symbol Subscriptions</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground">
+            {checkedAt ? `${timeAgo(new Date(checkedAt).toISOString())} ago` : running ? "checking…" : "—"}
+          </span>
+          <button
+            onClick={refresh}
+            disabled={running || forceSubscribeLoading}
+            className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded border border-border hover:bg-muted/40 disabled:opacity-50">
+            {running ? "…" : "Refresh"}
+          </button>
+          <button
+            onClick={handleForceSubscribe}
+            disabled={forceSubscribeLoading}
+            title="Retry hard recovery. Use when pairs show ❌ after a normal ping. Takes ~30–45 seconds."
+            className="text-xs px-2 py-1 border border-amber-500 text-amber-400 rounded hover:bg-amber-500/10 disabled:opacity-50">
+            {forceSubscribeLoading ? "⚡ Subscribing..." : "⚡ FORCE SUBSCRIBE"}
+          </button>
+        </div>
+      </div>
+      {forceSubscribeLoading && (
+        <div className="mt-2 text-[11px] text-amber-400 animate-pulse">
+          Re-deploying terminal and re-subscribing all pairs… this may take up to 45 seconds.
+        </div>
+      )}
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+        {activePairs.length === 0 && (
+          <div className="text-muted-foreground col-span-full text-[11px]">No active pairs configured for auto-execute.</div>
+        )}
+        {activePairs.map((pair) => {
+          const k = subResults[pair] ?? { ok: false, loading: true };
+          const pulse = k.loading && forceSubscribeLoading ? "animate-pulse" : "";
+          return (
+            <div key={pair} className={`bg-secondary/40 px-2 py-1.5 rounded flex items-center justify-between gap-2 ${pulse}`}>
+              <span className="flex items-center gap-1.5">
+                <span className={k.loading ? "text-muted-foreground" : k.ok ? "text-bull" : "text-bear"}>
+                  {k.loading ? "⏳" : k.ok ? "✅" : "❌"}
+                </span>
+                <span className="font-semibold">{pair}</span>
+                {k.recovered && !k.loading && k.ok && (
+                  <span className="text-[10px] text-amber-400" title="Recovered via force subscribe">↺</span>
+                )}
+                {k.symbol && <span className="text-[10px] text-muted-foreground">{k.symbol}</span>}
+              </span>
+              <span className={k.ok ? "text-foreground" : "text-muted-foreground/60"}>
+                {k.bid != null ? k.bid.toFixed(5) : k.loading ? "…" : "—"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {forceSummary && (
+        <div className={`mt-2 text-[11px] font-semibold ${forceSummary.recovered === forceSummary.total ? "text-bull" : forceSummary.recovered === 0 ? "text-bear" : "text-amber-400"}`}>
+          Recovered {forceSummary.recovered} / {forceSummary.total} pairs
+        </div>
+      )}
+      <div className="text-[10px] text-muted-foreground mt-2">Probes one pair at a time. Background keepalive runs on the cron cycle.</div>
+      <div className="text-[10px] text-amber-400/70 mt-1">Forces terminal redeploy + reconnect. Use when pairs show ❌ after normal ping. Takes ~30–45 seconds.</div>
+    </div>
+  );
 }
 
 
 
-function Toggle({ on,
-onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
 
-return (
-<button onClick={() => onChange(!on)}
-className={`relative w-11 h-6 rounded-full transition-colors ${on ? "bg-primary": "bg-secondary"}`}>
-<span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-background transition-transform ${on ? "translate-x-5": ""}`} />
-</button>
-);
+  return (
+    <button onClick={() => onChange(!on)}
+      className={`relative w-11 h-6 rounded-full transition-colors ${on ? "bg-primary" : "bg-secondary"}`}>
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-background transition-transform ${on ? "translate-x-5" : ""}`} />
+    </button>
+  );
 }
 
 function EdgePanel({
-stats,
+  stats,
 }: {
-stats: {
-summary: {
-setup: string; n: number; winRate: number; avgR: number; expectancy: number
-}[];
-curve: {
-i: number; r: number
-}[];
-totalR: number; totalN: number; winRate: number;
-};
+  stats: {
+    summary: { setup: string; n: number; winRate: number; avgR: number; expectancy: number }[];
+    curve: { i: number; r: number }[];
+    totalR: number; totalN: number; winRate: number;
+  };
 }) {
-return (
-<div className="mt-4 space-y-4">
-<div className="grid grid-cols-3 gap-2">
-<KPI label="CLOSED" value={stats.totalN.toString()} />
-<KPI label="WIN RATE" value={`${stats.winRate.toFixed(1)}%`} color={stats.winRate >= 50 ? "bull": "bear"} />
-<KPI label="TOTAL R" value={`${stats.totalR >= 0 ? "+": ""}${stats.totalR.toFixed(2)}R`} color={stats.totalR >= 0 ? "bull": "bear"} />
-</div>
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid grid-cols-3 gap-2">
+        <KPI label="CLOSED" value={stats.totalN.toString()} />
+        <KPI label="WIN RATE" value={`${stats.winRate.toFixed(1)}%`} color={stats.winRate >= 50 ? "bull" : "bear"} />
+        <KPI label="TOTAL R" value={`${stats.totalR >= 0 ? "+" : ""}${stats.totalR.toFixed(2)}R`} color={stats.totalR >= 0 ? "bull" : "bear"} />
+      </div>
 
-<div className="bg-card border border-border rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-P&L CURVE (R, cumulative)
-</div>
-<div className="h-56">
-{stats.curve.length === 0 ? (
-<div className="h-full flex items-center justify-center text-muted-foreground text-xs">
-Close out signals to build your edge curve
-</div>
-): (
-<ResponsiveContainer width="100%" height="100%">
-<LineChart data={stats.curve}>
-<CartesianGrid stroke="var(--grid)" strokeDasharray="2 2" />
-<XAxis dataKey="i" stroke="var(--muted-foreground)" fontSize={10} />
-<YAxis stroke="var(--muted-foreground)" fontSize={10} />
-<Tooltip contentStyle={ { backgroundColor: "var(--card)", border: "1px solid var(--border)", fontSize: 11 }} />
-<Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
-</LineChart>
-</ResponsiveContainer>
-)}
-</div>
-</div>
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">P&L CURVE (R, cumulative)</div>
+        <div className="h-56">
+          {stats.curve.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-xs">
+              Close out signals to build your edge curve
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={stats.curve}>
+                <CartesianGrid stroke="var(--grid)" strokeDasharray="2 2" />
+                <XAxis dataKey="i" stroke="var(--muted-foreground)" fontSize={10} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", fontSize: 11 }} />
+                <Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
 
-<div className="bg-card border border-border rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">
-BY SETUP
-</div>
-{stats.summary.length === 0 ? (
-<div className="text-xs text-muted-foreground py-6 text-center">
-No closed trades yet
-</div>
-): (
-<table className="w-full text-xs">
-<thead className="text-[10px] uppercase text-muted-foreground tracking-wider">
-<tr className="border-b border-border">
-<th className="text-left py-2">Setup</th>
-<th className="text-right">N</th>
-<th className="text-right">Win%</th>
-<th className="text-right">Avg R</th>
-<th className="text-right">Expectancy</th>
-</tr>
-</thead>
-<tbody>
-{stats.summary.map((r) => (
-<tr key={r.setup} className="border-b border-border/40">
-<td className="py-2">{r.setup}</td>
-<td className="text-right">{r.n}</td>
-<td className="text-right">{r.winRate.toFixed(1)}%</td>
-<td className="text-right font-semibold" style={ { color: r.avgR >= 0 ? "var(--bull)": "var(--bear)" }}>
-{r.avgR >= 0 ? "+": ""}{r.avgR.toFixed(2)}R
-</td>
-<td className="text-right" style={ { color: r.expectancy >= 0 ? "var(--bull)": "var(--bear)" }}>
-{r.expectancy >= 0 ? "+": ""}{r.expectancy.toFixed(2)}R
-</td>
-</tr>
-))}
-</tbody>
-</table>
-)}
-</div>
-</div>
-);
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">BY SETUP</div>
+        {stats.summary.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-6 text-center">No closed trades yet</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="text-[10px] uppercase text-muted-foreground tracking-wider">
+              <tr className="border-b border-border">
+                <th className="text-left py-2">Setup</th>
+                <th className="text-right">N</th>
+                <th className="text-right">Win%</th>
+                <th className="text-right">Avg R</th>
+                <th className="text-right">Expectancy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.summary.map((r) => (
+                <tr key={r.setup} className="border-b border-border/40">
+                  <td className="py-2">{r.setup}</td>
+                  <td className="text-right">{r.n}</td>
+                  <td className="text-right">{r.winRate.toFixed(1)}%</td>
+                  <td className="text-right font-semibold" style={{ color: r.avgR >= 0 ? "var(--bull)" : "var(--bear)" }}>
+                    {r.avgR >= 0 ? "+" : ""}{r.avgR.toFixed(2)}R
+                  </td>
+                  <td className="text-right" style={{ color: r.expectancy >= 0 ? "var(--bull)" : "var(--bear)" }}>
+                    {r.expectancy >= 0 ? "+" : ""}{r.expectancy.toFixed(2)}R
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function KPI({ label,
-value,
-color }: { label: string; value: string; color?: "bull" | "bear" }) {
-return (
-<div className="bg-card border border-border rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-{label}
-</div>
-<div className="text-xl font-bold mt-1" style={ {
-color: color === "bull" ? "var(--bull)": color === "bear" ? "var(--bear)": undefined
-}}>
-{value}
-</div>
-</div>
-);
+function KPI({ label, value, color }: { label: string; value: string; color?: "bull" | "bear" }) {
+  return (
+    <div className="bg-card border border-border rounded p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-xl font-bold mt-1" style={{
+        color: color === "bull" ? "var(--bull)" : color === "bear" ? "var(--bear)" : undefined
+      }}>{value}</div>
+    </div>
+  );
 }
 
 // ---------- Trading Hours / Sessions ----------
 const SESSION_LABELS: { key: keyof SessionConfig["sessions"]; label: string }[] = [
-{ key: "sydney",
-label: "Sydney" },
-{ key: "tokyo",
-label: "Tokyo" },
-{ key: "london",
-label: "London" },
-{ key: "ny",
-label: "New York" },
+  { key: "sydney", label: "Sydney" },
+  { key: "tokyo",  label: "Tokyo" },
+  { key: "london", label: "London" },
+  { key: "ny",     label: "New York" },
 ];
 const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function hhmm(h: number) { return `${String(h).padStart(2, "0")}:00`; }
 function parseHour(v: string): number {
-const n = parseInt(v.split(":")[0] ?? "0", 10);
-return isNaN(n) ? 0: Math.max(0, Math.min(23, n));
+  const n = parseInt(v.split(":")[0] ?? "0", 10);
+  return isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
 }
 
 function TradingHoursPanel({
-appSettings,
-saveAppSettings,
+  appSettings, saveAppSettings,
 }: {
-appSettings: AppSettings;
-saveAppSettings: (patch: Partial < AppSettings >) => Promise < void >;
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
 }) {
-const cfg = appSettings.session_config ?? DEFAULT_SESSION_CONFIG;
-const updateCfg = (next: SessionConfig) => saveAppSettings( {
-session_config: next
-});
-const setSession = (k: keyof SessionConfig["sessions"], patch: Partial < SessionWindow >) => {
-updateCfg( {
-...cfg, sessions: {
-...cfg.sessions, [k]: {
-...cfg.sessions[k], ...patch
-}
-}
-});
-};
-const setOverride = (dow: string, patch: {
-start: number; end: number
-} | null) => {
-const overrides = {
-...(cfg.custom_overrides ?? {})
-};
-if (patch === null) delete overrides[dow]; else overrides[dow] = patch;
-updateCfg( {
-...cfg, custom_overrides: overrides
-});
-};
+  const cfg = appSettings.session_config ?? DEFAULT_SESSION_CONFIG;
+  const updateCfg = (next: SessionConfig) => saveAppSettings({ session_config: next });
+  const setSession = (k: keyof SessionConfig["sessions"], patch: Partial<SessionWindow>) => {
+    updateCfg({ ...cfg, sessions: { ...cfg.sessions, [k]: { ...cfg.sessions[k], ...patch } } });
+  };
+  const setOverride = (dow: string, patch: { start: number; end: number } | null) => {
+    const overrides = { ...(cfg.custom_overrides ?? {}) };
+    if (patch === null) delete overrides[dow]; else overrides[dow] = patch;
+    updateCfg({ ...cfg, custom_overrides: overrides });
+  };
 
-return (
-<div className="border border-border rounded bg-card p-4">
-<div className="flex items-center justify-between gap-3 mb-3">
-<div>
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-Trading Hours
-</div>
-<div className="text-xs text-muted-foreground mt-1">
-All times UTC. Day overrides take priority over session windows.
-</div>
-</div>
-<label className="flex items-center gap-2 text-xs">
-<span className="uppercase tracking-wider">Scan only during active sessions</span>
-<Toggle on={cfg.scan_active_sessions_only} onChange={(v) => updateCfg( { ...cfg, scan_active_sessions_only: v })} />
-</label>
-</div>
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trading Hours</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            All times UTC. Day overrides take priority over session windows.
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="uppercase tracking-wider">Scan only during active sessions</span>
+          <Toggle on={cfg.scan_active_sessions_only} onChange={(v) => updateCfg({ ...cfg, scan_active_sessions_only: v })} />
+        </label>
+      </div>
 
-<div className="space-y-1.5">
-{SESSION_LABELS.map(({
-key, label
-}) => {
-const w = cfg.sessions[key];
-return (
-<div key={key} className="flex items-center gap-3 flex-wrap border-b border-border/40 pb-1.5 last:border-b-0">
-<label className="flex items-center gap-2 min-w-32">
-<Toggle on={w.enabled} onChange={(v) => setSession(key, { enabled: v })} />
-<span className="text-sm font-semibold">{label}</span>
-</label>
-<div className="flex items-center gap-2 text-xs">
-<input type="time" step={3600} value={hhmm(w.start)}
-onChange={(e) => setSession(key, { start: parseHour(e.target.value) })}
-className="bg-secondary border border-border rounded px-2 py-1" />
-<span className="text-muted-foreground">to</span>
-<input type="time" step={3600} value={hhmm(w.end)}
-onChange={(e) => setSession(key, { end: parseHour(e.target.value) })}
-className="bg-secondary border border-border rounded px-2 py-1" />
-<span className="text-muted-foreground">UTC</span>
-</div>
-</div>
-);
-})}
-</div>
+      <div className="space-y-1.5">
+        {SESSION_LABELS.map(({ key, label }) => {
+          const w = cfg.sessions[key];
+          return (
+            <div key={key} className="flex items-center gap-3 flex-wrap border-b border-border/40 pb-1.5 last:border-b-0">
+              <label className="flex items-center gap-2 min-w-32">
+                <Toggle on={w.enabled} onChange={(v) => setSession(key, { enabled: v })} />
+                <span className="text-sm font-semibold">{label}</span>
+              </label>
+              <div className="flex items-center gap-2 text-xs">
+                <input type="time" step={3600} value={hhmm(w.start)}
+                  onChange={(e) => setSession(key, { start: parseHour(e.target.value) })}
+                  className="bg-secondary border border-border rounded px-2 py-1" />
+                <span className="text-muted-foreground">to</span>
+                <input type="time" step={3600} value={hhmm(w.end)}
+                  onChange={(e) => setSession(key, { end: parseHour(e.target.value) })}
+                  className="bg-secondary border border-border rounded px-2 py-1" />
+                <span className="text-muted-foreground">UTC</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-<div className="mt-4">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Custom Day Overrides
-</div>
-<div className="space-y-1">
-{DOW_LABELS.map((label, i) => {
-const dow = String(i);
-const ov = cfg.custom_overrides?.[dow] ?? null;
-return (
-<div key={dow} className="flex items-center gap-3 flex-wrap text-xs">
-<span className="w-10 font-semibold">{label}</span>
-<Toggle on={!!ov} onChange={(v) => setOverride(dow, v ? { start: 7, end: 20 }: null)} />
-{ov ? (
-<>
-<input type="time" step={3600} value={hhmm(ov.start)}
-onChange={(e) => setOverride(dow, { ...ov, start: parseHour(e.target.value) })}
-className="bg-secondary border border-border rounded px-2 py-1" />
-<span className="text-muted-foreground">to</span>
-<input type="time" step={3600} value={hhmm(ov.end)}
-onChange={(e) => setOverride(dow, { ...ov, end: parseHour(e.target.value) })}
-className="bg-secondary border border-border rounded px-2 py-1" />
-<span className="text-muted-foreground">UTC (replaces sessions)</span>
-</>
-): (
-<span className="text-muted-foreground">Use session windows</span>
-)}
-</div>
-);
-})}
-</div>
-</div>
-</div>
-);
+      <div className="mt-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Custom Day Overrides</div>
+        <div className="space-y-1">
+          {DOW_LABELS.map((label, i) => {
+            const dow = String(i);
+            const ov = cfg.custom_overrides?.[dow] ?? null;
+            return (
+              <div key={dow} className="flex items-center gap-3 flex-wrap text-xs">
+                <span className="w-10 font-semibold">{label}</span>
+                <Toggle on={!!ov} onChange={(v) => setOverride(dow, v ? { start: 7, end: 20 } : null)} />
+                {ov ? (
+                  <>
+                    <input type="time" step={3600} value={hhmm(ov.start)}
+                      onChange={(e) => setOverride(dow, { ...ov, start: parseHour(e.target.value) })}
+                      className="bg-secondary border border-border rounded px-2 py-1" />
+                    <span className="text-muted-foreground">to</span>
+                    <input type="time" step={3600} value={hhmm(ov.end)}
+                      onChange={(e) => setOverride(dow, { ...ov, end: parseHour(e.target.value) })}
+                      className="bg-secondary border border-border rounded px-2 py-1" />
+                    <span className="text-muted-foreground">UTC (replaces sessions)</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">Use session windows</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ---------- History Panel ----------
 function sessionOf(s: Signal): "London" | "New York" | "Asian" | "Off" {
-const h = new Date(s.created_at).getUTCHours();
-if (h >= 12 && h < 16) return "London"; // overlap counts as either; pick LDN by default
-if (h >= 7 && h < 12) return "London";
-if (h >= 16 && h < 21) return "New York";
-if (h >= 0 && h < 9) return "Asian";
-if (h >= 22) return "Asian";
-return "Off";
+  const h = new Date(s.created_at).getUTCHours();
+  if (h >= 12 && h < 16) return "London"; // overlap counts as either; pick LDN by default
+  if (h >= 7  && h < 12) return "London";
+  if (h >= 16 && h < 21) return "New York";
+  if (h >= 0  && h < 9)  return "Asian";
+  if (h >= 22)           return "Asian";
+  return "Off";
 }
 
 function HistoryPanel({ signals }: { signals: Signal[] }) {
-const closed = useMemo(
-() => signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null),
-[signals]
-);
+  const closed = useMemo(
+    () => signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null),
+    [signals]
+  );
 
-const [pairFilter,
-setPairFilter] = useState < string > ("all");
-const [setupFilter,
-setSetupFilter] = useState < string > ("all");
-const [sessionFilter,
-setSessionFilter] = useState < string > ("all");
-const [minConfidence,
-setMinConfidence] = useState < number | null > (null);
-const [minRR,
-setMinRR] = useState < number | null > (null);
-const [openMonths,
-setOpenMonths] = useState < Record < string,
-boolean>>({});
+  const [pairFilter, setPairFilter] = useState<string>("all");
+  const [setupFilter, setSetupFilter] = useState<string>("all");
+  const [sessionFilter, setSessionFilter] = useState<string>("all");
+  const [minConfidence, setMinConfidence] = useState<number | null>(null);
+  const [minRR, setMinRR] = useState<number | null>(null);
+  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
-const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
-const setups = useMemo(() => Array.from(new Set(closed.map((s) => s.setup))).sort(), [closed]);
-const sessions = ["London",
-"New York",
-"Asian",
-"Off"];
+  const pairs = useMemo(() => Array.from(new Set(closed.map((s) => s.pair))).sort(), [closed]);
+  const setups = useMemo(() => Array.from(new Set(closed.map((s) => s.setup))).sort(), [closed]);
+  const sessions = ["London", "New York", "Asian", "Off"];
 
-const filtered = useMemo(() => {
-return closed.filter((s) =>
-(pairFilter === "all" || s.pair === pairFilter) &&
-(setupFilter === "all" || s.setup === setupFilter) &&
-(sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
-(minConfidence == null || s.confidence >= minConfidence) &&
-(minRR == null || (s.rr ?? 0) >= minRR)
-);
-}, [closed, pairFilter, setupFilter, sessionFilter, minConfidence, minRR]);
+  const filtered = useMemo(() => {
+    return closed.filter((s) =>
+      (pairFilter === "all" || s.pair === pairFilter) &&
+      (setupFilter === "all" || s.setup === setupFilter) &&
+      (sessionFilter === "all" || sessionOf(s) === sessionFilter) &&
+      (minConfidence == null || s.confidence >= minConfidence) &&
+      (minRR == null || (s.rr ?? 0) >= minRR)
+    );
+  }, [closed, pairFilter, setupFilter, sessionFilter, minConfidence, minRR]);
 
-// Group by Month-Year (most recent first)
-type MonthGroup = {
-key: string; label: string; items: Signal[]
-};
-const groups: MonthGroup[] = useMemo(() => {
-const map = new Map < string, MonthGroup > ();
-for (const s of filtered) {
-const d = new Date(s.created_at);
-// Use 1-indexed month so the key matches strategyTrends ("YYYY-MM").
-const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-const label = d.toLocaleString("en-US", {
-month: "short", year: "numeric", timeZone: "UTC"
-});
-if (!map.has(key)) map.set(key, {
-key, label, items: []
-});
-map.get(key)!.items.push(s);
-}
-return Array.from(map.values()).sort((a, b) => (a.key < b.key ? 1: -1));
-},
-[filtered]);
+  // Group by Month-Year (most recent first)
+  type MonthGroup = { key: string; label: string; items: Signal[] };
+  const groups: MonthGroup[] = useMemo(() => {
+    const map = new Map<string, MonthGroup>();
+    for (const s of filtered) {
+      const d = new Date(s.created_at);
+      // Use 1-indexed month so the key matches strategyTrends ("YYYY-MM").
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+      if (!map.has(key)) map.set(key, { key, label, items: [] });
+      map.get(key)!.items.push(s);
+    }
+    return Array.from(map.values()).sort((a, b) => (a.key < b.key ? 1 : -1));
+  }, [filtered]);
 
-// Equity curve (chronological)
-const curve = useMemo(() => {
-let cum = 0;
-return [...filtered]
-.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
-.map((s, i) => {
-cum += s.outcome_r ?? 0; return {
-i: i + 1, r: +cum.toFixed(2)
-};
-});
-},
-[filtered]);
+  // Equity curve (chronological)
+  const curve = useMemo(() => {
+    let cum = 0;
+    return [...filtered]
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+      .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
+  }, [filtered]);
 
-// Per-strategy win rate over time (per month)
-const strategyTrends = useMemo(() => {
-const m: Record < string,
-Record < string,
-{
-n: number; wins: number
-}>> = {};
-for (const s of filtered) {
-const d = new Date(s.created_at);
-const mo = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-m[s.setup] ?? = {};
-m[s.setup][mo] ?? = {
-n: 0,
-wins: 0
-};
-m[s.setup][mo].n++;
-if ((s.outcome_r ?? 0) > 0) m[s.setup][mo].wins++;
-}
-const months = Array.from(new Set(Object.values(m).flatMap(Object.keys))).sort();
-const setupsList = Object.keys(m).sort();
-return {
-months,
-setups: setupsList,
-data: m
-};
-},
-[filtered]);
+  // Per-strategy win rate over time (per month)
+  const strategyTrends = useMemo(() => {
+    const m: Record<string, Record<string, { n: number; wins: number }>> = {};
+    for (const s of filtered) {
+      const d = new Date(s.created_at);
+      const mo = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      m[s.setup] ??= {};
+      m[s.setup][mo] ??= { n: 0, wins: 0 };
+      m[s.setup][mo].n++;
+      if ((s.outcome_r ?? 0) > 0) m[s.setup][mo].wins++;
+    }
+    const months = Array.from(new Set(Object.values(m).flatMap(Object.keys))).sort();
+    const setupsList = Object.keys(m).sort();
+    return { months, setups: setupsList, data: m };
+  }, [filtered]);
 
-function exportCSV() {
-const headers = ["created_at", "pair", "timeframe", "setup", "direction", "entry", "stop_loss", "tp1", "tp2", "rr", "status", "outcome_r", "session"];
-const rows = filtered.map((s) => [
-s.created_at,
-s.pair,
-s.timeframe,
-s.setup,
-s.direction,
-s.entry,
-s.stop_loss,
-s.tp1,
-s.tp2,
-s.rr,
-s.status,
-s.outcome_r ?? "",
-sessionOf(s),
-]);
-const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-const blob = new Blob([csv],
-{
-type: "text/csv"
-});
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
-a.href = url; a.download = `scalpedge-history-${new Date().toISOString().slice(0,
-10)}.csv`;
-a.click(); URL.revokeObjectURL(url);
-}
+  function exportCSV() {
+    const headers = ["created_at", "pair", "timeframe", "setup", "direction", "entry", "stop_loss", "tp1", "tp2", "rr", "status", "outcome_r", "session"];
+    const rows = filtered.map((s) => [
+      s.created_at, s.pair, s.timeframe, s.setup, s.direction, s.entry, s.stop_loss, s.tp1, s.tp2, s.rr, s.status, s.outcome_r ?? "", sessionOf(s),
+    ]);
+    const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `scalpedge-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
 
-if (closed.length === 0) {
-return (
-<div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
-<div className="text-sm">
-NO CLOSED SIGNALS YET
-</div>
-<div className="text-xs mt-1">
-Close out signals (TP/SL/BE) to build your history.
-</div>
-</div>
-);
-}
+  if (closed.length === 0) {
+    return (
+      <div className="mt-10 text-center text-muted-foreground py-16 border border-dashed border-border rounded">
+        <div className="text-sm">NO CLOSED SIGNALS YET</div>
+        <div className="text-xs mt-1">Close out signals (TP/SL/BE) to build your history.</div>
+      </div>
+    );
+  }
 
-return (
-<div className="mt-4 space-y-4">
-{/* Filters + export */}
-<div className="border border-border rounded bg-card p-3 flex items-center gap-2 flex-wrap text-xs">
-<span className="uppercase tracking-wider text-muted-foreground">Filters</span>
-<select value={pairFilter} onChange={(e) => setPairFilter(e.target.value)}
-className="bg-secondary border border-border rounded px-2 py-1">
-<option value="all">All pairs</option>
-{pairs.map((p) => <option key={p} value={p}>{p}</option>)}
-</select>
-<select value={setupFilter} onChange={(e) => setSetupFilter(e.target.value)}
-className="bg-secondary border border-border rounded px-2 py-1">
-<option value="all">All strategies</option>
-{setups.map((s) => <option key={s} value={s}>{s}</option>)}
-</select>
-<select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}
-className="bg-secondary border border-border rounded px-2 py-1">
-<option value="all">All sessions</option>
-{sessions.map((s) => <option key={s} value={s}>{s}</option>)}
-</select>
-<div className="flex flex-col gap-1">
-<label className="text-xs uppercase text-muted-foreground">Min Conf %</label>
-<input
-type="number" min={0} max={100} step={1}
-value={minConfidence ?? ""}
-onChange={(e) => {
-const v = e.target.value;
-setMinConfidence(v === "" ? null: Number(v));
-}}
-className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
-placeholder="e.g. 70"
-/>
-<div className="flex gap-1 flex-wrap">
-{[70, 75, 80, 85, 90].map((v) => (
-<button key={v} onClick={() => setMinConfidence(v)}
-className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === v ? "bg-primary text-primary-foreground border-primary": "bg-secondary/60 text-muted-foreground border-border"}`}>
-{v}%
-</button>
-))}
-<button onClick={() => setMinConfidence(null)}
-className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === null ? "bg-primary text-primary-foreground border-primary": "bg-secondary/60 text-muted-foreground border-border"}`}>
-Any
-</button>
-</div>
-</div>
-<div className="flex flex-col gap-1">
-<label className="text-xs uppercase text-muted-foreground">Min R:R</label>
-<input
-type="number" min={0} max={10} step={0.1}
-value={minRR ?? ""}
-onChange={(e) => {
-const v = e.target.value;
-setMinRR(v === "" ? null: Number(v));
-}}
-className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
-placeholder="e.g. 2.0"
-/>
-<div className="flex gap-1 flex-wrap">
-{[1.5, 1.8, 2.0, 2.5, 3.0].map((v) => (
-<button key={v} onClick={() => setMinRR(v)}
-className={`text-xs px-1.5 py-0.5 rounded border ${minRR === v ? "bg-primary text-primary-foreground border-primary": "bg-secondary/60 text-muted-foreground border-border"}`}>
-{v}
-</button>
-))}
-<button onClick={() => setMinRR(null)}
-className={`text-xs px-1.5 py-0.5 rounded border ${minRR === null ? "bg-primary text-primary-foreground border-primary": "bg-secondary/60 text-muted-foreground border-border"}`}>
-Any
-</button>
-</div>
-</div>
-<button onClick={exportCSV}
-className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
-⬇ Export CSV
-</button>
-</div>
+  return (
+    <div className="mt-4 space-y-4">
+      {/* Filters + export */}
+      <div className="border border-border rounded bg-card p-3 flex items-center gap-2 flex-wrap text-xs">
+        <span className="uppercase tracking-wider text-muted-foreground">Filters</span>
+        <select value={pairFilter} onChange={(e) => setPairFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All pairs</option>
+          {pairs.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={setupFilter} onChange={(e) => setSetupFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All strategies</option>
+          {setups.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1">
+          <option value="all">All sessions</option>
+          {sessions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase text-muted-foreground">Min Conf %</label>
+          <input
+            type="number" min={0} max={100} step={1}
+            value={minConfidence ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMinConfidence(v === "" ? null : Number(v));
+            }}
+            className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
+            placeholder="e.g. 70"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {[70, 75, 80, 85, 90].map((v) => (
+              <button key={v} onClick={() => setMinConfidence(v)}
+                className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === v ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+                {v}%
+              </button>
+            ))}
+            <button onClick={() => setMinConfidence(null)}
+              className={`text-xs px-1.5 py-0.5 rounded border ${minConfidence === null ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+              Any
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase text-muted-foreground">Min R:R</label>
+          <input
+            type="number" min={0} max={10} step={0.1}
+            value={minRR ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMinRR(v === "" ? null : Number(v));
+            }}
+            className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm"
+            placeholder="e.g. 2.0"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {[1.5, 1.8, 2.0, 2.5, 3.0].map((v) => (
+              <button key={v} onClick={() => setMinRR(v)}
+                className={`text-xs px-1.5 py-0.5 rounded border ${minRR === v ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+                {v}
+              </button>
+            ))}
+            <button onClick={() => setMinRR(null)}
+              className={`text-xs px-1.5 py-0.5 rounded border ${minRR === null ? "bg-primary text-primary-foreground border-primary" : "bg-secondary/60 text-muted-foreground border-border"}`}>
+              Any
+            </button>
+          </div>
+        </div>
+        <button onClick={exportCSV}
+          className="ml-auto px-3 py-1 border border-primary/40 text-primary rounded uppercase tracking-wider hover:bg-primary/10">
+          ⬇ Export CSV
+        </button>
+      </div>
 
-{/* Equity curve */}
-<div className="bg-card border border-border rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Equity Curve · {filtered.length} closed
-</div>
-<div className="h-56">
-{curve.length === 0 ? (
-<div className="h-full flex items-center justify-center text-muted-foreground text-xs">
-No data for these filters
-</div>
-): (
-<ResponsiveContainer width="100%" height="100%">
-<LineChart data={curve}>
-<CartesianGrid stroke="var(--grid)" strokeDasharray="2 2" />
-<XAxis dataKey="i" stroke="var(--muted-foreground)" fontSize={10} />
-<YAxis stroke="var(--muted-foreground)" fontSize={10} />
-<Tooltip contentStyle={ { backgroundColor: "var(--card)", border: "1px solid var(--border)", fontSize: 11 }} />
-<Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
-</LineChart>
-</ResponsiveContainer>
-)}
-</div>
-</div>
+      {/* Equity curve */}
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Equity Curve · {filtered.length} closed</div>
+        <div className="h-56">
+          {curve.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-xs">No data for these filters</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={curve}>
+                <CartesianGrid stroke="var(--grid)" strokeDasharray="2 2" />
+                <XAxis dataKey="i" stroke="var(--muted-foreground)" fontSize={10} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", fontSize: 11 }} />
+                <Line type="monotone" dataKey="r" stroke="var(--primary)" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
 
-{/* Per-strategy trends */}
-<div className="bg-card border border-border rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-Strategy Win Rate by Month
-</div>
-{strategyTrends.setups.length === 0 ? (
-<div className="text-xs text-muted-foreground py-6 text-center">
-No data
-</div>
-): (
-<div className="overflow-x-auto">
-<table className="w-full text-xs font-mono">
-<thead>
-<tr className="border-b border-border text-muted-foreground text-[10px] uppercase tracking-wider">
-<th className="text-left py-2 pr-3">Strategy</th>
-{strategyTrends.months.map((m) => <th key={m} className="text-right px-2">{m}</th>)}
-</tr>
-</thead>
-<tbody>
-{strategyTrends.setups.map((setup) => (
-<tr key={setup} className="border-b border-border/40">
-<td className="py-1.5 pr-3 text-foreground">{setup}</td>
-{strategyTrends.months.map((m) => {
-const v = strategyTrends.data[setup][m];
-if (!v) return <td key={m} className="text-right text-muted-foreground/50 px-2">—</td>;
-const wr = (v.wins / v.n) * 100;
-const color = wr >= 50 ? "var(--bull)": "var(--bear)";
-return <td key={m} className="text-right px-2" style={ { color }}>{wr.toFixed(0)}% <span className="text-muted-foreground">({v.n})</span></td>;
-})}
-</tr>
-))}
-</tbody>
-</table>
-</div>
-)}
-</div>
+      {/* Per-strategy trends */}
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Strategy Win Rate by Month</div>
+        {strategyTrends.setups.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-6 text-center">No data</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground text-[10px] uppercase tracking-wider">
+                  <th className="text-left py-2 pr-3">Strategy</th>
+                  {strategyTrends.months.map((m) => <th key={m} className="text-right px-2">{m}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {strategyTrends.setups.map((setup) => (
+                  <tr key={setup} className="border-b border-border/40">
+                    <td className="py-1.5 pr-3 text-foreground">{setup}</td>
+                    {strategyTrends.months.map((m) => {
+                      const v = strategyTrends.data[setup][m];
+                      if (!v) return <td key={m} className="text-right text-muted-foreground/50 px-2">—</td>;
+                      const wr = (v.wins / v.n) * 100;
+                      const color = wr >= 50 ? "var(--bull)" : "var(--bear)";
+                      return <td key={m} className="text-right px-2" style={{ color }}>{wr.toFixed(0)}% <span className="text-muted-foreground">({v.n})</span></td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-{/* Month groups */}
-<div className="space-y-2">
-{groups.map((g) => {
-const wins = g.items.filter((s) => (s.outcome_r ?? 0) > 0).length;
-const wr = (wins / g.items.length) * 100;
-const avgR = g.items.reduce((a, s) => a + (s.outcome_r ?? 0), 0) / g.items.length;
-const pairTally: Record < string, number > = {};
-g.items.forEach((s) => {
-pairTally[s.pair] = (pairTally[s.pair] ?? 0) + 1;
-});
-const bestPair = Object.entries(pairTally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
-const open = !!openMonths[g.key];
-return (
-<div key={g.key} className="border border-border rounded bg-card">
-<button onClick={() => setOpenMonths((m) => ({ ...m,
-[g.key]: !m[g.key] }))}
-className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary/30 flex-wrap">
-<span className="text-primary">{open ? "▾": "▸"}</span>
-<span className="font-bold">{g.label}</span>
-<span className="text-xs text-muted-foreground">·</span>
-<span className="text-xs">{g.items.length} signals</span>
-<span className="text-xs text-muted-foreground">·</span>
-<span className="text-xs" style={ { color: wr >= 50 ? "var(--bull)": "var(--bear)" }}>{wr.toFixed(0)}% win</span>
-<span className="text-xs text-muted-foreground">·</span>
-<span className="text-xs" style={ { color: avgR >= 0 ? "var(--bull)": "var(--bear)" }}>
-{avgR >= 0 ? "+": ""}{avgR.toFixed(2)}R avg
-</span>
-<span className="text-xs text-muted-foreground">·</span>
-<span className="text-xs">best: {bestPair}</span>
-</button>
-{open && (
-<div className="border-t border-border px-3 py-2 space-y-1 text-xs font-mono">
-{g.items.map((s) => (
-<div key={s.id} className="flex items-center gap-2 flex-wrap py-1 border-b border-border/30 last:border-b-0">
-<span className="text-muted-foreground w-32">{new Date(s.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC</span>
-<span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${s.direction ß === "Long" ? "bg-bull/15 text-bull": "bg-bear/15 text-bear"}`}>
-{s.direction === "Long" ? "▲": "▼"} {s.pair}
-</span>
-<span className="text-muted-foreground">{s.timeframe}</span>
-<span>{s.setup}</span>
-<span className="text-muted-foreground uppercase text-[10px]">{s.status}</span>
-
-{/* ─── ADDED EXECUTION CHANNEL TRACKER BADGES ─── */}
-{s.metaapi_execution_channel === "bridge" && (
-<span className="px-1.5 py-0.5 text-[8px] font-extrabold uppercase rounded bg-primary/20 text-primary border border-primary/30 tracking-wider">
-MT4 FREE BRIDGE
-</span>
-)}
-{s.metaapi_execution_channel === "metaapi" && (
-<span className="px-1.5 py-0.5 text-[8px] font-medium uppercase rounded bg-secondary/80 text-muted-foreground border border-border">
-METAAPI SERVER
-</span>
-)}
-
-<span className="ml-auto font-bold" style={ {
-color: (s.outcome_r ?? 0) > 0 ? "var(--bull)": (s.outcome_r ?? 0) < 0 ? "var(--bear)": "var(--muted-foreground)"
-}}>
-
-<span className="ml-auto font-bold" style={ {
-color: (s.outcome_r ?? 0) > 0 ? "var(--bull)": (s.outcome_r ?? 0) < 0 ? "var(--bear)": "var(--muted-foreground)"
-}}>
-{(s.outcome_r ?? 0) > 0 ? "+": ""}{(s.outcome_r ?? 0).toFixed(2)}R
-</span>
-</div>
-))}
-</div>
-)}
-</div>
-);
-})}
-</div>
-</div>
-);
+      {/* Month groups */}
+      <div className="space-y-2">
+        {groups.map((g) => {
+          const wins = g.items.filter((s) => (s.outcome_r ?? 0) > 0).length;
+          const wr = (wins / g.items.length) * 100;
+          const avgR = g.items.reduce((a, s) => a + (s.outcome_r ?? 0), 0) / g.items.length;
+          const pairTally: Record<string, number> = {};
+          g.items.forEach((s) => { pairTally[s.pair] = (pairTally[s.pair] ?? 0) + 1; });
+          const bestPair = Object.entries(pairTally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+          const open = !!openMonths[g.key];
+          return (
+            <div key={g.key} className="border border-border rounded bg-card">
+              <button onClick={() => setOpenMonths((m) => ({ ...m, [g.key]: !m[g.key] }))}
+                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary/30 flex-wrap">
+                <span className="text-primary">{open ? "▾" : "▸"}</span>
+                <span className="font-bold">{g.label}</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs">{g.items.length} signals</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs" style={{ color: wr >= 50 ? "var(--bull)" : "var(--bear)" }}>{wr.toFixed(0)}% win</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs" style={{ color: avgR >= 0 ? "var(--bull)" : "var(--bear)" }}>
+                  {avgR >= 0 ? "+" : ""}{avgR.toFixed(2)}R avg
+                </span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs">best: {bestPair}</span>
+              </button>
+              {open && (
+                <div className="border-t border-border px-3 py-2 space-y-1 text-xs font-mono">
+                  {g.items.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 flex-wrap py-1 border-b border-border/30 last:border-b-0">
+                      <span className="text-muted-foreground w-32">{new Date(s.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${s.direction === "Long" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"}`}>
+                        {s.direction === "Long" ? "▲" : "▼"} {s.pair}
+                      </span>
+                      <span className="text-muted-foreground">{s.timeframe}</span>
+                      <span>{s.setup}</span>
+                      <span className="text-muted-foreground uppercase text-[10px]">{s.status}</span>
+                      <span className="ml-auto font-bold" style={{
+                        color: (s.outcome_r ?? 0) > 0 ? "var(--bull)" : (s.outcome_r ?? 0) < 0 ? "var(--bear)" : "var(--muted-foreground)"
+                      }}>
+                        {(s.outcome_r ?? 0) > 0 ? "+" : ""}{(s.outcome_r ?? 0).toFixed(2)}R
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // Currencies affected by a given pair (mirrors newsRiskCheck logic)
 function pairCurrencies(pair: string): string[] {
-if (pair === "XAU/USD") return ["USD",
-"XAU"];
-if (pair === "BTC/USD") return ["USD"];
-return [pair.slice(0, 3),
-pair.slice(4, 7)];
+  if (pair === "XAU/USD") return ["USD", "XAU"];
+  if (pair === "BTC/USD") return ["USD"];
+  return [pair.slice(0, 3), pair.slice(4, 7)];
 }
 
 function NewsPanel({
-events, date, setDate, pairs, onRefresh, loading, refreshing, error,
+  events, date, setDate, pairs, onRefresh, loading, refreshing, error,
 }: {
-events: EconomicEvent[];
-date: string;
-setDate: (d: string) => void;
-pairs: string[];
-onRefresh: () => Promise < void >;
-loading: boolean;
-refreshing: boolean;
-error: string | null;
+  events: EconomicEvent[];
+  date: string;
+  setDate: (d: string) => void;
+  pairs: string[];
+  onRefresh: () => Promise<void>;
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
 }) {
-const today = new Date().toISOString().slice(0, 10);
-const now = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
 
-// Blackout: any high-impact event within -30..+30 min of now (active),
-// or +0..+30 min upcoming. Map back to affected pairs.
-const blackouts = events
-.filter((e) => (e.impact ?? "").toLowerCase() === "high")
-.map((e) => {
-const diff = Math.round((new Date(e.event_time).getTime() - now) / 60000);
-const affected = pairs.filter((p) => pairCurrencies(p).includes(e.currency));
-return {
-e, diff, affected
-};
-})
-.filter((x) => x.diff >= -30 && x.diff <= 30 && x.affected.length > 0);
+  // Blackout: any high-impact event within -30..+30 min of now (active),
+  // or +0..+30 min upcoming. Map back to affected pairs.
+  const blackouts = events
+    .filter((e) => (e.impact ?? "").toLowerCase() === "high")
+    .map((e) => {
+      const diff = Math.round((new Date(e.event_time).getTime() - now) / 60000);
+      const affected = pairs.filter((p) => pairCurrencies(p).includes(e.currency));
+      return { e, diff, affected };
+    })
+    .filter((x) => x.diff >= -30 && x.diff <= 30 && x.affected.length > 0);
 
-const grouped = events.reduce < Record < string,
-EconomicEvent[]>>((acc, e) => {
-(acc[e.currency] = acc[e.currency] ?? []).push(e);
-return acc;
-}, {});
-const currencies = Object.keys(grouped).sort();
+  const grouped = events.reduce<Record<string, EconomicEvent[]>>((acc, e) => {
+    (acc[e.currency] = acc[e.currency] ?? []).push(e);
+    return acc;
+  }, {});
+  const currencies = Object.keys(grouped).sort();
 
-return (
-<div className="mt-6 space-y-4 animate-fade-in">
-{blackouts.length > 0 && (
-<div className="border-2 border-bear bg-bear/10 rounded p-3">
-<div className="text-[10px] uppercase tracking-wider text-bear font-bold mb-2">
-⚠ News Blackout {blackouts.some((b) => b.diff <= 0 && b.diff >= -30) ? "Active": "Imminent"}
-</div>
-<ul className="space-y-1 text-xs">
-{blackouts.map((b, i) => (
-<li key={i} className="flex flex-wrap items-center gap-2">
-<span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bear text-background">HIGH</span>
-<span className="font-semibold">{b.e.currency}</span>
-<span>{b.e.title}</span>
-<span className="text-muted-foreground">
-{b.diff >= 0 ? `in ${b.diff}m`: `${-b.diff}m ago`}
-</span>
-<span className="ml-auto text-muted-foreground text-[10px]">
-affects: {b.affected.join(", ")}
-</span>
-</li>
-))}
-</ul>
-</div>
-)}
+  return (
+    <div className="mt-6 space-y-4 animate-fade-in">
+      {blackouts.length > 0 && (
+        <div className="border-2 border-bear bg-bear/10 rounded p-3">
+          <div className="text-[10px] uppercase tracking-wider text-bear font-bold mb-2">
+            ⚠ News Blackout {blackouts.some((b) => b.diff <= 0 && b.diff >= -30) ? "Active" : "Imminent"}
+          </div>
+          <ul className="space-y-1 text-xs">
+            {blackouts.map((b, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bear text-background">HIGH</span>
+                <span className="font-semibold">{b.e.currency}</span>
+                <span>{b.e.title}</span>
+                <span className="text-muted-foreground">
+                  {b.diff >= 0 ? `in ${b.diff}m` : `${-b.diff}m ago`}
+                </span>
+                <span className="ml-auto text-muted-foreground text-[10px]">
+                  affects: {b.affected.join(", ")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-<div className="flex flex-wrap items-center gap-3 border border-border rounded p-3 bg-card/60">
-<label className="text-[10px] uppercase tracking-wider text-muted-foreground">Date (UTC)</label>
-<input
-type="date"
-value={date}
-onChange={(e) => setDate(e.target.value)}
-className="bg-background border border-border rounded px-2 py-1 text-xs"
-/>
-<button
-onClick={() => setDate(today)}
-className="text-[10px] uppercase tracking-wider px-2 py-1 border border-border rounded hover:bg-muted"
->
-Today
-</button>
-<button
-onClick={() => { void onRefresh(); }}
-disabled={refreshing}
-className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
->
-{refreshing ? "Refreshing…": "Refresh Calendar"}
-</button>
-<span className="text-[10px] text-muted-foreground">
-{events.length} event{events.length === 1 ? "": "s"}
-</span>
-</div>
+      <div className="flex flex-wrap items-center gap-3 border border-border rounded p-3 bg-card/60">
+        <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Date (UTC)</label>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="bg-background border border-border rounded px-2 py-1 text-xs"
+        />
+        <button
+          onClick={() => setDate(today)}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 border border-border rounded hover:bg-muted"
+        >
+          Today
+        </button>
+        <button
+          onClick={() => { void onRefresh(); }}
+          disabled={refreshing}
+          className="ml-auto text-[10px] uppercase tracking-wider px-3 py-1 border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {refreshing ? "Refreshing…" : "Refresh Calendar"}
+        </button>
+        <span className="text-[10px] text-muted-foreground">
+          {events.length} event{events.length === 1 ? "" : "s"}
+        </span>
+      </div>
 
-{error && (
-<div className="border border-bear bg-bear/10 rounded p-3 text-xs text-bear">
-{error}
-</div>
-)}
+      {error && (
+        <div className="border border-bear bg-bear/10 rounded p-3 text-xs text-bear">
+          {error}
+        </div>
+      )}
 
-{loading ? (
-<div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40">
-Loading events…
-</div>
-): currencies.length === 0 ? (
-<div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40 space-y-2">
-<div>
-No high-impact economic events for {date}.
-</div>
-<div className="text-[10px] text-muted-foreground/70">
-Try refreshing the calendar, or pick another date — bank holidays and weekends often have no scheduled releases.
-</div>
-</div>
-): (
-<div className="space-y-3">
-{currencies.map((ccy) => (
-<div key={ccy} className="border border-border rounded bg-card/60">
-<div className="px-3 py-2 border-b border-border flex items-center gap-2">
-<span className="font-mono text-sm font-bold">{ccy}</span>
-<span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-{grouped[ccy].length} event{grouped[ccy].length === 1 ? "": "s"} ·
-affects {pairs.filter((p) => pairCurrencies(p).includes(ccy)).join(", ") || "—"}
-</span>
-</div>
-<ul className="divide-y divide-border">
-{grouped[ccy].map((e) => {
-const d = new Date(e.event_time);
-const hh = String(d.getUTCHours()).padStart(2, "0");
-const mm = String(d.getUTCMinutes()).padStart(2, "0");
-const impact = (e.impact ?? "").toLowerCase();
-const isHigh = impact === "high";
-const badgeCls = isHigh
-? "bg-bear text-background": impact === "medium"
-? "bg-amber-500/80 text-background": "bg-muted text-muted-foreground";
-return (
-<li key={e.id} className="px-3 py-2 flex items-center gap-3 text-xs">
-<span className="font-mono text-muted-foreground w-14">{hh}:{mm}</span>
-<span className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded ${badgeCls}`}>
-{e.impact ?? "—"}
-</span>
-<span className="flex-1">{e.title}</span>
-</li>
-);
-})}
-</ul>
-</div>
-))}
-</div>
-)}
-</div>
-);
+      {loading ? (
+        <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40">
+          Loading events…
+        </div>
+      ) : currencies.length === 0 ? (
+        <div className="border border-border rounded p-6 text-center text-sm text-muted-foreground bg-card/40 space-y-2">
+          <div>No high-impact economic events for {date}.</div>
+          <div className="text-[10px] text-muted-foreground/70">
+            Try refreshing the calendar, or pick another date — bank holidays and weekends often have no scheduled releases.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {currencies.map((ccy) => (
+            <div key={ccy} className="border border-border rounded bg-card/60">
+              <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+                <span className="font-mono text-sm font-bold">{ccy}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  {grouped[ccy].length} event{grouped[ccy].length === 1 ? "" : "s"} ·
+                  affects {pairs.filter((p) => pairCurrencies(p).includes(ccy)).join(", ") || "—"}
+                </span>
+              </div>
+              <ul className="divide-y divide-border">
+                {grouped[ccy].map((e) => {
+                  const d = new Date(e.event_time);
+                  const hh = String(d.getUTCHours()).padStart(2, "0");
+                  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+                  const impact = (e.impact ?? "").toLowerCase();
+                  const isHigh = impact === "high";
+                  const badgeCls = isHigh
+                    ? "bg-bear text-background"
+                    : impact === "medium"
+                      ? "bg-amber-500/80 text-background"
+                      : "bg-muted text-muted-foreground";
+                  return (
+                    <li key={e.id} className="px-3 py-2 flex items-center gap-3 text-xs">
+                      <span className="font-mono text-muted-foreground w-14">{hh}:{mm}</span>
+                      <span className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded ${badgeCls}`}>
+                        {e.impact ?? "—"}
+                      </span>
+                      <span className="flex-1">{e.title}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
