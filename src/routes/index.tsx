@@ -418,6 +418,8 @@ function ScalpEdge() {
       metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points) : undefined,
       twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold) : undefined,
       metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
+      // ─── ADDED THE PIPELINE EXTRACTION FIELD DIRECTLY HERE ───
+      bridge_last_seen: (cfg.bridge_last_seen as string | null) ?? null,
 
 
     });
