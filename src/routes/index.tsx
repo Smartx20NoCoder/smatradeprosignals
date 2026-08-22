@@ -57,6 +57,7 @@ type Signal = {
   metaapi_pnl?: number | null;
   paper_status?: string | null;
   paper_hit?: string | null;
+  metaapi_execution_channel?: "bridge" | "metaapi" | null;
 };
 
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
@@ -135,6 +136,7 @@ type AppSettings = {
   twelvedata_key_threshold?: number;
   metaapi_key_rotation_threshold?: number;
   metaapi_min_stop_points?: number;
+  bridge_last_seen?: string | null;
 };
 
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
