@@ -3401,6 +3401,16 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
                       <span className="text-muted-foreground">{s.timeframe}</span>
                       <span>{s.setup}</span>
                       <span className="text-muted-foreground uppercase text-[10px]">{s.status}</span>
+                      {s.metaapi_execution_channel === "bridge" && (
+                        <span className="px-1.5 py-0.5 text-[8px] font-extrabold uppercase rounded bg-primary/20 text-primary border border-primary/30 tracking-wider">
+                          MT4 Free Bridge
+                        </span>
+                      )}
+                      {s.metaapi_execution_channel === "metaapi" && (
+                        <span className="px-1.5 py-0.5 text-[8px] font-medium uppercase rounded bg-secondary/80 text-muted-foreground border border-border">
+                          MetaApi Server
+                        </span>
+                      )}
                       <span className="ml-auto font-bold" style={{
                         color: (s.outcome_r ?? 0) > 0 ? "var(--bull)" : (s.outcome_r ?? 0) < 0 ? "var(--bear)" : "var(--muted-foreground)"
                       }}>
