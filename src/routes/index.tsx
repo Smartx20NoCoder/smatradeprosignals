@@ -776,6 +776,23 @@ function ScalpEdge() {
               )}
             </>
           )}
+
+          {/* MT4 bridge heartbeat indicator */}
+          {(() => {
+            if (!appSettings.bridge_last_seen) return null;
+            const secondsAgo = Math.floor(
+              (Date.now() - new Date(appSettings.bridge_last_seen).getTime()) / 1000
+            );
+            const isOnline = secondsAgo < 45;
+            return (
+              <div className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-border bg-card/60 shadow-sm">
+                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-bull animate-pulse" : "bg-bear"}`} />
+                <span className={`font-mono text-[9px] font-bold ${isOnline ? "text-bull" : "text-bear"}`}>
+                  MT4 FREE BRIDGE: {isOnline ? "ONLINE" : `OFFLINE (${secondsAgo}s ago)`}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         {scanning && (
