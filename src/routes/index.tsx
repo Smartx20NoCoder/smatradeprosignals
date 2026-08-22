@@ -2512,6 +2512,51 @@ function HealthPanel({
   return (
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
+
+    {/* ─── ADDED ADVANCED MT4 BRIDGE VPS MONITOR PANEL ─── */}
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MT4 Bridge VPS Telemetry</div>
+        <div className="flex items-center gap-2">
+          {(() => {
+            if (!appSettings.bridge_last_seen) return <span className="text-xs text-muted-foreground">No telemetry recorded</span>;
+            const lastSeenMs = new Date(appSettings.bridge_last_seen).getTime();
+            const secondsAgo = Math.floor((Date.now() - lastSeenMs) / 1000);
+            const isOnline = secondsAgo < 45;
+    
+            return (
+              <>
+                <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: isOnline ? "var(--bull)" : "var(--bear)" }} />
+                <span className="text-xs font-bold tracking-wider" style={{ color: isOnline ? "var(--bull)" : "var(--bear)" }}>
+                  {isOnline ? "OPERATIONAL" : "HIBERNATING"}
+                </span>
+              </>
+            );
+          })()}
+        </div>
+      </div>
+      
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Polling Ping</div>
+          <div className="font-semibold">
+            {appSettings.bridge_last_seen ? `${timeAgo(appSettings.bridge_last_seen)} ago` : "Never"}
+          </div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Bridge Target Pool</div>
+          <div className="font-semibold text-primary">GBPUSD / XAUUSD / BTCUSD</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">VPS Router Node</div>
+          <div className="font-semibold text-bull">Free Local Channel (REST Proxy)</div>
+        </div>
+      </div>
+      <div className="text-[10px] text-muted-foreground mt-2">
+        Telemetry updates dynamically every 20 seconds. Managed entirely via free VPS resources to completely bypass MetaAPI overhead costs.
+      </div>
+    </div>
+
       <SymbolKeepaliveCard appSettings={appSettings} />
 
 
