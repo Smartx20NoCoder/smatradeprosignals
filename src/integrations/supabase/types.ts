@@ -44,6 +44,10 @@ export type Database = {
       app_settings: {
         Row: {
           active_td_key: number
+          bridge_claim_expiry_min: number
+          bridge_claim_grace_sec: number
+          bridge_last_seen: string | null
+          bridge_pairs: Json
           id: string
           key1_exhausted_at: string | null
           key2_exhausted_at: string | null
@@ -98,6 +102,10 @@ export type Database = {
         }
         Insert: {
           active_td_key?: number
+          bridge_claim_expiry_min?: number
+          bridge_claim_grace_sec?: number
+          bridge_last_seen?: string | null
+          bridge_pairs?: Json
           id?: string
           key1_exhausted_at?: string | null
           key2_exhausted_at?: string | null
@@ -152,6 +160,10 @@ export type Database = {
         }
         Update: {
           active_td_key?: number
+          bridge_claim_expiry_min?: number
+          bridge_claim_grace_sec?: number
+          bridge_last_seen?: string | null
+          bridge_pairs?: Json
           id?: string
           key1_exhausted_at?: string | null
           key2_exhausted_at?: string | null
@@ -203,6 +215,33 @@ export type Database = {
           veritas_min_snr?: number
           veritas_sl_mult?: number
           veritas_tp_mult?: number
+        }
+        Relationships: []
+      }
+      bridge_poll_log: {
+        Row: {
+          endpoint: string
+          http_status: number
+          id: string
+          note: string | null
+          polled_at: string
+          signals_returned: number
+        }
+        Insert: {
+          endpoint: string
+          http_status: number
+          id?: string
+          note?: string | null
+          polled_at?: string
+          signals_returned?: number
+        }
+        Update: {
+          endpoint?: string
+          http_status?: number
+          id?: string
+          note?: string | null
+          polled_at?: string
+          signals_returned?: number
         }
         Relationships: []
       }
@@ -302,6 +341,7 @@ export type Database = {
       signals: {
         Row: {
           atr: number | null
+          bridge_claimed_at: string | null
           candle_time: string | null
           closed_at: string | null
           confidence: number
@@ -313,6 +353,7 @@ export type Database = {
           id: string
           metaapi_breakeven_moved: boolean
           metaapi_executed_lot: number | null
+          metaapi_execution_channel: string | null
           metaapi_execution_error: string | null
           metaapi_execution_status: string
           metaapi_filled_price: number | null
@@ -346,6 +387,7 @@ export type Database = {
         }
         Insert: {
           atr?: number | null
+          bridge_claimed_at?: string | null
           candle_time?: string | null
           closed_at?: string | null
           confidence: number
@@ -357,6 +399,7 @@ export type Database = {
           id?: string
           metaapi_breakeven_moved?: boolean
           metaapi_executed_lot?: number | null
+          metaapi_execution_channel?: string | null
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
@@ -390,6 +433,7 @@ export type Database = {
         }
         Update: {
           atr?: number | null
+          bridge_claimed_at?: string | null
           candle_time?: string | null
           closed_at?: string | null
           confidence?: number
@@ -401,6 +445,7 @@ export type Database = {
           id?: string
           metaapi_breakeven_moved?: boolean
           metaapi_executed_lot?: number | null
+          metaapi_execution_channel?: string | null
           metaapi_execution_error?: string | null
           metaapi_execution_status?: string
           metaapi_filled_price?: number | null
