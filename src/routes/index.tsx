@@ -3582,3 +3582,103 @@ function NewsPanel({
     </div>
   );
 }
+
+// ─── MT4 Bridge VPS telemetry — live poll log from the EA ───
+type BridgePoll = {
+  polled_at: string;
+  endpoint: string;
+  http_status: number;
+  signals_returned: number;
+  note: string | null;
+};
+
+function BridgeTelemetryCard() {
+  const [polls, setPolls] = useState<BridgePoll[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      const { data } = await (supabase as any)
+        .from("bridge_poll_log")
+        .select("polled_at, endpoint, http_status, signals_returned, note")
+        .order("polled_at", { ascending: false })
+        .limit(10);
+      if (!alive) return;
+      setPolls((data as BridgePoll[]) ?? []);
+      setLoaded(true);
+    }
+    load();
+    const t = setInterval(load, 20000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  const last = polls[0];
+  const secondsAgo = last ? Math.floor((Date.now() - new Date(last.polled_at).getTime()) / 1000) : Infinity;
+  const isOnline = secondsAgo < 120;
+  const authFail = last?.http_status === 401;
+  const statusColor = !last ? "var(--muted-foreground)" : authFail ? "var(--chart-4)" : isOnline ? "var(--bull)" : "var(--bear)";
+  const statusLabel = !last ? "NO TELEMETRY" : authFail ? "AUTH REJECTED" : isOnline ? "OPERATIONAL" : "HIBERNATING";
+  const signals24h = polls.reduce((a, p) => a + (p.signals_returned || 0), 0);
+
+  return (
+    <div className="border border-border rounded bg-card p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MT4 Bridge VPS Telemetry</div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusColor }} />
+          <span className="text-xs font-bold tracking-wider" style={{ color: statusColor }}>{statusLabel}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Last Polling Ping</div>
+          <div className="font-semibold">{last ? `${timeAgo(last.polled_at)} ago` : "Never"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">HTTP Result</div>
+          <div className="font-semibold" style={{ color: last ? (last.http_status === 200 ? "var(--bull)" : "var(--bear)") : undefined }}>
+            {last ? last.http_status : "—"}
+          </div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Signals Last Poll</div>
+          <div className="font-semibold text-primary">{last ? last.signals_returned : "—"}</div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Signals (last 10 polls)</div>
+          <div className="font-semibold">{signals24h}</div>
+        </div>
+      </div>
+
+      {loaded && polls.length > 0 && (
+        <div className="mt-3 space-y-1">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Recent Polls</div>
+          {polls.map((p, i) => (
+            <div key={`${p.polled_at}-${i}`} className="flex items-center justify-between gap-2 text-[10px] font-mono border-b border-border/40 pb-0.5">
+              <span className="text-muted-foreground">{timeAgo(p.polled_at)} ago</span>
+              <span className="truncate flex-1 text-muted-foreground">{p.endpoint}</span>
+              <span style={{ color: p.http_status === 200 ? "var(--bull)" : "var(--bear)" }}>{p.http_status}</span>
+              <span className="text-primary">{p.signals_returned} sig</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loaded && polls.length === 0 && (
+        <div className="text-[10px] text-muted-foreground mt-2">
+          No polls recorded yet. The EA must POST to
+          {" "}<span className="font-mono">/api/public/bridge-get-signals</span>{" "}
+          with the current x-fn-secret. A wrong secret is logged here as a 401.
+        </div>
+      )}
+
+      {authFail && (
+        <div className="text-[10px] mt-2" style={{ color: "var(--chart-4)" }}>
+          Last poll was rejected (401) — the EA is sending an outdated x-fn-secret.
+        </div>
+      )}
+    </div>
+  );
+}
