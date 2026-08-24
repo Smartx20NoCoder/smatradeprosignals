@@ -3592,20 +3592,37 @@ type BridgePoll = {
   note: string | null;
 };
 
+const BRIDGE_POOL_PAIRS = ["GBP/USD", "XAU/USD", "BTC/USD"];
+
 function BridgeTelemetryCard() {
   const [polls, setPolls] = useState<BridgePoll[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [claimable, setClaimable] = useState<{ total: number; claimed: number } | null>(null);
 
   useEffect(() => {
     let alive = true;
     async function load() {
-      const { data } = await (supabase as any)
-        .from("bridge_poll_log")
-        .select("polled_at, endpoint, http_status, signals_returned, note")
-        .order("polled_at", { ascending: false })
-        .limit(10);
+      const [{ data }, pool] = await Promise.all([
+        (supabase as any)
+          .from("bridge_poll_log")
+          .select("polled_at, endpoint, http_status, signals_returned, note")
+          .order("polled_at", { ascending: false })
+          .limit(10),
+        (supabase as any)
+          .from("signals")
+          .select("id, metaapi_execution_status")
+          .in("pair", BRIDGE_POOL_PAIRS)
+          .in("status", ["pending", "none"])
+          .in("metaapi_execution_status", ["none", "bridge_claimed"])
+          .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString()),
+      ]);
       if (!alive) return;
       setPolls((data as BridgePoll[]) ?? []);
+      const rows = (pool?.data as { metaapi_execution_status: string }[] | null) ?? [];
+      setClaimable({
+        total: rows.length,
+        claimed: rows.filter((r) => r.metaapi_execution_status === "bridge_claimed").length,
+      });
       setLoaded(true);
     }
     load();
@@ -3620,6 +3637,7 @@ function BridgeTelemetryCard() {
   const statusColor = !last ? "var(--muted-foreground)" : authFail ? "var(--chart-4)" : isOnline ? "var(--bull)" : "var(--bear)";
   const statusLabel = !last ? "NO TELEMETRY" : authFail ? "AUTH REJECTED" : isOnline ? "OPERATIONAL" : "HIBERNATING";
   const signals24h = polls.reduce((a, p) => a + (p.signals_returned || 0), 0);
+
 
   return (
     <div className="border border-border rounded bg-card p-4">
