@@ -165,8 +165,9 @@ Deno.serve(async (req) => {
         .from("signals")
         .select("id, pair, direction, order_type, entry, stop_loss, tp2, confidence, rr, setup")
         .in("pair", bridgePairs)
-        .is("metaapi_execution_status", null)
-        .order("created_at", { ascending: true })
+        .eq("metaapi_execution_status", "none")
+        .gte("created_at", expiryCutoff)
+        .order("created_at", { ascending: false })
         .limit(10);
 
       for (const s of (candidates ?? []) as any[]) {
@@ -185,7 +186,7 @@ Deno.serve(async (req) => {
             bridge_claimed_at: new Date().toISOString(),
           })
           .eq("id", s.id)
-          .is("metaapi_execution_status", null)
+          .eq("metaapi_execution_status", "none")
           .select("id, pair, direction, order_type, entry, stop_loss, tp2")
           .maybeSingle();
         if (!error && claimedRow) freshClaimed.push(claimedRow);
