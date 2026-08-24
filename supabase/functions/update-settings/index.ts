@@ -123,10 +123,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_key_rotation_threshold" && (typeof v !== "number" || !Number.isInteger(v) || v < 100 || v > 800)) continue;
     if ((k === "twelvedata_key_1_used" || k === "twelvedata_key_2_used" || k === "twelvedata_key_3_used") && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100000)) continue;
     if (k === "twelvedata_key_reset_date" && (typeof v !== "string" || v.length > 32)) continue;
-
-    // New validation for bridge_claim_expiry_min: integer minutes between 1 and 1440
-    if (k === "bridge_claim_expiry_min" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 1440)) continue;
-
+    
     out[k] = v;
   }
   return out;
