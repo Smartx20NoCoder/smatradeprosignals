@@ -137,7 +137,10 @@ type AppSettings = {
   metaapi_key_rotation_threshold?: number;
   metaapi_min_stop_points?: number;
   bridge_last_seen?: string | null;
+  // --- ADDED INTERFACE DATA PROPS TYPE ---
+  bridge_claim_expiry_min: number;
 };
+
 
 type EconomicEvent = { id: string; event_time: string; currency: string; title: string; impact: string };
 
@@ -418,9 +421,10 @@ function ScalpEdge() {
       metaapi_min_stop_points: (cfg as any).metaapi_min_stop_points != null ? Number((cfg as any).metaapi_min_stop_points) : undefined,
       twelvedata_key_threshold: (cfg as any).twelvedata_key_threshold != null ? Number((cfg as any).twelvedata_key_threshold) : undefined,
       metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
-      // ─── ADDED THE PIPELINE EXTRACTION FIELD DIRECTLY HERE ───
       bridge_last_seen: (cfg.bridge_last_seen as string | null) ?? null,
-
+      // --- ADDED THE DATA EXTRACTION PROP ENTRY ---
+      bridge_claim_expiry_min: Number((cfg as any).bridge_claim_expiry_min ?? 20),
+    
 
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
@@ -1411,6 +1415,38 @@ function SettingsPanel({
               );
             })}
           </div>
+        </div>
+      </div>
+
+      {/* ─── ADDED THE DYNAMIC BRIDGE CLAIM LIFESPAN SLIDER PANEL ─── */}
+      <div className="border border-border rounded bg-card p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-primary font-bold">Bridge Claim Lifespan Window</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              Controls how many minutes the database continues broadcasting a target signal to your MT4 terminal before pruning it.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={5}
+              max={360}
+              step={5}
+              className="w-20 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono text-center font-bold text-primary"
+              value={appSettings.bridge_claim_expiry_min ?? 20}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (Number.isFinite(val)) saveAppSettings({ bridge_claim_expiry_min: val });
+              }}
+            />
+            <span className="text-xs text-muted-foreground uppercase font-bold">Minutes</span>
+          </div>
+        </div>
+        <div className="text-[10px] text-muted-foreground/80">
+          • 20 Minutes = Standard high-frequency setup tracking.
+          <br />
+          • 60–120 Minutes = Recommended buffer window to let Gold or Crypto complete deep entry structural corrections.
         </div>
       </div>
 
