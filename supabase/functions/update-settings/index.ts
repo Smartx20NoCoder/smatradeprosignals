@@ -13,6 +13,8 @@ const ALLOWED_KEYS = new Set([
   "active_td_key", "session_config",
   "key1_exhausted_at", "key2_exhausted_at", "key3_exhausted_at",
   "scan_interval_minutes",
+  // ─── ADDED TO ALLOWLIST SECURITY GATE ───
+  "bridge_claim_expiry_min",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
@@ -35,7 +37,7 @@ const ALLOWED_KEYS = new Set([
 
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points","metaapi_trail_lock_r","metaapi_min_adx","metaapi_key_rotation_threshold","twelvedata_key_1_used","twelvedata_key_2_used","twelvedata_key_3_used"];
+  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points","metaapi_trail_lock_r","metaapi_min_adx","metaapi_key_rotation_threshold","twelvedata_key_1_used","twelvedata_key_2_used","twelvedata_key_3_used","bridge_claim_expiry_min"];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
@@ -118,6 +120,10 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_key_rotation_threshold" && (typeof v !== "number" || !Number.isInteger(v) || v < 100 || v > 800)) continue;
     if ((k === "twelvedata_key_1_used" || k === "twelvedata_key_2_used" || k === "twelvedata_key_3_used") && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100000)) continue;
     if (k === "twelvedata_key_reset_date" && (typeof v !== "string" || v.length > 32)) continue;
+
+    // New validation for bridge_claim_expiry_min: integer minutes between 1 and 1440
+    if (k === "bridge_claim_expiry_min" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 1440)) continue;
+
     out[k] = v;
   }
   return out;
