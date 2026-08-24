@@ -68,6 +68,9 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     }
     if (k === "metaapi_max_trades" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 50)) continue;
     if (k === "metaapi_expiry_hours" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 720)) continue;
+    // ─── ADDED THE PIPELINE SANITIZATION RANGE RULE DIRECTLY HERE ───
+    if (k === "bridge_claim_expiry_min" && (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 1440)) continue;
+    if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     if (k === "metaapi_risk_per_trade_pct" && (typeof v !== "number" || v < 0.1 || v > 10)) continue;
     if (k === "metaapi_min_lot" && (typeof v !== "number" || v < 0.01 || v > 1)) continue;
