@@ -3668,21 +3668,52 @@ function BridgeTelemetryCard() {
           <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Signals (last 10 polls)</div>
           <div className="font-semibold">{signals24h}</div>
         </div>
+        <div
+          className="bg-secondary/40 px-2 py-1.5 rounded col-span-2 sm:col-span-4 border"
+          style={{ borderColor: claimable && claimable.total > 0 ? "var(--bull)" : "var(--border)" }}
+        >
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Live Claimable Signals</div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span
+              className="text-base font-bold"
+              style={{ color: claimable && claimable.total > 0 ? "var(--bull)" : "var(--muted-foreground)" }}
+            >
+              {claimable ? claimable.total : "—"}
+            </span>
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+              eligible for bridge pool{claimable ? ` · ${claimable.claimed} claimed · ${claimable.total - claimable.claimed} unclaimed` : ""}
+            </span>
+          </div>
+          <div className="text-[9px] text-muted-foreground tracking-wider mt-0.5">
+            {BRIDGE_POOL_PAIRS.join(" · ")} · status pending/none · last 6h
+          </div>
+        </div>
       </div>
 
       {loaded && polls.length > 0 && (
         <div className="mt-3 space-y-1">
-          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Recent Polls</div>
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider grid grid-cols-[auto_1fr_auto_auto] gap-2 pb-1 border-b border-border">
+            <span>When</span>
+            <span>Endpoint</span>
+            <span className="text-right">HTTP</span>
+            <span className="text-right w-16">Signals</span>
+          </div>
           {polls.map((p, i) => (
-            <div key={`${p.polled_at}-${i}`} className="flex items-center justify-between gap-2 text-[10px] font-mono border-b border-border/40 pb-0.5">
-              <span className="text-muted-foreground">{timeAgo(p.polled_at)} ago</span>
-              <span className="truncate flex-1 text-muted-foreground">{p.endpoint}</span>
-              <span style={{ color: p.http_status === 200 ? "var(--bull)" : "var(--bear)" }}>{p.http_status}</span>
-              <span className="text-primary">{p.signals_returned} sig</span>
+            <div key={`${p.polled_at}-${i}`} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 text-[10px] font-mono border-b border-border/40 pb-0.5">
+              <span className="text-muted-foreground whitespace-nowrap">{timeAgo(p.polled_at)} ago</span>
+              <span className="truncate text-muted-foreground">{p.endpoint}</span>
+              <span className="text-right" style={{ color: p.http_status === 200 ? "var(--bull)" : "var(--bear)" }}>{p.http_status}</span>
+              <span
+                className="text-right w-16 font-semibold"
+                style={{ color: p.signals_returned > 0 ? "var(--bull)" : "var(--muted-foreground)" }}
+              >
+                {p.signals_returned} sig
+              </span>
             </div>
           ))}
         </div>
       )}
+
 
       {loaded && polls.length === 0 && (
         <div className="text-[10px] text-muted-foreground mt-2">
