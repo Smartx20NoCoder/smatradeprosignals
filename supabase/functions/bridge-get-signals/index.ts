@@ -113,7 +113,8 @@ Deno.serve(async (req) => {
     const minConf = Number(c.metaapi_min_confidence ?? 75);
     const minRR = Number(c.metaapi_min_rr ?? 2);
     const maxTrades = Number(c.metaapi_max_trades ?? 3);
-    const claimExpiryMin = Number(c.bridge_claim_expiry_min ?? 180);
+    // Forcefully assigns the expiry window to 60 minutes, bypassing database table records entirely.
+    const claimExpiryMin = 120; 
     const pairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
     const setupConfig = (c.setup_auto_execute ?? {}) as Record<string, boolean>;
 
