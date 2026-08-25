@@ -423,8 +423,7 @@ function ScalpEdge() {
       metaapi_key_rotation_threshold: (cfg as any).metaapi_key_rotation_threshold != null ? Number((cfg as any).metaapi_key_rotation_threshold) : undefined,
       bridge_last_seen: (cfg.bridge_last_seen as string | null) ?? null,
       // --- ADDED THE DATA EXTRACTION PROP ENTRY ---
-      bridge_claim_expiry_min: Number((cfg as any).bridge_claim_expiry_min ?? 20),
-    
+      bridge_claim_expiry_min: Number((cfg as any).bridge_claim_expiry_min ?? 45),
 
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
@@ -1435,7 +1434,7 @@ function SettingsPanel({
               max={360}
               step={5}
               className="w-20 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono text-center font-bold text-primary"
-              defaultValue={appSettings.bridge_claim_expiry_min ?? 20}
+              defaultValue={appSettings.bridge_claim_expiry_min ?? 45}
               key={appSettings.bridge_claim_expiry_min}
               onBlur={(e) => {
                 const val = parseInt(e.target.value, 10);
