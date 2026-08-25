@@ -131,6 +131,7 @@ Deno.serve(async (req) => {
       await supabase.from("signals").update({
         metaapi_execution_status: "failed",
         metaapi_execution_error: `Bridge claim expired after ${claimExpiryMin}min — price never reached entry zone.`,
+        status: "expired",
         paper_status: "watching",
       }).in("id", staleClaims.map((r: any) => r.id));
     }
