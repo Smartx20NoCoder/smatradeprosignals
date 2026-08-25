@@ -4,11 +4,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { callEdge } from "./api.server";
 
-// Settings update — payload validated server-side by update-settings as well.
-const SettingsPatchSchema = z.record(z.string(), z.unknown());
-
 export const updateAppSettingsFn = createServerFn({ method: "POST" })
-  .inputValidator((input) => SettingsPatchSchema.parse(input))
+  .inputValidator((input) => z.record(z.string(), z.unknown()).parse(input))
   .handler(async ({ data }) => {
     const { status, data: body } = await callEdge("update-settings", data);
     if (status >= 400) {
@@ -162,13 +159,11 @@ export const retryExecutionFn = createServerFn({ method: "POST" })
 
 
 
-const NewsSchema = z.object({
-  source: z.string().min(1).max(32).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-});
-
 export const refreshNewsCalendarFn = createServerFn({ method: "POST" })
-  .inputValidator((input) => NewsSchema.parse(input))
+  .inputValidator((input) => z.object({
+    source: z.string().min(1).max(32).optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  }).parse(input))
   .handler(async ({ data }) => {
     const { status, data: body } = await callEdge("fetch-news-calendar", data);
     if (status >= 400) {
