@@ -1434,8 +1434,9 @@ function SettingsPanel({
               max={360}
               step={5}
               className="w-20 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono text-center font-bold text-primary"
-              value={appSettings.bridge_claim_expiry_min ?? 20}
-              onChange={(e) => {
+              defaultValue={appSettings.bridge_claim_expiry_min ?? 20}
+              key={appSettings.bridge_claim_expiry_min}
+              onBlur={(e) => {
                 const val = parseInt(e.target.value, 10);
                 if (Number.isFinite(val)) saveAppSettings({ bridge_claim_expiry_min: val });
               }}
