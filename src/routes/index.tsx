@@ -440,7 +440,8 @@ function ScalpEdge() {
     const next = { ...appSettings, ...patch };
     setAppSettings(next);
     try {
-      await updateAppSettingsFn({ data: patch as Record<string, unknown> });
+      const result = await updateAppSettingsFn({ data: patch as Record<string, unknown> });
+      if (!result.ok) throw new Error(result.error ?? "Failed to save settings");
     } catch (err) {
       console.error("saveAppSettings failed", err);
       setAppSettings(prev);
