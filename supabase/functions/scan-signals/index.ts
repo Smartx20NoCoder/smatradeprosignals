@@ -1567,8 +1567,76 @@ type Signal = RawSignal & {
   paper_only?: boolean;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// Empirical confidence — replaces the old heuristic point formula
+// (50 + session/3 + rr*4 + mfi_boost ± adjustments), which baked R:R
+// directly into "confidence" and gave MFI a small nudge with no real
+// separating power. Neither tracked whether a stated confidence band
+// actually won at that rate — a 95% signal performed no better (and
+// on gold, worse) than a 70% one across 5 months of live results.
+//
+// This instead uses each (pair, setup family)'s ACTUAL historical win
+// rate, shrunk toward that pair's overall rate when the specific
+// bucket's sample is thin (Bayesian-style shrinkage: the pair-level
+// rate acts as a prior worth SHRINKAGE_K "pseudo-trades", so a lucky
+// 2-trade streak can't claim 100%, but a bucket with real history
+// dominates its own prior once it has enough of it). Below MIN_SAMPLE
+// resolved trades the number is honestly still just the shrunk
+// estimate — SHRINKAGE_K already keeps it conservative — but the
+// sample size is logged in the filter reason so it's visible in the
+// scan report when a number shouldn't be trusted too far yet.
+// ═══════════════════════════════════════════════════════════════
+const SHRINKAGE_K = 20;   // pseudo-trades of prior weight before real data dominates
+const MIN_SAMPLE = 20;    // resolved trades below this are flagged as thin in the report reason
+const GLOBAL_DEFAULT_RATE = 0.35; // used only if a pair has zero resolved history at all
+
+type EmpiricalStats = {
+  buckets: Map<string, { wins: number; n: number }>;   // key: "pair|family"
+  pairTotals: Map<string, { wins: number; n: number }>; // key: pair
+  globalRate: number;
+};
+
+async function loadEmpiricalStats(supabase: ReturnType<typeof createClient>): Promise<EmpiricalStats> {
+  const buckets = new Map<string, { wins: number; n: number }>();
+  const pairTotals = new Map<string, { wins: number; n: number }>();
+  let globalWins = 0, globalN = 0;
+
+  const { data } = await supabase
+    .from("signals")
+    .select("pair, setup, status")
+    .in("status", ["tp1", "tp2", "be", "loss"]);
+
+  for (const row of (data ?? []) as any[]) {
+    const family = setupFamilyOf(String(row.setup ?? ""));
+    const win = (row.status === "tp1" || row.status === "tp2") ? 1 : 0;
+
+    const bkey = `${row.pair}|${family}`;
+    const b = buckets.get(bkey) ?? { wins: 0, n: 0 };
+    b.wins += win; b.n += 1; buckets.set(bkey, b);
+
+    const p = pairTotals.get(row.pair) ?? { wins: 0, n: 0 };
+    p.wins += win; p.n += 1; pairTotals.set(row.pair, p);
+
+    globalWins += win; globalN += 1;
+  }
+
+  return { buckets, pairTotals, globalRate: globalN > 0 ? globalWins / globalN : GLOBAL_DEFAULT_RATE };
+}
+
+function empiricalConfidence(stats: EmpiricalStats, pair: string, family: string): { pct: number; n: number } {
+  const b = stats.buckets.get(`${pair}|${family}`) ?? { wins: 0, n: 0 };
+  const p = stats.pairTotals.get(pair);
+  const priorRate = p && p.n > 0 ? p.wins / p.n : stats.globalRate;
+
+  const rawRate = b.n > 0 ? b.wins / b.n : priorRate;
+  const shrunkRate = (b.n * rawRate + SHRINKAGE_K * priorRate) / (b.n + SHRINKAGE_K);
+
+  return { pct: Math.round(shrunkRate * 100), n: b.n };
+}
+
 function qualifyAndScore(
   raw: RawSignal, c5: Candle[], bias: "bull" | "bear" | "neutral", currentPrice: number,
+  stats: EmpiricalStats,
 ): { signal: Signal | null; reason?: string } {
   const pair = raw.pair, ps = pipSize(pair), a = raw.atr;
   const atrPips = a / ps;
@@ -1601,12 +1669,15 @@ function qualifyAndScore(
   const now = new Date();
   const ss = sessionScore(pair, now);
   const news = newsFlag(now, pair);
-  const mb = mfiBoost(c5, raw.direction);
-  let conf = 50 + Math.floor(ss / 3) + Math.floor(rr * 4) + mb.boost;
-  if (news) conf -= 15;
-  if (bias !== "neutral") conf += 5;
-  conf = Math.max(0, Math.min(99, conf));
-  if (conf < 55) return { signal: null, reason: `Confidence too low (${conf})` };
+  const mb = mfiBoost(c5, raw.direction); // kept for display only — historically didn't separate winners from losers, no longer feeds the confidence number
+  const family = setupFamilyOf(raw.setup);
+  const emp = empiricalConfidence(stats, pair, family);
+  let conf = emp.pct;
+  if (news) conf -= 15; // genuine external risk factor, independent of the setup's own historical rate
+  conf = Math.max(1, Math.min(99, conf));
+  if (conf < 55) {
+    return { signal: null, reason: `Confidence too low (${conf}%, from ${emp.n} historical ${pair} ${family} trades${emp.n < MIN_SAMPLE ? " — thin sample, still shrunk toward pair average" : ""})` };
+  }
 
   return {
     signal: {
@@ -1928,6 +1999,10 @@ async function runScanJob(
       exhausted: initialExhausted,
     };
 
+    // Loaded once per scan cycle — every candidate signal this cycle reuses the
+    // same snapshot rather than re-querying per-signal.
+    const empiricalStats = await loadEmpiricalStats(supabase);
+
     const nowDate = new Date();
 
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
@@ -2189,7 +2264,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
-        const q = qualifyAndScore(raw, d.c5, bias, currentPrice);
+        const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
@@ -2235,6 +2310,11 @@ async function runScanJob(
             direction: veritas.direction,
             reason: isPausedV ? "VERITAS disabled in Settings — paper tracked only, no alert" : undefined,
           });
+          // Internal heuristic score already did its job deciding VERITAS qualifies at
+          // all (its own min-confidence gate ran inside veritasSetup) — the number
+          // attached to the signal itself is now the empirical rate, same as every
+          // other setup family, so "confidence" means the same thing everywhere.
+          veritas.confidence = empiricalConfidence(empiricalStats, pair, "VERITAS").pct;
           veritasCandidates.push(veritas);
         }
       }
@@ -2257,6 +2337,7 @@ async function runScanJob(
             direction: qss.direction,
             reason: isPausedQ ? "QSS disabled in Settings — paper tracked only, no alert" : undefined,
           });
+          qss.confidence = empiricalConfidence(empiricalStats, pair, "QSS").pct;
           qssCandidates.push(qss);
         }
       }
@@ -2280,6 +2361,7 @@ async function runScanJob(
             direction: prism.direction,
             reason: isPausedP ? "PRISM disabled in Settings — paper tracked only, no alert" : undefined,
           });
+          prism.confidence = empiricalConfidence(empiricalStats, pair, "PRISM").pct;
           prismCandidates.push(prism);
         }
       }
