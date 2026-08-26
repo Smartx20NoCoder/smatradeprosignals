@@ -1740,6 +1740,16 @@ function setupFamilyOf(setupName: string): string {
   return base;
 }
 
+// True only when there's NO pair-scoped override and the plain global key is
+// false — i.e. this setup has been retired entirely, not just excluded from
+// one pair. Distinguished from a pair-scoped override (lighter: still
+// generated/paper-tracked on that pair, just not traded there).
+function isGloballyDisabled(setupConfig: Record<string, boolean>, pair: string, component: string): boolean {
+  const pairKey = `${pair}|${component}`;
+  const hasPairOverride = Object.prototype.hasOwnProperty.call(setupConfig, pairKey);
+  return !hasPairOverride && setupConfig[component] === false;
+}
+
 // Per-pair setup override: checks a pair-scoped key ("PAIR|component") first —
 // e.g. "GBP/USD|EMA Pullback" — falling back to the plain global component key
 // so existing toggles keep working unchanged for any pair without an override.
@@ -2259,6 +2269,11 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
+        if (isGloballyDisabled(setupAutoExec, pair, setupFamilyOf(name))) {
+          pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
+            reason: `${setupFamilyOf(name)} fully disabled in Settings — not generated at all` });
+          continue;
+        }
         if (hits.length > 0) {
           const h = hits[0];
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
@@ -2302,6 +2317,9 @@ async function runScanJob(
           const h = hits[0];
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
+        } else if (isGloballyDisabled(setupAutoExec, pair, "VERITAS")) {
+          pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
+            reason: "VERITAS fully disabled in Settings — not generated at all" });
         } else {
           const isPausedV = isComponentDisabledForPair(setupAutoExec, pair, "VERITAS");
           pairReport.checks.push({
@@ -2329,6 +2347,9 @@ async function runScanJob(
           const h = hits[0];
           pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
+        } else if (isGloballyDisabled(setupAutoExec, pair, "QSS")) {
+          pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
+            reason: "QSS fully disabled in Settings — not generated at all" });
         } else {
           const isPausedQ = isComponentDisabledForPair(setupAutoExec, pair, "QSS");
           pairReport.checks.push({
@@ -2353,6 +2374,9 @@ async function runScanJob(
           const h = hits[0];
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
+        } else if (isGloballyDisabled(setupAutoExec, pair, "PRISM")) {
+          pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
+            reason: "PRISM fully disabled in Settings — not generated at all" });
         } else {
           const isPausedP = isComponentDisabledForPair(setupAutoExec, pair, "PRISM");
           pairReport.checks.push({
