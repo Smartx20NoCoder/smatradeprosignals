@@ -1669,6 +1669,17 @@ function setupFamilyOf(setupName: string): string {
   return base;
 }
 
+// Per-pair setup override: checks a pair-scoped key ("PAIR|component") first —
+// e.g. "GBP/USD|EMA Pullback" — falling back to the plain global component key
+// so existing toggles keep working unchanged for any pair without an override.
+// This is what lets a setup be disabled for one pair while staying active on
+// others, instead of setup_auto_execute being an all-pairs-at-once switch.
+function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: string, component: string): boolean {
+  const pairKey = `${pair}|${component}`;
+  if (Object.prototype.hasOwnProperty.call(setupConfig, pairKey)) return setupConfig[pairKey] === false;
+  return setupConfig[component] === false;
+}
+
 async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -2183,7 +2194,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
           const family = setupFamilyOf(name);
-          const isPaused = setupAutoExec[family] === false;
+          const isPaused = isComponentDisabledForPair(setupAutoExec, pair, family);
           pairReport.checks.push({
             setup: name,
             status: isPaused ? "filtered" : "qualified",
@@ -2217,7 +2228,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: "VERITAS", status: "filtered", direction: veritas.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          const isPausedV = setupAutoExec["VERITAS"] === false;
+          const isPausedV = isComponentDisabledForPair(setupAutoExec, pair, "VERITAS");
           pairReport.checks.push({
             setup: "VERITAS",
             status: isPausedV ? "filtered" : "qualified",
@@ -2239,7 +2250,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: "QSS", status: "filtered", direction: qss.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          const isPausedQ = setupAutoExec["QSS"] === false;
+          const isPausedQ = isComponentDisabledForPair(setupAutoExec, pair, "QSS");
           pairReport.checks.push({
             setup: "QSS",
             status: isPausedQ ? "filtered" : "qualified",
@@ -2262,7 +2273,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: "PRISM", status: "filtered", direction: prism.direction,
             reason: `News blackout: ${h.title} (${h.ccy})` });
         } else {
-          const isPausedP = setupAutoExec["PRISM"] === false;
+          const isPausedP = isComponentDisabledForPair(setupAutoExec, pair, "PRISM");
           pairReport.checks.push({
             setup: "PRISM",
             status: isPausedP ? "filtered" : "qualified",
@@ -2312,7 +2323,7 @@ async function runScanJob(
     // Tag paper_only based on setup_auto_execute — controls Telegram alert suppression.
     for (const s of merged) {
       const family = setupFamilyOf(s.setup);
-      (s as any).paper_only = setupAutoExec[family] === false;
+      (s as any).paper_only = isComponentDisabledForPair(setupAutoExec, s.pair, family);
     }
     signals.push(...merged);
 
