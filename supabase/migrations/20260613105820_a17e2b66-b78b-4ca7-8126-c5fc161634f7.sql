@@ -1,4 +1,4 @@
-
+-- ─── 1. DATABASE SCHEMA FOOTPRINT EXTENSIONS ───
 ALTER TABLE public.app_settings
   ADD COLUMN IF NOT EXISTS setup_auto_execute jsonb NOT NULL DEFAULT '{
     "EMA Pullback": true,
@@ -7,15 +7,21 @@ ALTER TABLE public.app_settings
     "VERITAS": false
   }'::jsonb;
 
+-- ─── 2. UNIFIED DATABASE OVERRIDE STATEMENT ───
+-- Session Break is set to false globally.
+-- GBP/USD EMA Pullback is turned off explicitly.
+-- Global EMA Pullback remains true so Gold/BTC can still trade it.
 UPDATE public.app_settings
 SET setup_auto_execute = '{
   "EMA Pullback": true,
   "BOS Retest": true,
-  "Session Range Break": true,
-  "VERITAS": false
+  "Session Range Break": false,
+  "VERITAS": false,
+  "GBP/USD|EMA Pullback": false
 }'::jsonb
 WHERE id = 'singleton';
 
+-- ─── 3. PUBLIC SECURITY VIEW INTERFACE FUNCTIONS ───
 DROP FUNCTION IF EXISTS public.get_app_settings_public();
 
 CREATE OR REPLACE FUNCTION public.get_app_settings_public()
@@ -36,11 +42,13 @@ AS $function$
     s.metaapi_risk_per_trade_pct, s.metaapi_min_lot, s.metaapi_max_lot,
     COALESCE(s.metaapi_is_cent_account, false) AS metaapi_is_cent_account,
     COALESCE(s.pair_auto_execute, '{}'::jsonb) AS pair_auto_execute,
+    -- Perfectly mirrors the base table logic to enforce global and specific restrictions
     COALESCE(s.setup_auto_execute, '{
       "EMA Pullback": true,
       "BOS Retest": true,
-      "Session Range Break": true,
-      "VERITAS": false
+      "Session Range Break": false,
+      "VERITAS": false,
+      "GBP/USD|EMA Pullback": false
     }'::jsonb) AS setup_auto_execute,
     COALESCE(s.metaapi_active_mode, 'demo') AS metaapi_active_mode,
     COALESCE(s.metaapi_region_live, 'london') AS metaapi_region_live,
