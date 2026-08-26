@@ -45,6 +45,15 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 function hourInWindow(h: number, start: number, end: number): boolean {
   return start <= end ? (h >= start && h < end) : (h >= start || h < end);
 }
+// Per-pair setup override: checks a pair-scoped key ("PAIR|component") first,
+// falling back to the plain global component key so existing toggles keep
+// working unchanged for any pair without an override.
+function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: string, component: string): boolean {
+  const pairKey = `${pair}|${component}`;
+  if (Object.prototype.hasOwnProperty.call(setupConfig, pairKey)) return setupConfig[pairKey] === false;
+  return setupConfig[component] === false;
+}
+
 function isWithinTradingHours(d: Date, c: any): boolean {
   const h = d.getUTCHours();
   const dow = String(d.getUTCDay());
@@ -177,7 +186,7 @@ Deno.serve(async (req) => {
         if (pairConfig[String(s.pair)] === false) continue;
         const setupComponents = String(s.setup ?? "")
           .split("+").map((x: string) => x.split("(")[0].trim()).filter(Boolean);
-        if (!setupComponents.every((comp: string) => setupConfig[comp] !== false)) continue;
+        if (!setupComponents.every((comp: string) => !isComponentDisabledForPair(setupConfig, String(s.pair), comp))) continue;
 
         // Optimistic-lock claim: only succeeds if still unclaimed at write time.
         const { data: claimedRow, error } = await supabase
