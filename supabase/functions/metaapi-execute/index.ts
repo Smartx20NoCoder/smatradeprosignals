@@ -26,6 +26,15 @@ import {
   type PendingOrderAction,
 } from "../_shared/metaapi.ts";
 
+// Per-pair setup override: checks a pair-scoped key ("PAIR|component") first,
+// falling back to the plain global component key so existing toggles keep
+// working unchanged for any pair without an override.
+function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: string, component: string): boolean {
+  const pairKey = `${pair}|${component}`;
+  if (Object.prototype.hasOwnProperty.call(setupConfig, pairKey)) return setupConfig[pairKey] === false;
+  return setupConfig[component] === false;
+}
+
 function mapBrokerError(err: string): string {
   if (err && err.includes("10016")) {
     return "Signal skipped — price moved too far before execution, stops now invalid. Wait for next signal.";
@@ -176,7 +185,7 @@ Deno.serve(async (req) => {
       .split("+")
       .map(c => c.split("(")[0].trim())
       .filter(Boolean);
-    const setupEnabled = setupComponents.every(comp => setupConfig[comp] !== false);
+    const setupEnabled = setupComponents.every(comp => !isComponentDisabledForPair(setupConfig, pairNorm, comp));
     if (!setupEnabled) {
       await supabase.from("signals").update({
         metaapi_execution_status: "skipped",
