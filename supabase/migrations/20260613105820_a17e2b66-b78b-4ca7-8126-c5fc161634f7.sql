@@ -3,8 +3,8 @@ ALTER TABLE public.app_settings
   ADD COLUMN IF NOT EXISTS setup_auto_execute jsonb NOT NULL DEFAULT '{
     "EMA Pullback": true,
     "BOS Retest": true,
-    "Session Range Break": true,
-    "VERITAS": false
+    "Session Range Break": false,
+    "VERITAS": true
   }'::jsonb;
 
 -- ─── 2. UNIFIED DATABASE OVERRIDE STATEMENT ───
@@ -16,7 +16,7 @@ SET setup_auto_execute = '{
   "EMA Pullback": true,
   "BOS Retest": true,
   "Session Range Break": false,
-  "VERITAS": false,
+  "VERITAS": true,
   "GBP/USD|EMA Pullback": false
 }'::jsonb
 WHERE id = 'singleton';
@@ -47,7 +47,7 @@ AS $function$
       "EMA Pullback": true,
       "BOS Retest": true,
       "Session Range Break": false,
-      "VERITAS": false,
+      "VERITAS": true,
       "GBP/USD|EMA Pullback": false
     }'::jsonb) AS setup_auto_execute,
     COALESCE(s.metaapi_active_mode, 'demo') AS metaapi_active_mode,
