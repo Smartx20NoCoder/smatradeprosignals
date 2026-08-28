@@ -477,17 +477,25 @@ function emaPullback(pair: string, c5: Candle[], c15: Candle[]): RawSignal | nul
   const trendUp = e21_15.at(-1)! > e50_15.at(-1)!;
   const trendDown = e21_15.at(-1)! < e50_15.at(-1)!;
   const a = atr(c5);
-  if (a === 0 || Math.abs(e9 - e21v) / a > 0.3) return null;
+  // SL buffer now sized off 15m ATR, not 5m. The trend filter this setup rides
+  // (EMA21 vs EMA50) is read on c15, so the stop needs to survive normal 15m-scale
+  // noise around that level — a 5m-sized stop was getting shaken out by ordinary
+  // 15m pullback noise even when the higher-timeframe read was correct. Entry
+  // trigger, the convergence gate, and the returned `atr` field (used elsewhere
+  // for the volatility-floor check) stay 5m-based — scoped to the SL/TP mismatch
+  // specifically, nothing else changed.
+  const a15 = atr(c15);
+  if (a === 0 || a15 === 0 || Math.abs(e9 - e21v) / a > 0.3) return null;
   const touched = last.l <= Math.max(e9, e21v) && last.h >= Math.min(e9, e21v);
   const ct = new Date(last.t).toISOString();
   if (trendUp && touched && last.c > last.o && last.c > prev.h) {
-    const entry = (e9 + e21v) / 2, sl = Math.min(e21v, last.l) - a * 0.3;
+    const entry = (e9 + e21v) / 2, sl = Math.min(e21v, last.l) - a15 * 0.3;
     const risk = entry - sl; if (risk <= 0) return null;
     return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Long",
       entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
   }
   if (trendDown && touched && last.c < last.o && last.c < prev.l) {
-    const entry = (e9 + e21v) / 2, sl = Math.max(e21v, last.h) + a * 0.3;
+    const entry = (e9 + e21v) / 2, sl = Math.max(e21v, last.h) + a15 * 0.3;
     const risk = sl - entry; if (risk <= 0) return null;
     return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Short",
       entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
@@ -500,6 +508,13 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const e21 = ema(c15.map(x => x.c), 21).at(-1)!;
   const e50 = ema(c15.map(x => x.c), 50).at(-1)!;
   const a = atr(c5); if (a === 0) return null;
+  // SL buffer sized off 15m ATR — the breakout level itself is a 15m structural
+  // point (last 20 closed 15m candles), so the stop needs to clear normal
+  // 15m-scale noise around that level, not 5m noise. The a*0.2 retest-timing
+  // tolerance just below stays 5m-based deliberately: that's about how precisely
+  // the 5m retracement needs to tag the level, a timing question on the entry
+  // timeframe, not a stop-sizing question — different concern, left alone.
+  const a15 = atr(c15); if (a15 === 0) return null;
   // Structure levels from last 20 closed 15m candles (~5h), excluding the current forming bar.
   const structure = c15.slice(-21, -1); if (structure.length < 20) return null;
   const sh = Math.max(...structure.map(x => x.h)), sl = Math.min(...structure.map(x => x.l));
@@ -507,14 +522,14 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const ct = new Date(last.t).toISOString();
   if (e21 > e50 && recent.some(x => x.c > sh)) {
     if (!(last.l <= sh + a * 0.2 && last.c > sh)) return null;
-    const entry = sh, slp = sh - a * 0.8, risk = entry - slp;
+    const entry = sh, slp = sh - a15 * 0.8, risk = entry - slp;
     if (risk <= 0) return null;
     return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Long",
       entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
   }
   if (e21 < e50 && recent.some(x => x.c < sl)) {
     if (!(last.h >= sl - a * 0.2 && last.c < sl)) return null;
-    const entry = sl, slp = sl + a * 0.8, risk = slp - entry;
+    const entry = sl, slp = sl + a15 * 0.8, risk = slp - entry;
     if (risk <= 0) return null;
     return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Short",
       entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
