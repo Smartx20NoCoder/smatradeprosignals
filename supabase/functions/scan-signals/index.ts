@@ -572,43 +572,52 @@ function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
 }
 
 function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
-  if (c5.length < 40) return null;
-  const a = atr(c5); if (a === 0) return null;
+  if (c5.length < 5 || c15.length < 40) return null;
+  const a15 = atr(c15); if (a15 === 0) return null;
   const e21_15 = ema(c15.map(x => x.c), 21).at(-1)!;
   const e50_15 = ema(c15.map(x => x.c), 50).at(-1)!;
-  const last = c5.at(-1)!;
-  const ct = new Date(last.t).toISOString();
-  for (let i = c5.length - 4; i >= c5.length - 20 && i >= 3; i--) {
-    const seq = c5.slice(i - 2, i + 1);
-    const bullSeq = seq.every(x => x.c > x.o && (x.c - x.o) > a * 0.5);
-    const bearSeq = seq.every(x => x.c < x.o && (x.o - x.c) > a * 0.5);
+  const last5 = c5.at(-1)!;
+  const ct = new Date(last5.t).toISOString();
+  // Displacement sequence, order block, and FVG identified on 15m — this is what
+  // an order block actually is in practice: an HTF point of interest, not a
+  // 5-minute one. The 5m chart's only job now is to confirm price has retraced
+  // back into that 15m zone with a real refinement candle before firing.
+  for (let i = c15.length - 4; i >= c15.length - 20 && i >= 3; i--) {
+    const seq = c15.slice(i - 2, i + 1);
+    const bullSeq = seq.every(x => x.c > x.o && (x.c - x.o) > a15 * 0.5);
+    const bearSeq = seq.every(x => x.c < x.o && (x.o - x.c) > a15 * 0.5);
     if (!bullSeq && !bearSeq) continue;
     let obIdx = i - 3;
-    while (obIdx >= 0 && ((bullSeq && c5[obIdx].c > c5[obIdx].o) || (bearSeq && c5[obIdx].c < c5[obIdx].o))) obIdx--;
+    while (obIdx >= 0 && ((bullSeq && c15[obIdx].c > c15[obIdx].o) || (bearSeq && c15[obIdx].c < c15[obIdx].o))) obIdx--;
     if (obIdx < 0) continue;
-    const ob = c5[obIdx];
-    const fvgBull = bullSeq && obIdx + 3 < c5.length && c5[obIdx + 1].h < c5[obIdx + 3].l;
-    const fvgBear = bearSeq && obIdx + 3 < c5.length && c5[obIdx + 1].l > c5[obIdx + 3].h;
-    if (bullSeq && e21_15 > e50_15 && last.l <= ob.h && last.l >= ob.l && last.c > last.o) {
-      const entry = ob.h, sl = ob.l - a * 0.3, risk = entry - sl;
+    const ob = c15[obIdx];
+    const fvgBull = bullSeq && obIdx + 3 < c15.length && c15[obIdx + 1].h < c15[obIdx + 3].l;
+    const fvgBear = bearSeq && obIdx + 3 < c15.length && c15[obIdx + 1].l > c15[obIdx + 3].h;
+    if (bullSeq && e21_15 > e50_15 && last5.l <= ob.h && last5.l >= ob.l && last5.c > last5.o) {
+      const entry = ob.h, sl = ob.l - a15 * 0.3, risk = entry - sl;
       if (risk <= 0) return null;
-      return { pair, timeframe: "5m", setup: fvgBull ? "OB+FVG" : "Order Block", direction: "Long",
-        entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
+      return { pair, timeframe: "15m", setup: fvgBull ? "OB+FVG" : "Order Block", direction: "Long",
+        entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
     }
-    if (bearSeq && e21_15 < e50_15 && last.h >= ob.l && last.h <= ob.h && last.c < last.o) {
-      const entry = ob.l, sl = ob.h + a * 0.3, risk = sl - entry;
+    if (bearSeq && e21_15 < e50_15 && last5.h >= ob.l && last5.h <= ob.h && last5.c < last5.o) {
+      const entry = ob.l, sl = ob.h + a15 * 0.3, risk = sl - entry;
       if (risk <= 0) return null;
-      return { pair, timeframe: "5m", setup: fvgBear ? "OB+FVG" : "Order Block", direction: "Short",
-        entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
+      return { pair, timeframe: "15m", setup: fvgBear ? "OB+FVG" : "Order Block", direction: "Short",
+        entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
     }
   }
   return null;
 }
 
-function choch(pair: string, c5: Candle[]): RawSignal | null {
-  if (c5.length < 30) return null;
-  const a = atr(c5); if (a === 0) return null;
-  const window = c5.slice(-25);
+function choch(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
+  if (c15.length < 30 || c5.length < 5) return null;
+  const a15 = atr(c15); if (a15 === 0) return null;
+  // Swing structure, liquidity sweep, and the character-change break are now
+  // identified on 15m — CHOCH is a structural read, and 5-minute swing points
+  // are just noise relative to what actually matters for a real reversal. The
+  // 5m chart is used only for a retest confirmation after the 15m break, same
+  // "HTF structure, LTF refinement" pattern as BOS Retest.
+  const window = c15.slice(-25);
   const highs: { i: number; v: number }[] = [], lows: { i: number; v: number }[] = [];
   for (let i = 2; i < window.length - 2; i++) {
     if (window[i].h > window[i - 1].h && window[i].h > window[i - 2].h && window[i].h > window[i + 1].h && window[i].h > window[i + 2].h)
@@ -617,25 +626,33 @@ function choch(pair: string, c5: Candle[]): RawSignal | null {
       lows.push({ i, v: window[i].l });
   }
   if (highs.length < 2 || lows.length < 2) return null;
-  const last = window.at(-1)!;
-  const ct = new Date(last.t).toISOString();
+  const last15 = window.at(-1)!;
   const lh1 = highs.at(-1)!, lh2 = highs.at(-2)!;
   const ll1 = lows.at(-1)!, ll2 = lows.at(-2)!;
   const sweptLow = window.some((x, i) => i > ll1.i && x.l < ll1.v);
-  const brokeHigh = last.c > lh1.v;
-  if (lh1.v < lh2.v && ll1.v < ll2.v && sweptLow && brokeHigh) {
-    const entry = lh1.v, sl = Math.min(...window.slice(ll1.i).map(x => x.l)) - a * 0.2;
-    const risk = entry - sl; if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "CHOCH", direction: "Long",
-      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
-  }
+  const brokeHigh = last15.c > lh1.v;
   const sweptHigh = window.some((x, i) => i > lh1.i && x.h > lh1.v);
-  const brokeLow = last.c < ll1.v;
+  const brokeLow = last15.c < ll1.v;
+
+  const last5 = c5.at(-1)!;
+  const ct = new Date(last5.t).toISOString();
+  const tol = a15 * 0.2; // 5m retest tolerance around the 15m break level
+
+  if (lh1.v < lh2.v && ll1.v < ll2.v && sweptLow && brokeHigh) {
+    // 15m CHOCH confirmed — wait for a 5m retest back toward the broken level
+    // before firing, rather than chasing the breakout candle itself.
+    if (!(last5.l <= lh1.v + tol && last5.c > lh1.v)) return null;
+    const entry = lh1.v, sl = Math.min(...window.slice(ll1.i).map(x => x.l)) - a15 * 0.2;
+    const risk = entry - sl; if (risk <= 0) return null;
+    return { pair, timeframe: "15m", setup: "CHOCH", direction: "Long",
+      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
+  }
   if (lh1.v > lh2.v && ll1.v > ll2.v && sweptHigh && brokeLow) {
-    const entry = ll1.v, sl = Math.max(...window.slice(lh1.i).map(x => x.h)) + a * 0.2;
+    if (!(last5.h >= ll1.v - tol && last5.c < ll1.v)) return null;
+    const entry = ll1.v, sl = Math.max(...window.slice(lh1.i).map(x => x.h)) + a15 * 0.2;
     const risk = sl - entry; if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "CHOCH", direction: "Short",
-      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
+    return { pair, timeframe: "15m", setup: "CHOCH", direction: "Short",
+      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
   }
   return null;
 }
@@ -2267,7 +2284,7 @@ async function runScanJob(
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
         ["Session Range Break", sessionRangeBreak(pair, d.c5)],
         ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
-        ["CHOCH",               choch(pair, d.c5)],
+        ["CHOCH",               choch(pair, d.c5, d.c15)],
       ];
       for (const [name, raw] of setups) {
         if (!raw) {
