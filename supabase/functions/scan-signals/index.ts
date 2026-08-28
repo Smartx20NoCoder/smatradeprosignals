@@ -1677,6 +1677,13 @@ function qualifyAndScore(
 
   if (bias === "bull" && raw.direction === "Short") return { signal: null, reason: "Against 1H bias (1H bull)" };
   if (bias === "bear" && raw.direction === "Long") return { signal: null, reason: "Against 1H bias (1H bear)" };
+  // EMA Pullback and BOS Retest are trend-CONTINUATION setups — a neutral/undecided
+  // 1H backdrop means there's no established trend to continue, so the shared
+  // "only block outright opposition" rule above doesn't fit these two specifically.
+  // Every other setup still gets the permissive version; this is scoped to just these.
+  if (bias === "neutral" && (raw.setup === "EMA Pullback" || raw.setup === "BOS Retest")) {
+    return { signal: null, reason: `${raw.setup} needs a confirmed 1H trend, not neutral` };
+  }
 
   const spread = spreadPrice(pair);
   const sDisp = spreadDisplay(pair);
