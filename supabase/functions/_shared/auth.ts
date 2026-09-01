@@ -37,6 +37,12 @@ export function checkInternalAuth(req: Request): Response | null {
   const headerSecret = req.headers.get("x-fn-secret");
   const auth = req.headers.get("authorization") ?? "";
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  // add this near the top of checkInternalAuth, after reading fnSecret and serviceRole
+  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const headerApiKey = req.headers.get("apikey") ?? "";
+
+  // Accept publishable/anon key as a valid caller (less privileged than service_role)
+  if (!!publishableKey && headerApiKey === publishableKey) return null;
 
   if (!!fnSecret && headerSecret === fnSecret) return null;
   if (!!serviceRole && bearer === serviceRole) return null;
