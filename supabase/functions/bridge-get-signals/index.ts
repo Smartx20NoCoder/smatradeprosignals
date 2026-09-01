@@ -22,8 +22,9 @@
 // until it either fills (EA calls bridge-report-execution) or expires (this
 // endpoint marks it "failed" and stops returning it once bridge_claim_expiry_min
 // has elapsed since it was claimed).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+// supabase/functions/bridge-get-signals/index.ts
 import { checkSecret, corsHeaders, safeError } from "../_shared/metaapi.ts";
+import { getServerConfigSafe } from "../_shared/safe-config.ts";
 
 // ── Trading-hours check — mirrored from scan-signals.ts's isWithinTradingHours() ──
 type SessionWindow = { enabled: boolean; start: number; end: number };
@@ -45,15 +46,11 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 function hourInWindow(h: number, start: number, end: number): boolean {
   return start <= end ? (h >= start && h < end) : (h >= start || h < end);
 }
-// Per-pair setup override: checks a pair-scoped key ("PAIR|component") first,
-// falling back to the plain global component key so existing toggles keep
-// working unchanged for any pair without an override.
 function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: string, component: string): boolean {
   const pairKey = `${pair}|${component}`;
   if (Object.prototype.hasOwnProperty.call(setupConfig, pairKey)) return setupConfig[pairKey] === false;
   return setupConfig[component] === false;
 }
-
 function isWithinTradingHours(d: Date, c: any): boolean {
   const h = d.getUTCHours();
   const dow = String(d.getUTCDay());
@@ -71,33 +68,52 @@ function isWithinTradingHours(d: Date, c: any): boolean {
   return hourInWindow(h, start, end);
 }
 
+// Guarded serve handler: lazy-import supabase client and handle any startup errors gracefully.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const unauth = checkSecret(req);
   if (unauth) return unauth;
 
+  // Validate envs safely
+  const cfgSafe = getServerConfigSafe();
+  if ("error" in cfgSafe) {
+    console.error("bridge-get-signals CONFIG_ERROR", cfgSafe.error);
+    return new Response(JSON.stringify({ code: "CONFIG_ERROR", message: cfgSafe.error }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Lazy import supabase client to avoid module-load crashes
+  let createClient: any;
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const mod = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
+    // supabase-js exports createClient
+    createClient = (mod as any).createClient ?? (mod as any).default?.createClient;
+    if (!createClient) {
+      throw new Error("createClient not found in supabase-js import");
+    }
+  } catch (e) {
+    console.error("bridge-get-signals: failed to import supabase client", e);
+    return new Response(JSON.stringify({ code: "IMPORT_ERROR", message: "Failed to load supabase client" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  try {
+    const supabase = createClient(cfgSafe.url, cfgSafe.serviceRole ?? cfgSafe.anon ?? "");
 
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
     const c: any = cfg ?? {};
 
-    // Heartbeat — record that the bridge is alive and polling, regardless of
-    // whether there happen to be any signals to hand back this cycle.
     await supabase.from("app_settings")
       .update({ bridge_last_seen: new Date().toISOString() })
       .eq("id", "singleton");
 
-    // Scanning-active flag — paused toggle OR outside trading hours both mean
-    // "the app has stopped looking for new signals right now."
     const scanningActive = !c.paused && isWithinTradingHours(new Date(), c);
 
-    // Live risk/lot config — sent every poll so the EA never trades on a stale
-    // local copy of these values if Settings gets changed.
     const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
     const isLive = mode === "live";
     const isCentAccount = isLive
@@ -116,9 +132,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // The bridge supports the full scanner lineup. Pair auto-execute is the
-    // source of truth: turning a pair on makes it eligible for the bridge pool,
-    // while turning it off removes it without requiring a separate bridge list.
     const bridgeSupportedPairs = [
       "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD",
       "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD",
@@ -128,13 +141,9 @@ Deno.serve(async (req) => {
     const minConf = Number(c.metaapi_min_confidence ?? 75);
     const minRR = Number(c.metaapi_min_rr ?? 2);
     const maxTrades = Number(c.metaapi_max_trades ?? 3);
-    // ─── DYNAMIC VALUE LINKED TO YOUR FRONTEND SETTINGS BOX ───
     const claimExpiryMin = Number(c.bridge_claim_expiry_min ?? 45);
     const setupConfig = (c.setup_auto_execute ?? {}) as Record<string, boolean>;
 
-    // Expire stale claims first — anything the bridge grabbed but never filled
-    // within the expiry window. Marked failed so a fresh signal generates
-    // naturally rather than the EA chasing a stale entry price forever.
     const expiryCutoff = new Date(Date.now() - claimExpiryMin * 60_000).toISOString();
     const { data: staleClaims } = await supabase
       .from("signals")
@@ -150,17 +159,12 @@ Deno.serve(async (req) => {
       }).in("id", staleClaims.map((r: any) => r.id));
     }
 
-    // Don't hand out NEW claims once scanning has stopped — only keep tracking
-    // claims already in flight so they can still fill or expire cleanly.
     const { data: alreadyClaimed } = await supabase
       .from("signals")
       .select("id, pair, direction, order_type, entry, stop_loss, tp2")
       .eq("metaapi_execution_status", "bridge_claimed")
       .in("pair", bridgePairs);
 
-    // Active-trade count. "filled" rows are time-bounded to the last 48h so a
-    // single dropped close-report can't wedge the slot counter forever;
-    // "bridge_claimed" already self-expires via bridge_claim_expiry_min.
     const filledCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
     const { count: filledCount } = await supabase
       .from("signals")
@@ -173,7 +177,6 @@ Deno.serve(async (req) => {
       .eq("metaapi_execution_status", "bridge_claimed");
     const activeCount = (filledCount ?? 0) + (claimedCount ?? 0);
     const roomForMore = activeCount < maxTrades;
-
 
     const freshClaimed: any[] = [];
     if (roomForMore && scanningActive) {
@@ -193,7 +196,6 @@ Deno.serve(async (req) => {
           .split("+").map((x: string) => x.split("(")[0].trim()).filter(Boolean);
         if (!setupComponents.every((comp: string) => !isComponentDisabledForPair(setupConfig, String(s.pair), comp))) continue;
 
-        // Optimistic-lock claim: only succeeds if still unclaimed at write time.
         const { data: claimedRow, error } = await supabase
           .from("signals")
           .update({
