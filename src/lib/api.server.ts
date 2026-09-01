@@ -35,5 +35,6 @@ export async function callEdge(path: string, body: unknown): Promise<EdgeResult>
   } catch {
     data = { raw: text.slice(0, 300) };
   }
+
   return { status: response.status, data };
 }
