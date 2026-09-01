@@ -130,7 +130,6 @@ Deno.serve(async (req) => {
     const maxTrades = Number(c.metaapi_max_trades ?? 3);
     // ─── DYNAMIC VALUE LINKED TO YOUR FRONTEND SETTINGS BOX ───
     const claimExpiryMin = Number(c.bridge_claim_expiry_min ?? 45);
-    const pairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
     const setupConfig = (c.setup_auto_execute ?? {}) as Record<string, boolean>;
 
     // Expire stale claims first — anything the bridge grabbed but never filled
