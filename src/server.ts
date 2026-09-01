@@ -68,14 +68,6 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    // ─── ADDED TANSTACK CLOUDFLARE ENV TRANSLATION PASS-THROUGH ───
-    // Maps Cloudflare runtime bindings directly to process.env during the request event
-    if (env && typeof env === "object") {
-      Object.entries(env).forEach(([k, v]) => {
-        if (typeof v === "string") (process.env as any)[k] = v;
-      });
-    }
-
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
