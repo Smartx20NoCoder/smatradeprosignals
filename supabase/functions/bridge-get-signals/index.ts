@@ -23,6 +23,7 @@
 // endpoint marks it "failed" and stops returning it once bridge_claim_expiry_min
 // has elapsed since it was claimed).
 // supabase/functions/bridge-get-signals/index.ts
+// supabase/functions/bridge-get-signals/index.ts
 import { checkSecret, corsHeaders, safeError } from "../_shared/metaapi.ts";
 import { getServerConfigSafe } from "../_shared/safe-config.ts";
 
@@ -70,6 +71,9 @@ function isWithinTradingHours(d: Date, c: any): boolean {
 
 // Guarded serve handler: lazy-import supabase client and handle any startup errors gracefully.
 Deno.serve(async (req) => {
+  // Startup marker for provider logs — helps correlate EA polls with function startup.
+  console.log("bridge-get-signals invoked at", new Date().toISOString());
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const unauth = checkSecret(req);
   if (unauth) return unauth;
@@ -88,7 +92,6 @@ Deno.serve(async (req) => {
   let createClient: any;
   try {
     const mod = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
-    // supabase-js exports createClient
     createClient = (mod as any).createClient ?? (mod as any).default?.createClient;
     if (!createClient) {
       throw new Error("createClient not found in supabase-js import");
@@ -102,7 +105,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(cfgSafe.url, cfgSafe.serviceRole ?? cfgSafe.anon ?? "");
+    // Create client with safe fallback: prefer service role, fall back to publishable/anon key if service role missing.
+    const supabase = createClient(
+      cfgSafe.url,
+      cfgSafe.serviceRole ?? cfgSafe.anon ?? ""
+    );
 
     const { data: cfg } = await supabase
       .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
