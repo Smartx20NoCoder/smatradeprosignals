@@ -24,13 +24,7 @@ function getServerConfig() {
 
 export async function callEdge(path: string, body: unknown): Promise<EdgeResult> {
   const { url, anon, secret } = getServerConfig();
-  
-  // Rule: If the path is for the bridge service, route it locally instead of Supabase
-  const targetUrl = path.startsWith("bridge") 
-    ? `http://localhost:8080/_bridge`
-    : `${url}/functions/v1/${path}`;
-
-  const response = await fetch(targetUrl, {
+  const response = await fetch(`${url}/functions/v1/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -48,7 +42,5 @@ export async function callEdge(path: string, body: unknown): Promise<EdgeResult>
   } catch {
     data = { raw: text.slice(0, 300) };
   }
-
   return { status: response.status, data };
 }
-
