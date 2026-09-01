@@ -2289,7 +2289,9 @@ async function runScanJob(
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
-        ["Session Range Break", sessionRangeBreak(pair, d.c5)],
+        // Session Range Break is retired from signal generation. Keep the report
+        // slot so the Edge breakdown remains stable, but never call the strategy.
+        ["Session Range Break", null],
         ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH",               choch(pair, d.c5, d.c15)],
       ];
