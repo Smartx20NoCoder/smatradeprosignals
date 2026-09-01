@@ -5,12 +5,8 @@
 //   - Ongoing trail management (stepped R-multiple ratchet) happens in metaapi-sync,
 //     which moves this position's SL forward every sync cycle.
 //
-// BRIDGE FALLBACK: for pairs the ScalpEdge Bridge EA handles (app_settings.bridge_pairs,
-// default GBP/USD + XAU/USD), this function defers to the bridge while it's alive and a
-// signal is still within its claim window (app_settings.bridge_claim_grace_sec) — the
-// bridge gets first attempt since it trades for free off the VPS. If the bridge is
-// offline (no heartbeat) or the claim window has passed, MetaAPI executes as normal —
-// no manual switch needed either way.
+// BRIDGE FALLBACK: all pairs in the scanner lineup can be routed through the
+// ScalpEdge Bridge EA. Pair auto-execute is the source of truth for eligibility.
 //
 // Adds risk gates: max concurrent trades, daily loss limit, pending-order expiry.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -104,8 +100,12 @@ Deno.serve(async (req) => {
     // To reintroduce heartbeat-based failover once MetaApi is resubscribed, restore the
     // bridgeAlive (bridge_last_seen vs bridge_claim_grace_sec) + signal-age conditions here.
     if (!force_retry) {
-      const bridgePairs: string[] = Array.isArray(c.bridge_pairs) && c.bridge_pairs.length > 0
-        ? c.bridge_pairs : ["GBP/USD", "XAU/USD"];
+      const bridgeSupportedPairs = [
+        "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD",
+        "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD",
+      ];
+      const bridgePairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
+      const bridgePairs = bridgeSupportedPairs.filter((pair) => bridgePairConfig[pair] !== false);
       if (bridgePairs.includes(String(s.pair))) {
         return new Response(JSON.stringify({ ok: false, reason: "deferring to bridge EA (bridge pair — always deferred)" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

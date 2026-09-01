@@ -116,9 +116,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    const bridgePairs: string[] = Array.isArray(c.bridge_pairs) && c.bridge_pairs.length > 0
-      ? c.bridge_pairs
-      : ["GBP/USD", "XAU/USD", "BTC/USD"];
+    // The bridge supports the full scanner lineup. Pair auto-execute is the
+    // source of truth: turning a pair on makes it eligible for the bridge pool,
+    // while turning it off removes it without requiring a separate bridge list.
+    const bridgeSupportedPairs = [
+      "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD",
+      "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD",
+    ];
+    const pairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
+    const bridgePairs = bridgeSupportedPairs.filter((pair) => pairConfig[pair] !== false);
     const minConf = Number(c.metaapi_min_confidence ?? 75);
     const minRR = Number(c.metaapi_min_rr ?? 2);
     const maxTrades = Number(c.metaapi_max_trades ?? 3);

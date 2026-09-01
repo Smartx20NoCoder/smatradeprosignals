@@ -3629,7 +3629,9 @@ type BridgePoll = {
   note: string | null;
 };
 
-const BRIDGE_POOL_PAIRS = ["GBP/USD", "XAU/USD", "BTC/USD"];
+// Keep telemetry aligned with the backend bridge pool. The backend filters this
+// lineup by pair_auto_execute, so enabling any supported pair makes it claimable.
+const BRIDGE_POOL_PAIRS = PAIRS;
 
 function BridgeTelemetryCard() {
   const [polls, setPolls] = useState<BridgePoll[]>([]);
