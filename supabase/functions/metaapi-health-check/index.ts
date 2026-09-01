@@ -82,6 +82,15 @@ async function runHealthCheck(opts: { force?: boolean } = {}): Promise<{
 }
 
 Deno.serve(async (req) => {
+  // Quick public health probe for platform checks (no auth)
+  if (req.method === "GET") {
+    console.log("metaapi-health-check: quick GET probe");
+    return new Response(JSON.stringify({ status: "healthy" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const unauth = checkInternalAuth(req);
   if (unauth) return unauth;
