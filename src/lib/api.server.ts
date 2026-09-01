@@ -4,7 +4,7 @@ function getServerConfig() {
   // Uses environment variables if present, otherwise uses your specific Supabase credentials as fallback strings
   const url = process.env["SUPABASE_URL"] 
     ?? process.env["VITE_SUPABASE_URL"] 
-    ?? "https://gvxiwqbuurwksvjqsuoy.supabase.co";
+    ?? "https://supabase.co"; // Restored your correct project reference ID
 
   const anon = process.env["SUPABASE_PUBLISHABLE_KEY"]
     ?? process.env["SUPABASE_ANON_KEY"]
