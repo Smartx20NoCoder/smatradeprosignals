@@ -2550,7 +2550,7 @@ function HealthPanel({
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
 
-    <BridgeTelemetryCard />
+    <BridgeTelemetryCard appSettings={appSettings} />
 
 
       <SymbolKeepaliveCard appSettings={appSettings} />
@@ -3633,10 +3633,14 @@ type BridgePoll = {
 // lineup by pair_auto_execute, so enabling any supported pair makes it claimable.
 const BRIDGE_POOL_PAIRS = PAIRS;
 
-function BridgeTelemetryCard() {
+function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
   const [polls, setPolls] = useState<BridgePoll[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [claimable, setClaimable] = useState<{ total: number; claimed: number } | null>(null);
+  const enabledBridgePairs = useMemo(
+    () => BRIDGE_POOL_PAIRS.filter((pair) => appSettings.pair_auto_execute?.[pair] !== false),
+    [appSettings.pair_auto_execute],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -3650,7 +3654,7 @@ function BridgeTelemetryCard() {
         (supabase as any)
           .from("signals")
           .select("id, metaapi_execution_status")
-          .in("pair", BRIDGE_POOL_PAIRS)
+           .in("pair", enabledBridgePairs)
           .in("status", ["pending", "none"])
           .in("metaapi_execution_status", ["none", "bridge_claimed"])
           .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString()),
@@ -3667,7 +3671,7 @@ function BridgeTelemetryCard() {
     load();
     const t = setInterval(load, 20000);
     return () => { alive = false; clearInterval(t); };
-  }, []);
+  }, [enabledBridgePairs]);
 
   const last = polls[0];
   const secondsAgo = last ? Math.floor((Date.now() - new Date(last.polled_at).getTime()) / 1000) : Infinity;
@@ -3724,7 +3728,7 @@ function BridgeTelemetryCard() {
             </span>
           </div>
           <div className="text-[9px] text-muted-foreground tracking-wider mt-0.5">
-            {BRIDGE_POOL_PAIRS.join(" · ")} · status pending/none · last 6h
+             {enabledBridgePairs.join(" · ") || "No pairs enabled"} · status pending/none · last 6h
           </div>
         </div>
       </div>
