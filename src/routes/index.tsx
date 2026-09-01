@@ -2550,7 +2550,7 @@ function HealthPanel({
     <div className="mt-4 space-y-3">
       <BrokerHealthCard />
 
-    <BridgeTelemetryCard appSettings={appSettings} />
+    <BridgeTelemetryCard />
 
 
       <SymbolKeepaliveCard appSettings={appSettings} />
@@ -3629,18 +3629,12 @@ type BridgePoll = {
   note: string | null;
 };
 
-// Keep telemetry aligned with the backend bridge pool. The backend filters this
-// lineup by pair_auto_execute, so enabling any supported pair makes it claimable.
-const BRIDGE_POOL_PAIRS = PAIRS;
+const BRIDGE_POOL_PAIRS = ["GBP/USD", "XAU/USD", "BTC/USD"];
 
-function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
+function BridgeTelemetryCard() {
   const [polls, setPolls] = useState<BridgePoll[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [claimable, setClaimable] = useState<{ total: number; claimed: number } | null>(null);
-  const enabledBridgePairs = useMemo(
-    () => BRIDGE_POOL_PAIRS.filter((pair) => appSettings.pair_auto_execute?.[pair] !== false),
-    [appSettings.pair_auto_execute],
-  );
 
   useEffect(() => {
     let alive = true;
@@ -3654,7 +3648,7 @@ function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
         (supabase as any)
           .from("signals")
           .select("id, metaapi_execution_status")
-           .in("pair", enabledBridgePairs)
+          .in("pair", BRIDGE_POOL_PAIRS)
           .in("status", ["pending", "none"])
           .in("metaapi_execution_status", ["none", "bridge_claimed"])
           .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString()),
@@ -3671,7 +3665,7 @@ function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
     load();
     const t = setInterval(load, 20000);
     return () => { alive = false; clearInterval(t); };
-  }, [enabledBridgePairs]);
+  }, []);
 
   const last = polls[0];
   const secondsAgo = last ? Math.floor((Date.now() - new Date(last.polled_at).getTime()) / 1000) : Infinity;
@@ -3728,7 +3722,7 @@ function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
             </span>
           </div>
           <div className="text-[9px] text-muted-foreground tracking-wider mt-0.5">
-             {enabledBridgePairs.join(" · ") || "No pairs enabled"} · status pending/none · last 6h
+            {BRIDGE_POOL_PAIRS.join(" · ")} · status pending/none · last 6h
           </div>
         </div>
       </div>
