@@ -23,11 +23,8 @@
 // endpoint marks it "failed" and stops returning it once bridge_claim_expiry_min
 // has elapsed since it was claimed).
 // supabase/functions/bridge-get-signals/index.ts
-// supabase/functions/bridge-get-signals/index.ts
-import { checkSecret, corsHeaders, safeError } from "../_shared/metaapi.ts";
-import { getServerConfigSafe } from "../_shared/safe-config.ts";
+// Fully guarded version: dynamic imports + safe fallbacks so cold-start crashes return readable JSON.
 
-// ── Trading-hours check — mirrored from scan-signals.ts's isWithinTradingHours() ──
 type SessionWindow = { enabled: boolean; start: number; end: number };
 type SessionConfig = {
   scan_active_sessions_only: boolean;
@@ -69,161 +66,192 @@ function isWithinTradingHours(d: Date, c: any): boolean {
   return hourInWindow(h, start, end);
 }
 
-// Guarded serve handler: lazy-import supabase client and handle any startup errors gracefully.
 Deno.serve(async (req) => {
-  // Startup marker for provider logs — helps correlate EA polls with function startup.
+  // Always log invocation so provider logs can be correlated with EA polls.
   console.log("bridge-get-signals invoked at", new Date().toISOString());
 
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const unauth = checkSecret(req);
-  if (unauth) return unauth;
-
-  // Validate envs safely
-  const cfgSafe = getServerConfigSafe();
-  if ("error" in cfgSafe) {
-    console.error("bridge-get-signals CONFIG_ERROR", cfgSafe.error);
-    return new Response(JSON.stringify({ code: "CONFIG_ERROR", message: cfgSafe.error }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  // Lazy import supabase client to avoid module-load crashes
-  let createClient: any;
+  // Quick CORS preflight
   try {
-    const mod = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
-    createClient = (mod as any).createClient ?? (mod as any).default?.createClient;
-    if (!createClient) {
-      throw new Error("createClient not found in supabase-js import");
+    // Dynamic import of shared helpers to avoid top-level import crashes
+    const shared = await import("../_shared/metaapi.ts").catch((e) => ({ __err: e }));
+    const safeCfgMod = await import("../_shared/safe-config.ts").catch((e) => ({ __err: e }));
+
+    if ((shared as any).__err) {
+      console.error("bridge-get-signals: failed to import _shared/metaapi.ts", (shared as any).__err);
+      return new Response(JSON.stringify({ code: "IMPORT_ERROR", message: "Failed to load metaapi helper" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
-  } catch (e) {
-    console.error("bridge-get-signals: failed to import supabase client", e);
-    return new Response(JSON.stringify({ code: "IMPORT_ERROR", message: "Failed to load supabase client" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+    if ((safeCfgMod as any).__err) {
+      console.error("bridge-get-signals: failed to import _shared/safe-config.ts", (safeCfgMod as any).__err);
+      return new Response(JSON.stringify({ code: "IMPORT_ERROR", message: "Failed to load safe-config helper" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-  try {
-    // Create client with safe fallback: prefer service role, fall back to publishable/anon key if service role missing.
-    const supabase = createClient(
-      cfgSafe.url,
-      cfgSafe.serviceRole ?? cfgSafe.anon ?? ""
-    );
+    const { checkSecret, corsHeaders, safeError } = shared as any;
+    const { getServerConfigSafe } = safeCfgMod as any;
 
-    const { data: cfg } = await supabase
-      .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
-    const c: any = cfg ?? {};
+    if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const unauth = checkSecret(req);
+    if (unauth) return unauth;
 
-    await supabase.from("app_settings")
-      .update({ bridge_last_seen: new Date().toISOString() })
-      .eq("id", "singleton");
-
-    const scanningActive = !c.paused && isWithinTradingHours(new Date(), c);
-
-    const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
-    const isLive = mode === "live";
-    const isCentAccount = isLive
-      ? Boolean(c?.metaapi_is_cent_account_live)
-      : Boolean(c?.metaapi_is_cent_account);
-    const risk = {
-      risk_pct: Number(c?.metaapi_risk_per_trade_pct ?? 2),
-      min_lot: Number(c?.metaapi_min_lot ?? 0.10),
-      max_lot: Number(c?.metaapi_max_lot ?? 0.50),
-      is_cent_account: isCentAccount,
-    };
-
-    if (!c.metaapi_auto_trade) {
-      return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals: [] }), {
+    // Validate envs safely
+    const cfgSafe = getServerConfigSafe();
+    if ("error" in cfgSafe) {
+      console.error("bridge-get-signals CONFIG_ERROR", cfgSafe.error);
+      return new Response(JSON.stringify({ code: "CONFIG_ERROR", message: cfgSafe.error }), {
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const bridgeSupportedPairs = [
-      "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD",
-      "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD",
-    ];
-    const pairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
-    const bridgePairs = bridgeSupportedPairs.filter((pair) => pairConfig[pair] !== false);
-    const minConf = Number(c.metaapi_min_confidence ?? 75);
-    const minRR = Number(c.metaapi_min_rr ?? 2);
-    const maxTrades = Number(c.metaapi_max_trades ?? 3);
-    const claimExpiryMin = Number(c.bridge_claim_expiry_min ?? 45);
-    const setupConfig = (c.setup_auto_execute ?? {}) as Record<string, boolean>;
-
-    const expiryCutoff = new Date(Date.now() - claimExpiryMin * 60_000).toISOString();
-    const { data: staleClaims } = await supabase
-      .from("signals")
-      .select("id")
-      .eq("metaapi_execution_status", "bridge_claimed")
-      .lt("bridge_claimed_at", expiryCutoff);
-    if (staleClaims && staleClaims.length > 0) {
-      await supabase.from("signals").update({
-        metaapi_execution_status: "failed",
-        metaapi_execution_error: `Bridge claim expired after ${claimExpiryMin}min — price never reached entry zone.`,
-        status: "expired",
-        paper_status: "watching",
-      }).in("id", staleClaims.map((r: any) => r.id));
-    }
-
-    const { data: alreadyClaimed } = await supabase
-      .from("signals")
-      .select("id, pair, direction, order_type, entry, stop_loss, tp2")
-      .eq("metaapi_execution_status", "bridge_claimed")
-      .in("pair", bridgePairs);
-
-    const filledCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
-    const { count: filledCount } = await supabase
-      .from("signals")
-      .select("id", { count: "exact", head: true })
-      .eq("metaapi_execution_status", "filled")
-      .gte("executed_at", filledCutoff);
-    const { count: claimedCount } = await supabase
-      .from("signals")
-      .select("id", { count: "exact", head: true })
-      .eq("metaapi_execution_status", "bridge_claimed");
-    const activeCount = (filledCount ?? 0) + (claimedCount ?? 0);
-    const roomForMore = activeCount < maxTrades;
-
-    const freshClaimed: any[] = [];
-    if (roomForMore && scanningActive) {
-      const { data: candidates } = await supabase
-        .from("signals")
-        .select("id, pair, direction, order_type, entry, stop_loss, tp2, confidence, rr, setup")
-        .in("pair", bridgePairs)
-        .eq("metaapi_execution_status", "none")
-        .gte("created_at", expiryCutoff)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      for (const s of (candidates ?? []) as any[]) {
-        if (Number(s.confidence) < minConf || Number(s.rr) < minRR) continue;
-        if (pairConfig[String(s.pair)] === false) continue;
-        const setupComponents = String(s.setup ?? "")
-          .split("+").map((x: string) => x.split("(")[0].trim()).filter(Boolean);
-        if (!setupComponents.every((comp: string) => !isComponentDisabledForPair(setupConfig, String(s.pair), comp))) continue;
-
-        const { data: claimedRow, error } = await supabase
-          .from("signals")
-          .update({
-            metaapi_execution_status: "bridge_claimed",
-            metaapi_execution_channel: "bridge",
-            bridge_claimed_at: new Date().toISOString(),
-          })
-          .eq("id", s.id)
-          .eq("metaapi_execution_status", "none")
-          .select("id, pair, direction, order_type, entry, stop_loss, tp2")
-          .maybeSingle();
-        if (!error && claimedRow) freshClaimed.push(claimedRow);
+    // Lazy import supabase client to avoid module-load crashes
+    let createClient: any;
+    try {
+      const mod = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
+      createClient = (mod as any).createClient ?? (mod as any).default?.createClient;
+      if (!createClient) {
+        throw new Error("createClient not found in supabase-js import");
       }
+    } catch (e) {
+      console.error("bridge-get-signals: failed to import supabase client", e);
+      return new Response(JSON.stringify({ code: "IMPORT_ERROR", message: "Failed to load supabase client" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const signals = [...(alreadyClaimed ?? []), ...freshClaimed];
-    return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    try {
+      // Create client with safe fallback: prefer service role, fall back to publishable/anon key if service role missing.
+      const supabase = createClient(
+        cfgSafe.url,
+        cfgSafe.serviceRole ?? cfgSafe.anon ?? ""
+      );
+
+      const { data: cfg } = await supabase
+        .from("app_settings").select("*").eq("id", "singleton").maybeSingle();
+      const c: any = cfg ?? {};
+
+      await supabase.from("app_settings")
+        .update({ bridge_last_seen: new Date().toISOString() })
+        .eq("id", "singleton");
+
+      const scanningActive = !c.paused && isWithinTradingHours(new Date(), c);
+
+      const mode = (c?.metaapi_active_mode as string | null) ?? "demo";
+      const isLive = mode === "live";
+      const isCentAccount = isLive
+        ? Boolean(c?.metaapi_is_cent_account_live)
+        : Boolean(c?.metaapi_is_cent_account);
+      const risk = {
+        risk_pct: Number(c?.metaapi_risk_per_trade_pct ?? 2),
+        min_lot: Number(c?.metaapi_min_lot ?? 0.10),
+        max_lot: Number(c?.metaapi_max_lot ?? 0.50),
+        is_cent_account: isCentAccount,
+      };
+
+      if (!c.metaapi_auto_trade) {
+        return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals: [] }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const bridgeSupportedPairs = [
+        "XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD",
+        "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD",
+      ];
+      const pairConfig = (c.pair_auto_execute ?? {}) as Record<string, boolean>;
+      const bridgePairs = bridgeSupportedPairs.filter((pair) => pairConfig[pair] !== false);
+      const minConf = Number(c.metaapi_min_confidence ?? 75);
+      const minRR = Number(c.metaapi_min_rr ?? 2);
+      const maxTrades = Number(c.metaapi_max_trades ?? 3);
+      const claimExpiryMin = Number(c.bridge_claim_expiry_min ?? 45);
+      const setupConfig = (c.setup_auto_execute ?? {}) as Record<string, boolean>;
+
+      const expiryCutoff = new Date(Date.now() - claimExpiryMin * 60_000).toISOString();
+      const { data: staleClaims } = await supabase
+        .from("signals")
+        .select("id")
+        .eq("metaapi_execution_status", "bridge_claimed")
+        .lt("bridge_claimed_at", expiryCutoff);
+      if (staleClaims && staleClaims.length > 0) {
+        await supabase.from("signals").update({
+          metaapi_execution_status: "failed",
+          metaapi_execution_error: `Bridge claim expired after ${claimExpiryMin}min — price never reached entry zone.`,
+          status: "expired",
+          paper_status: "watching",
+        }).in("id", staleClaims.map((r: any) => r.id));
+      }
+
+      const { data: alreadyClaimed } = await supabase
+        .from("signals")
+        .select("id, pair, direction, order_type, entry, stop_loss, tp2")
+        .eq("metaapi_execution_status", "bridge_claimed")
+        .in("pair", bridgePairs);
+
+      const filledCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
+      const { count: filledCount } = await supabase
+        .from("signals")
+        .select("id", { count: "exact", head: true })
+        .eq("metaapi_execution_status", "filled")
+        .gte("executed_at", filledCutoff);
+      const { count: claimedCount } = await supabase
+        .from("signals")
+        .select("id", { count: "exact", head: true })
+        .eq("metaapi_execution_status", "bridge_claimed");
+      const activeCount = (filledCount ?? 0) + (claimedCount ?? 0);
+      const roomForMore = activeCount < maxTrades;
+
+      const freshClaimed: any[] = [];
+      if (roomForMore && scanningActive) {
+        const { data: candidates } = await supabase
+          .from("signals")
+          .select("id, pair, direction, order_type, entry, stop_loss, tp2, confidence, rr, setup")
+          .in("pair", bridgePairs)
+          .eq("metaapi_execution_status", "none")
+          .gte("created_at", expiryCutoff)
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        for (const s of (candidates ?? []) as any[]) {
+          if (Number(s.confidence) < minConf || Number(s.rr) < minRR) continue;
+          if (pairConfig[String(s.pair)] === false) continue;
+          const setupComponents = String(s.setup ?? "")
+            .split("+").map((x: string) => x.split("(")[0].trim()).filter(Boolean);
+          if (!setupComponents.every((comp: string) => !isComponentDisabledForPair(setupConfig, String(s.pair), comp))) continue;
+
+          const { data: claimedRow, error } = await supabase
+            .from("signals")
+            .update({
+              metaapi_execution_status: "bridge_claimed",
+              metaapi_execution_channel: "bridge",
+              bridge_claimed_at: new Date().toISOString(),
+            })
+            .eq("id", s.id)
+            .eq("metaapi_execution_status", "none")
+            .select("id, pair, direction, order_type, entry, stop_loss, tp2")
+            .maybeSingle();
+          if (!error && claimedRow) freshClaimed.push(claimedRow);
+        }
+      }
+
+      const signals = [...(alreadyClaimed ?? []), ...freshClaimed];
+      return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      console.error("bridge-get-signals runtime error", e);
+      return safeError("internal error fetching bridge signals", 500);
+    }
+  } catch (outerErr) {
+    // Any unexpected error in the handler bootstrap should return JSON rather than 503
+    console.error("bridge-get-signals bootstrap error", outerErr);
+    return new Response(JSON.stringify({ code: "BOOTSTRAP_ERROR", message: String(outerErr) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
     });
-  } catch (e) {
-    console.error("bridge-get-signals error", e);
-    return safeError("internal error fetching bridge signals", 500);
   }
 });
