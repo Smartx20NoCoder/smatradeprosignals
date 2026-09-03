@@ -1,119 +1,48 @@
+# Restore ScalpEdge Signal Generation
 
-## MetaApi Auto-Execution Integration
+## Goal
+Restore normal signal generation with the smallest safe changes and minimal API-credit usage, while preserving broker-risk and duplicate-signal protections.
 
-Hybrid architecture: server fires orders via REST when qualifying signals are saved (works 24/7), browser opens MetaApi WebSocket when the tab is open to show live connection status and position updates.
+## Verified Current State
+- The scheduled scanner is running every 5 minutes and completes successfully.
+- Fresh candle data is being fetched through Key 3; no key is marked exhausted and recent scans have no backend errors.
+- The last saved signal was on August 31; zero signals were saved on September 1–3.
+- Current settings allow only XAU/USD, BTC/USD, and GBP/USD; the other 7 configured instruments are disabled before analysis.
+- Recent scans report zero qualified candidates, with checks ending as either “no pattern” or another strategy filter.
+- The saved bridge claim value is already 45 minutes, but the database column and frontend initial-state defaults remain 20.
 
-### 1. Database (migration)
+## Implementation
+1. **Run one controlled diagnostic scan**
+   - Use a single full/test scan rather than repeated scans.
+   - Capture per-pair strategy reasons and identify whether candle shape, ADX, strategy-specific conditions, or pair configuration accounts for the zero-candidate result.
+   - Do not weaken confidence, RR, stop-distance, news, or deduplication gates without evidence from this result.
 
-Extend `app_settings` with MetaApi configuration:
-- `metaapi_account_id` text
-- `metaapi_region` text default `'new-york'`
-- `metaapi_auto_trade` boolean default false
-- `metaapi_min_confidence` int default 75
-- `metaapi_min_rr` numeric default 2.0
-- `metaapi_fixed_lot` numeric default 0.01
-- `metaapi_connected_at` timestamptz (last successful broker ping)
+2. **Restore intended scan coverage**
+   - Correct the pair gate so enabled scanning coverage matches the intended active instrument set.
+   - Keep deliberately disabled pairs disabled; do not confuse “scan this pair” with “auto-execute this pair.” If the existing `pair_auto_execute` setting is meant only for execution, stop using it to suppress market analysis.
+   - Preserve market-hours handling and 24/7 crypto behavior.
 
-Extend `signals` with execution tracking:
-- `metaapi_position_id` text
-- `metaapi_order_id` text
-- `metaapi_execution_status` text (`none` | `pending` | `filled` | `failed` | `closed`)
-- `metaapi_execution_error` text
-- `metaapi_filled_price` numeric
-- `metaapi_pnl` numeric
+3. **Fix only the confirmed blocking strategy condition**
+   - Adjust the specific regression revealed by the diagnostic scan.
+   - Preserve broker error-130 filtering, news blackout, minimum RR/confidence, active-trade limits, and 90-minute/candle deduplication.
+   - Add a concise diagnostic reason where a broad “no pattern” result currently hides the blocking condition, so future outages are visible in Health/Edge without another code audit.
 
-The MetaApi auth token is sensitive → stored as a Supabase secret `METAAPI_TOKEN`, not in the DB.
+4. **Finish the 45-minute claim-expiry fix**
+   - Change the database column default from 20 to 45.
+   - Change the frontend initial value from 20 to 45 and keep the loaded database value authoritative.
+   - Retain the current valid save range and verify a changed value survives reload.
 
-### 2. Secret
+5. **Deploy only what changed**
+   - Redeploy `scan-signals` if scanner logic changes.
+   - Redeploy `update-settings` only if its implementation changes; its current 5–1440 validation already accepts 45.
+   - Let the frontend update through the normal Lovable/GitHub sync path. Keep GitHub Actions as CI verification only; do not add an unsupported direct-hosting deploy command.
 
-Add `METAAPI_TOKEN` via the secret tool.
+6. **Production verification with a credit cap**
+   - Confirm the next scheduled run scans the intended pairs, uses fresh/cache data correctly, and reports meaningful strategy outcomes without errors.
+   - Run at most one additional manual scan if scheduled-run evidence is insufficient.
+   - Verify generated candidates can be saved and become bridge-claimable; do not create a fake live trade solely to prove signal generation.
 
-### 3. Edge functions (REST against MetaApi Cloud)
-
-All call `https://mt-client-api-v1.{region}.agiliumtrade.ai` with `auth-token` header.
-
-**`metaapi-execute`** (POST `{ signal_id }`)
-- Auth via `x-fn-secret: chelseafc`.
-- Loads signal + app_settings; rejects if auto-trade off, account/token missing, or thresholds unmet.
-- Computes side (`BUY`/`SELL`), volume = `metaapi_fixed_lot`, symbol from pair (`EURUSD` etc).
-- Calls `POST /users/current/accounts/{id}/trade` with `ORDER_TYPE_BUY` or `ORDER_TYPE_SELL`, `stopLoss`, `takeProfit` = tp2, `comment` = signal id.
-- Persists `metaapi_position_id`, `metaapi_order_id`, `metaapi_filled_price`, `metaapi_execution_status='filled'`, `executed_at`. On error writes `failed` + error text. Never throws to caller.
-
-**`metaapi-sync`** (POST, no body)
-- Auth via `x-fn-secret`.
-- Fetches open positions + last 50 history deals from MetaApi.
-- For each signal where `metaapi_position_id IS NOT NULL AND status='pending'`:
-  - If position no longer open → look up close reason from history deals (SL / TP / manual), update `status` (`tp1`/`tp2`/`loss`/`manual`), `outcome_r`, `closed_at`, `metaapi_pnl`, `metaapi_execution_status='closed'`.
-  - Else update `metaapi_pnl` only.
-- Returns counts; safe to call frequently.
-
-**`metaapi-ping`** (GET)
-- Auth via `x-fn-secret`.
-- Calls `GET /users/current/accounts/{id}` to verify token + account. Writes `metaapi_connected_at` on success. Returns `{ ok, account: { state, connectionStatus, balance, equity } }`.
-
-### 4. Hook into signal creation
-
-In `scan-signals/index.ts` after a signal row is inserted and passes filters:
-- If `metaapi_auto_trade && confidence >= metaapi_min_confidence && rr >= metaapi_min_rr`, fire-and-forget `fetch(metaapi-execute, { signal_id })` (no await blocking the scan loop, but log result to `scan_runs.errors` on failure).
-
-Same hook is **not** added to manual signal saves unless the user manually flags them; existing manual flows stay click-driven.
-
-### 5. Cron
-
-Add pg_cron schedule: `metaapi-sync` every 1 minute during trading hours (reuses existing cron secret pattern).
-
-### 6. Browser (live status + WS)
-
-Install `metaapi.cloud-sdk` (browser-compatible streaming SDK).
-
-New module `src/lib/metaapi-client.ts`:
-- `connectMetaApi({ token, accountId, region })` returns a singleton `MetatraderAccount` + `StreamingConnection`.
-- Exposes `subscribe(onUpdate)` that emits `{ connectionStatus, positions[], accountInfo }`.
-- Gracefully handles missing token (returns null) and reconnects on disconnect.
-
-The token is fetched from a new tiny edge function `get-metaapi-token` (auth via `x-fn-secret: chelseafc`) so it isn't committed in code. The browser caches it in memory only (never localStorage).
-
-### 7. Settings UI (in `src/routes/index.tsx`)
-
-New "MetaApi Auto-Trading" panel near the existing TwelveData key panel:
-- Account ID input
-- Region select (new-york / london / singapore)
-- Token input (write-only, "Save" button calls `update-metaapi-token` edge fn which sets the secret via Supabase admin API — actually we'll store as plain row in a new privileged table because the secrets API isn't writable from edge functions; instead the user sets `METAAPI_TOKEN` once via the Lovable secret prompt and the input is read-only "Configured ✓"). **Decision: token is set once via `add_secret` tool prompt; UI shows status only.**
-- Auto-trade toggle
-- Min confidence (slider 50–95)
-- Min RR (slider 1.0–5.0)
-- Fixed lot (number, 0.01–10, step 0.01)
-- Connection badge (green "Connected to {broker}" / amber "Demo • Connected" / red "Disconnected"): driven by browser WS subscription.
-- "Test connection" button → calls `metaapi-ping`.
-
-### 8. Signal cards
-
-Show execution badge when `metaapi_position_id` exists:
-- `EXECUTED @ {filled_price}` with live PnL pill from WS.
-- `FAILED` (with tooltip showing `metaapi_execution_error`) when status = failed.
-
-### 9. Demo-first safety
-
-- All flows work identically for demo and live accounts (MetaApi handles this server-side based on the broker account).
-- Add a visible "DEMO MODE" indicator in the panel header pulled from the account state returned by `metaapi-ping`.
-- Auto-trade defaults to **off** even after configuring credentials.
-
-### Technical notes
-- MetaApi REST trade endpoint: `POST /users/current/accounts/{accountId}/trade` with payload `{ actionType: 'ORDER_TYPE_BUY', symbol, volume, stopLoss, takeProfit, comment, clientId }`.
-- Region routing: base URL must match the region the account was provisioned in.
-- WebSocket SDK runs only in the browser (Cloudflare Workers can't hold persistent WS to MetaApi).
-- All edge functions reuse the `chelseafc` shared secret pattern already used by `update-settings`.
-
-### Files touched
-- new migration (app_settings + signals columns)
-- new `supabase/functions/metaapi-execute/index.ts`
-- new `supabase/functions/metaapi-sync/index.ts`
-- new `supabase/functions/metaapi-ping/index.ts`
-- new `supabase/functions/get-metaapi-token/index.ts`
-- edit `supabase/functions/scan-signals/index.ts` (post-insert trigger)
-- new `src/lib/metaapi-client.ts`
-- edit `src/routes/index.tsx` (settings panel, signal card badge, connection status)
-- add secret `METAAPI_TOKEN`
-- add pg_cron entry for `metaapi-sync`
-
-Confirm and I'll build it.
+## Technical Notes
+- Prefer cached candles and one targeted diagnostic invocation to limit TwelveData usage.
+- A lack of a market setup can legitimately produce zero signals; success means the engine analyzes the intended universe and exposes exact gate outcomes, not that it fabricates a trade.
+- The existing CI workflow already installs, formats-checks, lints, type-checks, and builds on GitHub pushes; Lovable publishing remains managed by the platform.
