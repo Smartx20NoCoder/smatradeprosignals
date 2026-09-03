@@ -21,7 +21,19 @@ import {
 } from "recharts";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
-export const Route = createFileRoute("/")({ component: ScalpEdge });
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "ScalpEdge Forex Scalping Signals" },
+      { name: "description", content: "Monitor live forex and crypto scalping signals, execution health, and scan-engine diagnostics." },
+      { property: "og:title", content: "ScalpEdge Forex Scalping Signals" },
+      { property: "og:description", content: "Monitor live forex and crypto scalping signals, execution health, and scan-engine diagnostics." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
+  component: ScalpEdge,
+});
 
 type Signal = {
   id: string;
@@ -295,7 +307,7 @@ function ScalpEdge() {
     scan_interval_minutes: 15,
     veritas_sl_mult: 1.5, veritas_tp_mult: 2.5, veritas_min_hurst: 0.55,
     veritas_min_snr: 40, veritas_min_conf: 72, veritas_min_rr: 1.60,
-    bridge_claim_expiry_min: 20,
+    bridge_claim_expiry_min: 45,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 

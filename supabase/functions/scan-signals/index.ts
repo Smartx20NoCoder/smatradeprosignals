@@ -335,7 +335,10 @@ async function fetchCandles(
   // 2. Build URL with currently active key
   const fetchKey: KeyIdx = state.active;
   const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
+  // Twelve Data otherwise returns each instrument in its exchange timezone.
+  // Treating those wall-clock values as UTC put FX/gold candles hours in the
+  // future, breaking candle fingerprints and trade-resolution ordering.
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&timezone=UTC&apikey=${primaryKey}`;
   
   let r: Response;
   try {
@@ -429,14 +432,17 @@ async function fetchCandles(
   }
 
   // 5. Format & Merge Cached Data
+  const maxCandleTime = Date.now() + 5 * 60_000;
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
     o: +v.open, h: +v.high, l: +v.low, c: +v.close,
     v: v.volume ? +v.volume : undefined,
-  })).reverse();
+  })).filter((c: Candle) => Number.isFinite(c.t) && c.t <= maxCandleTime).reverse();
 
   if (cached) {
-    const prev = cached.candles as Candle[];
+    // Discard legacy future-dated cache rows produced before timezone=UTC was
+    // explicit, then merge only chronologically valid candles.
+    const prev = (cached.candles as Candle[]).filter((c) => Number.isFinite(c.t) && c.t <= maxCandleTime);
     const merged = [...prev];
     const seen = new Set(merged.map((x) => x.t));
     for (const f of fresh) {
@@ -1877,7 +1883,9 @@ type ActiveSettings = {
   metaapi_is_cent_account_live: boolean;
 };
 
-// Core pairs always scanned regardless of pair_auto_execute setting.
+// Core pairs always scan regardless of the auto-execution toggle. That toggle
+// controls broker routing only; using it as a market-data gate silently reduced
+// the strategy universe from seven core instruments to three.
 const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
@@ -2107,15 +2115,13 @@ async function runScanJob(
       console.warn("key threshold rotation check failed", e);
     }
 
-    // Filter pair list for weekend / Friday-late: only BTC trades.
-    // Filter to pairs enabled in auto-execute config (core pairs always scan).
+    // Filter pair list for market hours. Core instruments are always analyzed;
+    // secondary instruments remain opt-in to conserve API credits.
     const autoCfg = settings.pair_auto_execute ?? {};
     const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
-    // pair_auto_execute is now a TRUE gate: disabled pairs are skipped entirely,
-    // before any candle fetch, regardless of the global auto_trade toggle.
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
-      .filter((p) => autoCfg[p] !== false)
+      .filter((p) => CORE_PAIRS.has(p) || autoCfg[p] !== false)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
@@ -2146,8 +2152,8 @@ async function runScanJob(
     }> = [];
 
     for (const p of skippedPairs) {
-      const reason = autoCfg[p] === false
-        ? "Pair disabled in Settings (pair_auto_execute)"
+      const reason = autoCfg[p] === false && !CORE_PAIRS.has(p)
+        ? "Secondary pair disabled in Settings"
         : "Market closed (weekend / Fri 22:00+ UTC)";
       report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason }] });
       emit?.({ type: "pair_done", pair: p, status: "done", message: `Skipped: ${reason}` });
