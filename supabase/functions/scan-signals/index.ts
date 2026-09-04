@@ -1720,9 +1720,6 @@ function qualifyAndScore(
   let conf = emp.pct;
   if (news) conf -= 15; // genuine external risk factor, independent of the setup's own historical rate
   conf = Math.max(1, Math.min(99, conf));
-  if (conf < 55) {
-    return { signal: null, reason: `Confidence too low (${conf}%, from ${emp.n} historical ${pair} ${family} trades${emp.n < MIN_SAMPLE ? " — thin sample, still shrunk toward pair average" : ""})` };
-  }
 
   return {
     signal: {

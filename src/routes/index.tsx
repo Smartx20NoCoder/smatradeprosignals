@@ -1696,7 +1696,7 @@ function ScanEngineControlsPanel({
 
   type FieldDef = { key: ScanGateKey; label: string; min: number; max: number; step: number; hint?: string };
   const group1: FieldDef[] = [
-    { key: "metaapi_min_confidence", label: "MIN CONFIDENCE (%)", min: 50, max: 99, step: 1,    hint: `Signals below this % are never saved or alerted. Currently: ${scanGates.metaapi_min_confidence}%` },
+    { key: "metaapi_min_confidence", label: "MIN CONFIDENCE (%)", min: 5, max: 99, step: 1,    hint: `Signals below this % are never saved or alerted. Currently: ${scanGates.metaapi_min_confidence}%` },
     { key: "metaapi_min_rr",         label: "MIN R:R (GLOBAL)",   min: 1,  max: 4,  step: 0.05, hint: "VERITAS uses its own R:R gate below. All other setups use this value." },
     { key: "metaapi_min_adx",        label: "MIN ADX (TREND)",    min: 0,  max: 50, step: 1,    hint: "EMA Pullback + BOS Retest skip when 15M ADX is below this. 0 = disabled." },
     { key: "metaapi_trail_lock_r",   label: "TRAIL LOCK-IN (R)",  min: 0,  max: 1,  step: 0.05, hint: "After TP1 hit, Order B SL moves to entry + this fraction of 1R. 0 = breakeven only." },
@@ -2127,8 +2127,8 @@ function MetaApiPanel({
       <div className="grid grid-cols-3 gap-2">
         <label className="text-xs">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Min Confidence (%)</div>
-          <input type="number" min={50} max={99} step={1} value={appSettings.metaapi_min_confidence}
-            onChange={(e) => saveAppSettings({ metaapi_min_confidence: Math.max(50, Math.min(99, Number(e.target.value) || 75)) })}
+          <input type="number" min={5} max={99} step={1} value={appSettings.metaapi_min_confidence}
+            onChange={(e) => saveAppSettings({ metaapi_min_confidence: Math.max(5, Math.min(99, Number(e.target.value) || 35)) })}
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
         </label>
         <label className="text-xs">
