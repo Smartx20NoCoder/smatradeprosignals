@@ -58,7 +58,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_account_id" && v !== null && (typeof v !== "string" || v.length > 200)) continue;
     if (k === "metaapi_region" && (typeof v !== "string" || !["new-york", "london", "singapore"].includes(v))) continue;
     if (k === "metaapi_auto_trade" && typeof v !== "boolean") continue;
-    if (k === "metaapi_min_confidence" && (typeof v !== "number" || v < 50 || v > 99)) continue;
+    if (k === "metaapi_min_confidence" && (typeof v !== "number" || v < 5 || v > 99)) continue;
     if (k === "metaapi_min_rr" && (typeof v !== "number" || v < 1 || v > 10)) continue;
     if (k === "metaapi_fixed_lot" && (typeof v !== "number" || v < 0.01 || v > 100)) continue;
     if (k === "metaapi_symbol_suffix" && (typeof v !== "string" || v.length > 16 || !/^[A-Za-z0-9._-]*$/.test(v))) continue;
