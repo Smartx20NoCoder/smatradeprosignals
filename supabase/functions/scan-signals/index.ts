@@ -4,15 +4,8 @@
 // with an ~7.8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 //
-// v3.1: Fixed a leak where a disabled legacy setup (setup_auto_execute[x]=false)
-// could still ride along inside a merged compound signal — e.g. disabling
-// "Session Range Break" didn't stop "EMA Pullback + Session Range Break" from
-// generating, alerting, and saving as a fully-qualified signal, because the
-// merge step's paper_only check only ever inspected the FIRST component of a
-// combined setup name. Disabled-setup signals now go into a separate
-// legacyPaperOnly bucket that never enters mergeFamily(), so a disabled
-// setup can no longer combine with — or silently ride inside — an enabled
-// one. It's still individually paper-tracked on its own, same as before.
+// v3.1: Disabled legacy setups are kept out of mergeFamily(), so a disabled
+// setup cannot combine with — or silently ride inside — an enabled one.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
 
@@ -35,9 +28,9 @@ const PAIRS = [
   "AUD/JPY",
   "AUD/USD",
 ];
-// Disabled setups — kept in code but filtered out of signal generation.
-// Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
-const DISABLED_SETUPS = new Set<string>();
+// Retired setups are never evaluated or emitted. This code gate is independent
+// of editable setup_auto_execute settings and protects old configuration rows.
+const RETIRED_SETUPS = new Set<string>(["Session Range Break"]);
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -539,40 +532,6 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
     if (risk <= 0) return null;
     return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Short",
       entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
-  }
-  return null;
-}
-
-function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
-  if (c5.length < 30) return null;
-  const a = atr(c5); if (a === 0) return null;
-  const now = new Date(), hUTC = now.getUTCHours();
-  // 30-minute session range windows: London 07:00–07:30 UTC, NY 13:30–14:00 UTC.
-  let rStartMin: number | null = null;
-  if (hUTC >= 8 && hUTC < 11) rStartMin = 7 * 60;            // London: 07:00–07:30
-  else if (hUTC >= 14 && hUTC < 17) rStartMin = 13 * 60 + 30; // NY: 13:30–14:00
-  if (rStartMin === null) return null;
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const rStart = today.getTime() + rStartMin * 60_000, rEnd = rStart + 30 * 60_000;
-  const range = c5.filter(x => x.t >= rStart && x.t < rEnd);
-  if (range.length < 4) return null;
-  const rh = Math.max(...range.map(x => x.h)), rl = Math.min(...range.map(x => x.l));
-  if (rh - rl > a * 3) return null;
-  const after = c5.filter(x => x.t >= rEnd); if (!after.length) return null;
-  const last = after.at(-1)!;
-  const ct = new Date(last.t).toISOString();
-  if (Math.abs(last.c - last.o) < a * 0.6) return null;
-  if (last.c > rh) {
-    const entry = rh, sl = rl, risk = entry - sl;
-    if (risk <= 0 || risk > a * 4) return null;
-    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Long",
-      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
-  }
-  if (last.c < rl) {
-    const entry = rl, sl = rh, risk = sl - entry;
-    if (risk <= 0 || risk > a * 4) return null;
-    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Short",
-      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
   }
   return null;
 }
@@ -1776,7 +1735,6 @@ function setupFamilyOf(setupName: string): string {
   if (base.startsWith("PRISM")) return "PRISM";
   if (base === "EMA Pullback") return "EMA Pullback";
   if (base === "BOS Retest") return "BOS Retest";
-  if (base === "Session Range Break") return "Session Range Break";
   if (base === "SMC OB/FVG" || base === "OB+FVG" || base === "Order Block") return "SMC OB/FVG";
   if (base === "CHOCH") return "CHOCH";
   return base;
@@ -2258,15 +2216,7 @@ async function runScanJob(
     const prismCandidates:   Signal[] = [];
     const legacyCandidates:  Signal[] = [];
     // Disabled-setup signals land here instead of legacyCandidates so they can
-    // NEVER combine with an enabled setup via mergeFamily(). Previously a
-    // disabled setup (e.g. "Session Range Break") still went into the same
-    // pool as everything else, so if it fired on the same pair+direction as
-    // an enabled setup (e.g. "EMA Pullback") in the same scan cycle, they'd
-    // merge into "EMA Pullback + Session Range Break" — and since
-    // setupFamilyOf() on a merged name only checks the FIRST component, the
-    // disabled half rode along undetected: full alert, full save, as if
-    // 100% enabled. Keeping them fully separate here closes that gap while
-    // still preserving standalone paper-tracking for the disabled setup.
+    // never combine with an enabled setup via mergeFamily().
     const legacyPaperOnly:   Signal[] = [];
 
     for (const pair of allowedPairs) {
@@ -2287,12 +2237,11 @@ async function runScanJob(
       const ccys         = pairCurrencies(pair);
       const hits         = blackoutHits(events, ccys, nowDate);
 
-      // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
+      // ── Legacy setups (EMA Pullback, BOS Retest, SMC, CHOCH) ──
       const adx15 = calcADX(d.c15);
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
-        ["Session Range Break", sessionRangeBreak(pair, d.c5)],
         ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH",               choch(pair, d.c5, d.c15)],
       ];
@@ -2307,7 +2256,7 @@ async function runScanJob(
             reason: `ADX ${adx15} < ${minADX} — ranging market` });
           continue;
         }
-        if (DISABLED_SETUPS.has(raw.setup)) {
+        if (RETIRED_SETUPS.has(raw.setup)) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
@@ -2343,7 +2292,7 @@ async function runScanJob(
       }
 
       // ── VERITAS (isolated — no merge with legacy) ──
-      if (!DISABLED_SETUPS.has("VERITAS")) {
+      if (!RETIRED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
         const veritas = veritasSetup(
           pair, d.c5, d.c15, c1m, ssNow,
