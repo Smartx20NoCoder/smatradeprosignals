@@ -2216,15 +2216,7 @@ async function runScanJob(
     const prismCandidates:   Signal[] = [];
     const legacyCandidates:  Signal[] = [];
     // Disabled-setup signals land here instead of legacyCandidates so they can
-    // NEVER combine with an enabled setup via mergeFamily(). Previously a
-    // disabled setup (e.g. "Session Range Break") still went into the same
-    // pool as everything else, so if it fired on the same pair+direction as
-    // an enabled setup (e.g. "EMA Pullback") in the same scan cycle, they'd
-    // merge into "EMA Pullback + Session Range Break" — and since
-    // setupFamilyOf() on a merged name only checks the FIRST component, the
-    // disabled half rode along undetected: full alert, full save, as if
-    // 100% enabled. Keeping them fully separate here closes that gap while
-    // still preserving standalone paper-tracking for the disabled setup.
+    // never combine with an enabled setup via mergeFamily().
     const legacyPaperOnly:   Signal[] = [];
 
     for (const pair of allowedPairs) {
@@ -2245,12 +2237,11 @@ async function runScanJob(
       const ccys         = pairCurrencies(pair);
       const hits         = blackoutHits(events, ccys, nowDate);
 
-      // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
+      // ── Legacy setups (EMA Pullback, BOS Retest, SMC, CHOCH) ──
       const adx15 = calcADX(d.c15);
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
-        ["Session Range Break", sessionRangeBreak(pair, d.c5)],
         ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH",               choch(pair, d.c5, d.c15)],
       ];
@@ -2265,7 +2256,7 @@ async function runScanJob(
             reason: `ADX ${adx15} < ${minADX} — ranging market` });
           continue;
         }
-        if (DISABLED_SETUPS.has(raw.setup)) {
+        if (RETIRED_SETUPS.has(raw.setup)) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
@@ -2301,7 +2292,7 @@ async function runScanJob(
       }
 
       // ── VERITAS (isolated — no merge with legacy) ──
-      if (!DISABLED_SETUPS.has("VERITAS")) {
+      if (!RETIRED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
         const veritas = veritasSetup(
           pair, d.c5, d.c15, c1m, ssNow,
