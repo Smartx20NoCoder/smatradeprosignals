@@ -536,40 +536,6 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   return null;
 }
 
-function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
-  if (c5.length < 30) return null;
-  const a = atr(c5); if (a === 0) return null;
-  const now = new Date(), hUTC = now.getUTCHours();
-  // 30-minute session range windows: London 07:00–07:30 UTC, NY 13:30–14:00 UTC.
-  let rStartMin: number | null = null;
-  if (hUTC >= 8 && hUTC < 11) rStartMin = 7 * 60;            // London: 07:00–07:30
-  else if (hUTC >= 14 && hUTC < 17) rStartMin = 13 * 60 + 30; // NY: 13:30–14:00
-  if (rStartMin === null) return null;
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const rStart = today.getTime() + rStartMin * 60_000, rEnd = rStart + 30 * 60_000;
-  const range = c5.filter(x => x.t >= rStart && x.t < rEnd);
-  if (range.length < 4) return null;
-  const rh = Math.max(...range.map(x => x.h)), rl = Math.min(...range.map(x => x.l));
-  if (rh - rl > a * 3) return null;
-  const after = c5.filter(x => x.t >= rEnd); if (!after.length) return null;
-  const last = after.at(-1)!;
-  const ct = new Date(last.t).toISOString();
-  if (Math.abs(last.c - last.o) < a * 0.6) return null;
-  if (last.c > rh) {
-    const entry = rh, sl = rl, risk = entry - sl;
-    if (risk <= 0 || risk > a * 4) return null;
-    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Long",
-      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
-  }
-  if (last.c < rl) {
-    const entry = rl, sl = rh, risk = sl - entry;
-    if (risk <= 0 || risk > a * 4) return null;
-    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Short",
-      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
-  }
-  return null;
-}
-
 function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   if (c5.length < 5 || c15.length < 40) return null;
   const a15 = atr(c15); if (a15 === 0) return null;
@@ -1769,7 +1735,6 @@ function setupFamilyOf(setupName: string): string {
   if (base.startsWith("PRISM")) return "PRISM";
   if (base === "EMA Pullback") return "EMA Pullback";
   if (base === "BOS Retest") return "BOS Retest";
-  if (base === "Session Range Break") return "Session Range Break";
   if (base === "SMC OB/FVG" || base === "OB+FVG" || base === "Order Block") return "SMC OB/FVG";
   if (base === "CHOCH") return "CHOCH";
   return base;
