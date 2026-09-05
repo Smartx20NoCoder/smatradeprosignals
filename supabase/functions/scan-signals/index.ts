@@ -4,15 +4,8 @@
 // with an ~7.8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 //
-// v3.1: Fixed a leak where a disabled legacy setup (setup_auto_execute[x]=false)
-// could still ride along inside a merged compound signal — e.g. disabling
-// "Session Range Break" didn't stop "EMA Pullback + Session Range Break" from
-// generating, alerting, and saving as a fully-qualified signal, because the
-// merge step's paper_only check only ever inspected the FIRST component of a
-// combined setup name. Disabled-setup signals now go into a separate
-// legacyPaperOnly bucket that never enters mergeFamily(), so a disabled
-// setup can no longer combine with — or silently ride inside — an enabled
-// one. It's still individually paper-tracked on its own, same as before.
+// v3.1: Disabled legacy setups are kept out of mergeFamily(), so a disabled
+// setup cannot combine with — or silently ride inside — an enabled one.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
 
@@ -35,9 +28,9 @@ const PAIRS = [
   "AUD/JPY",
   "AUD/USD",
 ];
-// Disabled setups — kept in code but filtered out of signal generation.
-// Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
-const DISABLED_SETUPS = new Set<string>();
+// Retired setups are never evaluated or emitted. This code gate is independent
+// of editable setup_auto_execute settings and protects old configuration rows.
+const RETIRED_SETUPS = new Set<string>(["Session Range Break"]);
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
