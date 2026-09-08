@@ -6,6 +6,19 @@
 //
 // v3.1: Disabled legacy setups are kept out of mergeFamily(), so a disabled
 // setup cannot combine with — or silently ride inside — an enabled one.
+//
+// v3.2: Reverted pair scanning to strictly follow pair_auto_execute again.
+// The CORE_PAIRS override (added to fix a confidence-gate deadlock) had a side
+// effect: pairs the user disabled (e.g. GBP/JPY, USD/JPY, ETH/USD, XRP/USD)
+// were still scanned and could generate real, alertable signals — and the
+// alert-suppression logic only ever checked setup_auto_execute, never
+// pair_auto_execute, so those signals reached Telegram and the in-app
+// notification with no way to suppress them short of manual cleanup. Since
+// the actual deadlock cause was the confidence threshold (fixed separately in
+// app_settings), not the scan breadth, pair_auto_execute can safely go back
+// to being the single source of truth for which pairs get scanned at all.
+// CORE_PAIRS is left declared below (unused) rather than removed, in case
+// scan breadth for empirical-stats coverage is revisited later.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
 
@@ -1838,9 +1851,9 @@ type ActiveSettings = {
   metaapi_is_cent_account_live: boolean;
 };
 
-// Core pairs always scan regardless of the auto-execution toggle. That toggle
-// controls broker routing only; using it as a market-data gate silently reduced
-// the strategy universe from seven core instruments to three.
+// NOTE: no longer used by the pair filter below (see v3.2 note at top of file) —
+// pair_auto_execute alone decides what gets scanned now. Left declared, unused,
+// in case scan-breadth-for-stats is revisited later.
 const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
@@ -2023,7 +2036,7 @@ async function runScanJob(
       .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
-    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
+    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);
     const veritasMinHurst  = Number((veritasCfgRow as any)?.veritas_min_hurst  ?? 0.55);
     const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
@@ -2070,13 +2083,15 @@ async function runScanJob(
       console.warn("key threshold rotation check failed", e);
     }
 
-    // Filter pair list for market hours. Core instruments are always analyzed;
-    // secondary instruments remain opt-in to conserve API credits.
+    // Filter pair list for market hours AND pair_auto_execute. pair_auto_execute
+    // is now the single source of truth for what gets scanned at all (v3.2) —
+    // see the note at the top of this file for why the CORE_PAIRS override was
+    // removed.
     const autoCfg = settings.pair_auto_execute ?? {};
     const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
-      .filter((p) => CORE_PAIRS.has(p) || autoCfg[p] !== false)
+      .filter((p) => autoCfg[p] !== false)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
@@ -2107,8 +2122,8 @@ async function runScanJob(
     }> = [];
 
     for (const p of skippedPairs) {
-      const reason = autoCfg[p] === false && !CORE_PAIRS.has(p)
-        ? "Secondary pair disabled in Settings"
+      const reason = autoCfg[p] === false
+        ? "Pair disabled in Settings (pair_auto_execute)"
         : "Market closed (weekend / Fri 22:00+ UTC)";
       report.push({ pair: p, cached: false, checks: [{ setup: "ALL", status: "filtered", reason }] });
       emit?.({ type: "pair_done", pair: p, status: "done", message: `Skipped: ${reason}` });
