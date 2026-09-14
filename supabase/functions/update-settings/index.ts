@@ -13,7 +13,6 @@ const ALLOWED_KEYS = new Set([
   "active_td_key", "session_config",
   "key1_exhausted_at", "key2_exhausted_at", "key3_exhausted_at",
   "scan_interval_minutes",
-  // ─── ADDED TO ALLOWLIST SECURITY GATE ───
   "bridge_claim_expiry_min",
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
@@ -29,15 +28,23 @@ const ALLOWED_KEYS = new Set([
   "veritas_min_snr", "veritas_min_conf", "veritas_min_rr",
   "metaapi_min_stop_points",
   "metaapi_trail_lock_r", "metaapi_min_adx",
-  "metaapi_key_rotation_threshold",
+  "metaapi_key_rotation_threshold", "twelvedata_key_threshold",
   "twelvedata_key_1_used", "twelvedata_key_2_used", "twelvedata_key_3_used",
   "twelvedata_key_reset_date",
 ]);
 
-
 function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
-  // Coerce string numbers to actual numbers for numeric fields
-  const numericFields = ["metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct","metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot","metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot","trading_hours_start_utc","trading_hours_end_utc","active_td_key","scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst","veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points","metaapi_trail_lock_r","metaapi_min_adx","metaapi_key_rotation_threshold","twelvedata_key_1_used","twelvedata_key_2_used","twelvedata_key_3_used","bridge_claim_expiry_min"];
+  const numericFields = [
+    "metaapi_max_trades","metaapi_expiry_hours","metaapi_max_daily_loss_pct",
+    "metaapi_min_confidence","metaapi_min_rr","metaapi_fixed_lot",
+    "metaapi_risk_per_trade_pct","metaapi_min_lot","metaapi_max_lot",
+    "trading_hours_start_utc","trading_hours_end_utc","active_td_key",
+    "scan_interval_minutes","veritas_sl_mult","veritas_tp_mult","veritas_min_hurst",
+    "veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points",
+    "metaapi_trail_lock_r","metaapi_min_adx","metaapi_key_rotation_threshold",
+    "twelvedata_key_threshold","twelvedata_key_1_used","twelvedata_key_2_used",
+    "twelvedata_key_3_used","bridge_claim_expiry_min"
+  ];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
       const n = Number(patch[f]);
@@ -68,9 +75,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     }
     if (k === "metaapi_max_trades" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 50)) continue;
     if (k === "metaapi_expiry_hours" && (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 720)) continue;
-    // ─── ADDED THE PIPELINE SANITIZATION RANGE RULE DIRECTLY HERE ───
     if (k === "bridge_claim_expiry_min" && (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 1440)) continue;
-    if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     if (k === "metaapi_risk_per_trade_pct" && (typeof v !== "number" || v < 0.1 || v > 10)) continue;
     if (k === "metaapi_min_lot" && (typeof v !== "number" || v < 0.01 || v > 1)) continue;
@@ -120,7 +125,8 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "metaapi_min_stop_points" && (typeof v !== "number" || v < 0 || v > 500)) continue;
     if (k === "metaapi_trail_lock_r"    && (typeof v !== "number" || v < 0 || v > 1)) continue;
     if (k === "metaapi_min_adx"         && (typeof v !== "number" || v < 0 || v > 50)) continue;
-    if (k === "metaapi_key_rotation_threshold" && (typeof v !== "number" || !Number.isInteger(v) || v < 100 || v > 800)) continue;
+    if ((k === "metaapi_key_rotation_threshold" || k === "twelvedata_key_threshold") &&
+        (typeof v !== "number" || !Number.isInteger(v) || v < 100 || v > 800)) continue;
     if ((k === "twelvedata_key_1_used" || k === "twelvedata_key_2_used" || k === "twelvedata_key_3_used") && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100000)) continue;
     if (k === "twelvedata_key_reset_date" && (typeof v !== "string" || v.length > 32)) continue;
 
@@ -128,7 +134,6 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
   }
   return out;
 }
-
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -141,7 +146,13 @@ Deno.serve(async (req) => {
   try {
     const raw = await req.json().catch(() => ({}));
     const patch = sanitize(raw ?? {});
-    
+
+    if (Object.prototype.hasOwnProperty.call(patch, "twelvedata_key_threshold")) {
+      patch.metaapi_key_rotation_threshold = patch.twelvedata_key_threshold;
+    } else if (Object.prototype.hasOwnProperty.call(patch, "metaapi_key_rotation_threshold")) {
+      patch.twelvedata_key_threshold = patch.metaapi_key_rotation_threshold;
+    }
+
     if (Object.keys(patch).length === 0) {
       return new Response(JSON.stringify({ error: "No valid fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
