@@ -747,9 +747,14 @@ function ScalpEdge() {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="text-left text-2xl font-bold tracking-tight"
+              title="Refresh page"
+            >
               <span className="text-primary">▲</span> SCALPEDGE
-            </h1>
+            </button>
             <p className="text-xs text-muted-foreground mt-1">
               FX + GOLD SCALPING TERMINAL · 5M/15M · 1H BIAS · SMC + MFI
             </p>
