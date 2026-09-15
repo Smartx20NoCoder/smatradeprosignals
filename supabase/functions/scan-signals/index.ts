@@ -429,7 +429,11 @@ async function fetchCandles(
 
   // Check for normal malformed payloads
   if (!j.values || !Array.isArray(j.values)) {
-    console.error("TwelveData error", pair, tf.label, r.status, j);
+    console.error("TwelveData malformed/error payload", pair, tf.label, r.status, j?.message ?? j);
+    if (cached) {
+      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Malformed TwelveData response (${r.status}) — using last cached candles` });
+      return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
+    }
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
     const err = new Error(`Failed to parse candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 1;
@@ -503,14 +507,14 @@ function emaPullback(pair: string, c5: Candle[], c15: Candle[]): RawSignal | nul
   if (trendUp && touched && last.c > last.o && last.c > prev.h) {
     const entry = (e9 + e21v) / 2, sl = Math.min(e21v, last.l) - a15 * 0.3;
     const risk = entry - sl; if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Long",
-      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
+    return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Long",
+      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
   }
   if (trendDown && touched && last.c < last.o && last.c < prev.l) {
     const entry = (e9 + e21v) / 2, sl = Math.max(e21v, last.h) + a15 * 0.3;
     const risk = sl - entry; if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Short",
-      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
+    return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Short",
+      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
   }
   return null;
 }
@@ -536,15 +540,15 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
     if (!(last.l <= sh + a * 0.2 && last.c > sh)) return null;
     const entry = sh, slp = sh - a15 * 0.8, risk = entry - slp;
     if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Long",
-      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
+    return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Long",
+      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
   }
   if (e21 < e50 && recent.some(x => x.c < sl)) {
     if (!(last.h >= sl - a * 0.2 && last.c < sl)) return null;
     const entry = sl, slp = sl + a15 * 0.8, risk = slp - entry;
     if (risk <= 0) return null;
-    return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Short",
-      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
+    return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Short",
+      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
   }
   return null;
 }
@@ -874,7 +878,8 @@ function veritasSetup(
   if (spread5m > maxSpread) return null;
 
   const atrVal             = calcATR14(c5);
-  if (atrVal <= 0) return null;
+  const setupAtrVal         = calcATR14(c15);
+  if (atrVal <= 0 || setupAtrVal <= 0) return null;
   const ps                 = pipSize(pair);
   const [atrMin, atrMax]   = VERITAS_ATR_RANGE[pair] ?? [0, Infinity];
   const atrPips            = atrVal / ps;
@@ -905,8 +910,8 @@ function veritasSetup(
 
   // ── Entry / SL / TP (ATR-based) ───────────────────────────────
   const entry   = Number(last1m.c);
-  const slDist  = slMult * atrVal;
-  const tp2Dist = tpMult * atrVal;
+  const slDist  = slMult * setupAtrVal;
+  const tp2Dist = tpMult * setupAtrVal;
 
   const tp1Dist = tp2Dist * 0.4;
   const sl      = isLong ? entry - slDist  : entry + slDist;
@@ -921,7 +926,7 @@ function veritasSetup(
 
   return {
     pair,
-    timeframe:     "5m",
+    timeframe:     "15m",
     setup:         `VERITAS (${signalGrade} H=${hurst.toFixed(2)} ${regimeLabel} ${snrLabel})`,
     direction,
     entry:         +entry.toFixed(5),
@@ -929,7 +934,7 @@ function veritasSetup(
     tp1:           +tp1.toFixed(5),
     tp2:           +tp2.toFixed(5),
     rr,
-    atr:           atrVal,
+    atr:           setupAtrVal,
     candle_time:   candleTime,
     session_score: sessScore * 5,
     confidence,
@@ -975,11 +980,16 @@ type QSSRegime = "COMPRESSION" | "EXPANSION_BULL" | "EXPANSION_BEAR" | "TRANSITI
 
 function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {
   const atr5 = qssATR(c5, 14);
-  const atrHtf = qssATR(cHtf, 14);
-  if (atr5.length < 3 || atrHtf.length < 10) return "TRANSITION";
-  const currentAtr5 = atr5[atr5.length - 1];
-  const p20 = qssPercentile(atrHtf, 20);
-  const p60 = qssPercentile(atrHtf, 60);
+  if (atr5.length < 20) return "TRANSITION";
+  // Volatility regime is classified on the entry/refinement timeframe itself.
+  // Comparing raw 5m ATR dollars to 1h/15m ATR dollars is dimensionally invalid.
+  const normAtr = atr5.map((a, i) => {
+    const close = c5[i + 15]?.c ?? c5[Math.min(i + 15, c5.length - 1)].c;
+    return close > 0 ? a / close : 0;
+  });
+  const currentAtr5 = normAtr[normAtr.length - 1];
+  const p20 = qssPercentile(normAtr, 20);
+  const p60 = qssPercentile(normAtr, 60);
 
   if (currentAtr5 < p20) {
     const last5 = c5.slice(-5);
@@ -1182,13 +1192,14 @@ function qssSetup(
 
   const atr5arr = qssATR(c5, 14);
   const atr5 = atr5arr[atr5arr.length - 1] ?? 0;
-  if (atr5 <= 0) return null;
+  const atr15 = calcATR14(c15);
+  if (atr5 <= 0 || atr15 <= 0) return null;
 
   const entry = lv.ce;
   const regimeMult = 1.5;
-  const slFromAtr = atr5 * regimeMult;
+  const slFromAtr = atr15 * regimeMult;
   const slFromVoid = lv.width * 1.2;
-  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr5 * 3.0);
+  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr15 * 3.0);
   const sl = lv.isLong ? entry - slDist : entry + slDist;
 
   const rrTarget = vwsaScore >= 90 ? 2.5
@@ -1220,7 +1231,7 @@ function qssSetup(
 
   return {
     pair,
-    timeframe: "5m",
+    timeframe: "15m",
     setup: `QSS (${regimeLabel} VWSA=${vwsaScore})`,
     direction: lv.isLong ? "Long" : "Short",
     entry: +entry.toFixed(5),
@@ -1228,7 +1239,7 @@ function qssSetup(
     tp1: +tp1.toFixed(5),
     tp2: +tp2.toFixed(5),
     rr: +rrTarget.toFixed(2),
-    atr: atr5,
+    atr: atr15,
     candle_time: candleTime,
     session_score: sessionScoreVal,
     confidence,
@@ -1434,11 +1445,12 @@ function prismSetup(
 ): Signal | null {
   if (c5.length < 60 || c15.length < 70 || c1h.length < 55) return null;
   const atr5m = calcATR14(c5);
-  if (atr5m <= 0) return null;
+  const atr15m = calcATR14(c15);
+  if (atr5m <= 0 || atr15m <= 0) return null;
 
   const { diPlus, diMinus } = calcDI(c5, 14);
   const diDiff = Math.abs(diPlus - diMinus);
-  const diRatio = diDiff / (atr5m + 1e-10);
+  const diRatio = diDiff / (diPlus + diMinus + 1e-10);
   if (diRatio < 0.15) return null;
 
   const regimeIsStrong = diRatio >= 0.35;
@@ -1482,7 +1494,7 @@ function prismSetup(
 
   const entry = pz.mid;
   const slMult = regimeIsStrong ? 1.2 : regimeIsModerate ? 1.5 : 1.8;
-  const slRaw = isLong ? entry - atr5m * slMult : entry + atr5m * slMult;
+  const slRaw = isLong ? entry - atr15m * slMult : entry + atr15m * slMult;
   const spread = spreadPrice(pair);
   const entryAdj = isLong ? entry + spread : entry - spread;
   const slAdj = isLong ? slRaw - spread : slRaw + spread;
@@ -1490,8 +1502,8 @@ function prismSetup(
   if (risk <= 0) return null;
 
   const tp2Mult = pzScore >= 22 ? 3.0 : pzScore >= 18 ? 2.5 : 2.0;
-  const tp1Adj = isLong ? entryAdj + atr5m * 1.0 : entryAdj - atr5m * 1.0;
-  const tp2Adj = isLong ? entryAdj + atr5m * tp2Mult : entryAdj - atr5m * tp2Mult;
+  const tp1Adj = isLong ? entryAdj + atr15m * 1.0 : entryAdj - atr15m * 1.0;
+  const tp2Adj = isLong ? entryAdj + atr15m * tp2Mult : entryAdj - atr15m * tp2Mult;
   const rrActual = Math.abs(tp2Adj - entryAdj) / risk;
   if (rrActual < 1.8) return null;
 
@@ -1505,7 +1517,7 @@ function prismSetup(
 
   return {
     pair,
-    timeframe: "5m",
+    timeframe: "15m",
     setup: `PRISM (${regimeLabel} DI=${diRatio.toFixed(2)} ${pzLabel})`,
     direction,
     entry: +entryAdj.toFixed(5),
@@ -1513,7 +1525,7 @@ function prismSetup(
     tp1: +tp1Adj.toFixed(5),
     tp2: +tp2Adj.toFixed(5),
     rr: +rrActual.toFixed(2),
-    atr: atr5m,
+    atr: atr15m,
     candle_time: candleTime,
     session_score: sessionScoreVal,
     confidence,
