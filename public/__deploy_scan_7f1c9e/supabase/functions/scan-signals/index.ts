@@ -51,6 +51,15 @@ const TFS = [
 ];
 const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 4.5, "5m": 4.5, "15m": 14.5, "1h": 59.5 };
 const DEFAULT_CACHE_TTL_MIN = 4.5;
+
+// Keep forming bars out of signal decisions. TwelveData time_series normally
+// includes the current bar; using it for a 15m setup or its 1h bias can make the
+// setup/SL/TP move while the candle is still open.
+function closedCandles(candles: Candle[], timeframeMinutes: number, now = Date.now()): Candle[] {
+  const periodMs = timeframeMinutes * 60_000;
+  return candles.filter((c) => Number(c.t) + periodMs <= now - 1000);
+}
+
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
 // safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
@@ -1259,7 +1268,7 @@ function qssSetup(
 // Unique ScalpEdge proprietary setup — not a known public system.
 // Five-layer mechanical filter: regime must confirm, pressure zone
 // must qualify, structure must align, momentum must be igniting NOW.
-// Designed for: FX, Gold, Crypto | 5m entry | 1H macro bias
+// Designed for: FX, Gold, Crypto | 15m setup | 5m refinement | 1H macro bias
 // ═══════════════════════════════════════════════════════════════
 
 // DI+/DI- calculation (Directional Index, 14-period)
@@ -2024,7 +2033,7 @@ async function runScanJob(
   emit?: ProgressEmitter,
   source: string = "manual",
 ) {
-    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
+    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 60 : 120) : (tf === "1h" ? 80 : 150);
     const tfsToFetch = TFS;
     const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
     const initialExhausted = new Set<KeyIdx>();
@@ -2158,7 +2167,7 @@ async function runScanJob(
             fetches.push(f);
             accumulateCall(f.usedApi, f.usedKey);
           }
-          pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
+          pairData[pair] = { c5: closedCandles(fetches[0].candles, 5), c15: closedCandles(fetches[1].candles, 15), c1h: closedCandles(fetches[2].candles, 60), cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
           accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
@@ -2178,7 +2187,7 @@ async function runScanJob(
           const size1m = mode === "latest" ? 30 : 60;
           try {
             const f1m = await fetchCandles(supabase, keys, keyState, pair, tf1m, size1m, emit, source);
-            c1m       = f1m.candles;
+            c1m       = closedCandles(f1m.candles, 1);
             c1mCached = f1m.cached;
             accumulateCall(f1m.usedApi, f1m.usedKey);
           } catch (e) {
@@ -2194,9 +2203,9 @@ async function runScanJob(
           accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
-        const c5  = fetches[0].candles;
-        const c15 = fetches[1].candles;
-        const c1h = fetches[2].candles;
+        const c5  = closedCandles(fetches[0].candles, 5);
+        const c15 = closedCandles(fetches[1].candles, 15);
+        const c1h = closedCandles(fetches[2].candles, 60);
 
         pairData[pair] = {
           c5, c15, c1h, c1m,
@@ -2667,7 +2676,7 @@ Deno.serve(async (req) => {
           const c5  = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "5m",  td: "5min" },  100, undefined, "manual");
           const c15 = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "15m", td: "15min" }, 100, undefined, "manual");
           const c1h = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1h",  td: "1h" },    100, undefined, "manual");
-          c5Arr = c5.candles; c15Arr = c15.candles; c1hArr = c1h.candles;
+          c5Arr = closedCandles(c5.candles, 5); c15Arr = closedCandles(c15.candles, 15); c1hArr = closedCandles(c1h.candles, 60);
         } catch (e) {
           for (const setup of testSetups) {
             results[pair][setup] = { setup, pair, qualified: false, reason: `Candle fetch failed: ${String((e as Error).message ?? e)}` };
@@ -2684,7 +2693,7 @@ Deno.serve(async (req) => {
               if (VERITAS_PAIRS.has(pair)) {
                 try {
                   const f1m = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1m", td: "1min" }, 30, undefined, "manual");
-                  c1mArr = f1m.candles;
+                  c1mArr = closedCandles(f1m.candles, 1);
                 } catch { /* 1m fetch failure — VERITAS micro-confirm will correctly return null */ }
               }
               const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, c1hArr, ss);
