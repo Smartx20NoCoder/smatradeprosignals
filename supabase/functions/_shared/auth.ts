@@ -5,13 +5,17 @@
 //   Authorization: Bearer <any Supabase JWT> issued by this project's ref
 //     with role in {service_role, anon, authenticated} — covers pg_cron whose
 //     stored service-role JWT may differ from the current env var after a rotation.
-//   apikey matching this project's publishable/anon key — browser-side function calls
-//     made without an authenticated Supabase session.
+//   this project's browser publishable key in apikey/Authorization — required for
+//   the unauthenticated Strategy Tester path used by the public web client.
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-fn-secret",
 };
+
+// Publishable keys are public client credentials (also embedded in the web app),
+// so keeping the current project key here is not equivalent to exposing a secret.
+const PROJECT_PUBLISHABLE_KEY = "sb_publishable_CwbRn7_T_tFM157Yv6AFTw_SWaGgS4u";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
@@ -36,7 +40,7 @@ function projectRef(): string | null {
 export function checkInternalAuth(req: Request): Response | null {
   const fnSecret = Deno.env.get("INTERNAL_FN_SECRET");
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
+  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || PROJECT_PUBLISHABLE_KEY;
   const headerSecret = req.headers.get("x-fn-secret");
   const apikey = req.headers.get("apikey") ?? req.headers.get("x-api-key") ?? "";
   const auth = req.headers.get("authorization") ?? "";
@@ -45,10 +49,9 @@ export function checkInternalAuth(req: Request): Response | null {
   if (!!fnSecret && headerSecret === fnSecret) return null;
   if (!!serviceRole && bearer === serviceRole) return null;
 
-  // Browser clients using a publishable/anon API key without an authenticated
-  // session do not have an Authorization JWT. Requiring an exact key match keeps
-  // the function callable from the app while still rejecting arbitrary callers.
-  if (!!publishableKey && apikey === publishableKey) return null;
+  // Browser clients may send the public project key either as apikey or as the
+  // Authorization bearer value. This is intentionally limited to this project key.
+  if (apikey === publishableKey || bearer === publishableKey) return null;
 
   // Fallback: accept any Supabase-issued JWT for this project.
   if (bearer) {
