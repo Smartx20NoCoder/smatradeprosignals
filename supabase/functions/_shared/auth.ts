@@ -5,6 +5,8 @@
 //   Authorization: Bearer <any Supabase JWT> issued by this project's ref
 //     with role in {service_role, anon, authenticated} — covers pg_cron whose
 //     stored service-role JWT may differ from the current env var after a rotation.
+//   apikey matching this project's publishable/anon key — browser-side function calls
+//     made without an authenticated Supabase session.
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -34,12 +36,19 @@ function projectRef(): string | null {
 export function checkInternalAuth(req: Request): Response | null {
   const fnSecret = Deno.env.get("INTERNAL_FN_SECRET");
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
   const headerSecret = req.headers.get("x-fn-secret");
+  const apikey = req.headers.get("apikey") ?? req.headers.get("x-api-key") ?? "";
   const auth = req.headers.get("authorization") ?? "";
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
 
   if (!!fnSecret && headerSecret === fnSecret) return null;
   if (!!serviceRole && bearer === serviceRole) return null;
+
+  // Browser clients using a publishable/anon API key without an authenticated
+  // session do not have an Authorization JWT. Requiring an exact key match keeps
+  // the function callable from the app while still rejecting arbitrary callers.
+  if (!!publishableKey && apikey === publishableKey) return null;
 
   // Fallback: accept any Supabase-issued JWT for this project.
   if (bearer) {
