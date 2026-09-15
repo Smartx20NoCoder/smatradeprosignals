@@ -503,7 +503,7 @@ function emaPullback(pair: string, c5: Candle[], c15: Candle[]): RawSignal | nul
   const a15 = atr(c15);
   if (a === 0 || a15 === 0 || Math.abs(e9 - e21v) / a > 0.3) return null;
   const touched = last.l <= Math.max(e9, e21v) && last.h >= Math.min(e9, e21v);
-  const ct = new Date(last.t).toISOString();
+  const ct = new Date(c15.at(-1)!.t).toISOString();
   if (trendUp && touched && last.c > last.o && last.c > prev.h) {
     const entry = (e9 + e21v) / 2, sl = Math.min(e21v, last.l) - a15 * 0.3;
     const risk = entry - sl; if (risk <= 0) return null;
@@ -535,7 +535,7 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const structure = c15.slice(-21, -1); if (structure.length < 20) return null;
   const sh = Math.max(...structure.map(x => x.h)), sl = Math.min(...structure.map(x => x.l));
   const recent = c5.slice(-3), last = c5.at(-1)!;
-  const ct = new Date(last.t).toISOString();
+  const ct = new Date(c15.at(-1)!.t).toISOString();
   if (e21 > e50 && recent.some(x => x.c > sh)) {
     if (!(last.l <= sh + a * 0.2 && last.c > sh)) return null;
     const entry = sh, slp = sh - a15 * 0.8, risk = entry - slp;
@@ -559,7 +559,7 @@ function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | n
   const e21_15 = ema(c15.map(x => x.c), 21).at(-1)!;
   const e50_15 = ema(c15.map(x => x.c), 50).at(-1)!;
   const last5 = c5.at(-1)!;
-  const ct = new Date(last5.t).toISOString();
+  const ct = new Date(c15.at(-1)!.t).toISOString();
   // Displacement sequence, order block, and FVG identified on 15m — this is what
   // an order block actually is in practice: an HTF point of interest, not a
   // 5-minute one. The 5m chart's only job now is to confirm price has retraced
@@ -617,7 +617,7 @@ function choch(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const brokeLow = last15.c < ll1.v;
 
   const last5 = c5.at(-1)!;
-  const ct = new Date(last5.t).toISOString();
+  const ct = new Date(c15.at(-1)!.t).toISOString();
   const tol = a15 * 0.2; // 5m retest tolerance around the 15m break level
 
   if (lh1.v < lh2.v && ll1.v < ll2.v && sweptLow && brokeHigh) {
@@ -782,6 +782,7 @@ function veritasSetup(
   c5: Candle[],
   c15: Candle[],
   c1m: Candle[] | null,
+  c1h: Candle[],
   ss: number,
   slMult    = 1.5,
   tpMult    = 2.5,
@@ -792,7 +793,7 @@ function veritasSetup(
 
   // ── Instrument guard ─────────────────────────────────────────
   if (!VERITAS_PAIRS.has(pair)) return null;
-  if (c5.length < 65 || c15.length < 110) return null;
+  if (c5.length < 65 || c15.length < 110 || c1h.length < 50) return null;
 
   const closes5  = c5.map((x) => Number(x.c));
   const closes15 = c15.map((x) => Number(x.c));
@@ -810,12 +811,11 @@ function veritasSetup(
   const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
   const regScore = hRegime === "strong" ? 25 : 20;
 
-  // ── PILLAR II: HTF Bias (15M close vs 15-period EMA) ─────────
-  const htfEMA15 = veritasEMA(closes15, 15);
-  const htfEMA   = htfEMA15[htfEMA15.length - 1];
-  const htfLast  = closes15[closes15.length - 1];
-  const htfBull  = htfLast > htfEMA;
-  const htfBear  = htfLast < htfEMA;
+  // ── PILLAR II: 1H Directional Bias ───────────────────────────
+  // 15M defines the setup/regime; 1H defines the tradable direction.
+  const macroBias = htfBias(c1h);
+  const htfBull = macroBias === "bull";
+  const htfBear = macroBias === "bear";
   if (!htfBull && !htfBear) return null;
 
   // ── PILLAR III: TSI Momentum (5M) ────────────────────────────
@@ -921,7 +921,7 @@ function veritasSetup(
 
   const regimeLabel = isTrending ? "Trend" : "MeanRev";
   const snrLabel    = snr > 60 ? "SNR++" : "SNR+";
-  const candleTime  = new Date(last5.t).toISOString();
+  const candleTime  = new Date(c15.at(-1)!.t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
@@ -983,8 +983,9 @@ function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {
   if (atr5.length < 20) return "TRANSITION";
   // Volatility regime is classified on the entry/refinement timeframe itself.
   // Comparing raw 5m ATR dollars to 1h/15m ATR dollars is dimensionally invalid.
+  const alignedCloses = c5.slice(14).map(c => c.c);
   const normAtr = atr5.map((a, i) => {
-    const close = c5[i + 15]?.c ?? c5[Math.min(i + 15, c5.length - 1)].c;
+    const close = alignedCloses[i] ?? c5[c5.length - 1].c;
     return close > 0 ? a / close : 0;
   });
   const currentAtr5 = normAtr[normAtr.length - 1];
@@ -1164,8 +1165,8 @@ function qssSetup(
 ): Signal | null {
   const isCrypto = pair.includes("BTC") || pair.includes("ETH") || pair.includes("XRP");
   const sym = pair.toUpperCase();
-  const cHtf = isCrypto ? c15 : c1h;
-  if (c5.length < 50 || cHtf.length < 20) return null;
+  const cHtf = c1h;
+  if (c5.length < 50 || c15.length < 30 || cHtf.length < 50) return null;
 
   const regime = qssAVRD(c5, cHtf);
   if (regime === "COMPRESSION" || regime === "TRANSITION") return null;
@@ -1227,7 +1228,7 @@ function qssSetup(
 
   const orderType = lv.isLong ? "Buy Limit" : "Sell Limit";
   const regimeLabel = regime === "EXPANSION_BULL" ? "ExpBull" : "ExpBear";
-  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
+  const candleTime = new Date(c15[c15.length - 1].t).toISOString();
 
   return {
     pair,
@@ -1512,7 +1513,7 @@ function prismSetup(
 
   const regimeLabel = regimeIsStrong ? "STR" : "MOD";
   const pzLabel = pzScore >= 22 ? "PZ++" : pzScore >= 18 ? "PZ+" : "PZ~";
-  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
+  const candleTime = new Date(c15[c15.length - 1].t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
@@ -2103,7 +2104,7 @@ async function runScanJob(
     const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
-      .filter((p) => autoCfg[p] !== false)
+      .filter((p) => autoCfg[p] === true)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
@@ -2322,7 +2323,7 @@ async function runScanJob(
       if (!RETIRED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
         const veritas = veritasSetup(
-          pair, d.c5, d.c15, c1m, ssNow,
+          pair, d.c5, d.c15, c1m, d.c1h, ssNow,
           veritasSlMult, veritasTpMult,
           veritasMinHurst, veritasMinSnr,
           veritasMinConf,
@@ -2686,7 +2687,7 @@ Deno.serve(async (req) => {
                   c1mArr = f1m.candles;
                 } catch { /* 1m fetch failure — VERITAS micro-confirm will correctly return null */ }
               }
-              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, ss);
+              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, c1hArr, ss);
               result = sig
                 ? { setup, pair, qualified: true, signal: sig,
                     debug: `H=${sig.setup.match(/H=([\d.]+)/)?.[1] ?? "?"} SNR=${sig.mfi_score}` }
