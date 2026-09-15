@@ -1,0 +1,105 @@
+name: Fix closed bars and bootstrap history
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch scanner
+        shell: python
+        run: |
+          from pathlib import Path
+          import sys
+          p=Path('supabase/functions/scan-signals/index.ts')
+          s=p.read_text()
+          original=s
+
+          # Always keep the latest fully CLOSED candle only. A 15m trade setup must
+          # be anchored to a completed 15m bar; 5m/1m are confirmation/refinement only.
+          marker='''const DEFAULT_CACHE_TTL_MIN = 4.5;\nconst DAILY_BUDGET = 800;'''
+          insert='''const DEFAULT_CACHE_TTL_MIN = 4.5;\n\n// Keep forming bars out of signal decisions. TwelveData time_series normally\n// includes the current bar; using it for a 15m setup or its 1h bias can make the\n// setup/SL/TP move while the candle is still open.\nfunction closedCandles(candles: Candle[], timeframeMinutes: number, now = Date.now()): Candle[] {\n  const periodMs = timeframeMinutes * 60_000;\n  return candles.filter((c) => Number(c.t) + periodMs <= now - 1000);\n}\n\nconst DAILY_BUDGET = 800;'''
+          if marker not in s:
+              print('marker missing',file=sys.stderr); sys.exit(2)
+          s=s.replace(marker,insert,1)
+
+          # Cold-start: fetch enough history for every current strategy even when
+          # candle_cache is empty. API call count is unchanged (output size only).
+          old='''    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);'''
+          new='''    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 60 : 120) : (tf === "1h" ? 80 : 150);'''
+          if old not in s:
+              print('sizeFor missing',file=sys.stderr); sys.exit(3)
+          s=s.replace(old,new,1)
+
+          # Main scanner: normalize all timeframes to closed bars once after fetch.
+          old='''        const c5  = fetches[0].candles;\n        const c15 = fetches[1].candles;\n        const c1h = fetches[2].candles;'''
+          new='''        const c5  = closedCandles(fetches[0].candles, 5);\n        const c15 = closedCandles(fetches[1].candles, 15);\n        const c1h = closedCandles(fetches[2].candles, 60);'''
+          if old not in s:
+              print('main candle assignment missing',file=sys.stderr); sys.exit(4)
+          s=s.replace(old,new,1)
+
+          old='''          c1m       = f1m.candles;\n            c1mCached = f1m.cached;'''
+          new='''          c1m       = closedCandles(f1m.candles, 1);\n            c1mCached = f1m.cached;'''
+          if old not in s:
+              # spacing can differ; fall back to the exact current text.
+              old2='''            c1m       = f1m.candles;\n            c1mCached = f1m.cached;'''
+              new2='''            c1m       = closedCandles(f1m.candles, 1);\n            c1mCached = f1m.cached;'''
+              if old2 not in s:
+                  print('main 1m assignment missing',file=sys.stderr); sys.exit(5)
+              s=s.replace(old2,new2,1)
+          else:
+              s=s.replace(old,new,1)
+
+          # Secondary pairs get the same closed-bar protection.
+          old='''          pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };'''
+          new='''          pairData[pair] = { c5: closedCandles(fetches[0].candles, 5), c15: closedCandles(fetches[1].candles, 15), c1h: closedCandles(fetches[2].candles, 60), cached: fetches.every(f => f.cached) };'''
+          if old not in s:
+              print('secondary assignment missing',file=sys.stderr); sys.exit(6)
+          s=s.replace(old,new,1)
+
+          # Test mode also evaluates only completed candles.
+          s=s.replace('''          c5Arr = c5.candles; c15Arr = c15.candles; c1hArr = c1h.candles;''', '''          c5Arr = closedCandles(c5.candles, 5); c15Arr = closedCandles(c15.candles, 15); c1hArr = closedCandles(c1h.candles, 60);''',1)
+          s=s.replace('''                  c1mArr = f1m.candles;''', '''                  c1mArr = closedCandles(f1m.candles, 1);''',1)
+
+          # Update misleading strategy header so the architecture is explicit.
+          s=s.replace('Designed for: FX, Gold, Crypto | 5m entry | 1H macro bias', 'Designed for: FX, Gold, Crypto | 15m setup | 5m refinement | 1H macro bias')
+
+          if s==original:
+              print('no changes',file=sys.stderr); sys.exit(7)
+          p.write_text(s)
+          print('patched')
+
+      - name: Verify
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('supabase/functions/scan-signals/index.ts').read_text()
+          checks={
+            'closed bars helper':'function closedCandles(' in s,
+            'latest history 120':'(tf === "1h" ? 60 : 120)' in s,
+            'main closed 5m':'closedCandles(fetches[0].candles, 5)' in s,
+            'main closed 15m':'closedCandles(fetches[1].candles, 15)' in s,
+            'main closed 1h':'closedCandles(fetches[2].candles, 60)' in s,
+            'legacy gate still free':'if (conf < 55)' not in s,
+            'explicit pair gate':'.filter((p) => autoCfg[p] === true)' in s,
+            'veritas 1h bias':'const macroBias = htfBias(c1h)' in s,
+            'qss 1h htf':'const cHtf = c1h;' in s,
+          }
+          print(checks)
+          assert all(checks.values()), checks
+          PY
+
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/scan-signals/index.ts
+          git rm .github/workflows/fix-closed-bars-and-bootstrap.yml
+          git commit -m "fix: base signals on closed candles and bootstrap sufficient history"
+          git push
