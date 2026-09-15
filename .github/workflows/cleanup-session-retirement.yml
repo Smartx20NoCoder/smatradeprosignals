@@ -1,0 +1,40 @@
+name: Restore session range setup control
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove hard retirement
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('supabase/functions/scan-signals/index.ts')
+          s=p.read_text()
+          old='''// Retired setups are never evaluated or emitted. This code gate is independent
+// of editable setup_auto_execute settings and protects old configuration rows.
+const RETIRED_SETUPS = new Set<string>(["Session Range Break"]);'''
+          new='''// No setup is hard-retired here. setup_auto_execute remains the single control
+// for whether a supported setup can qualify/alert. Session Range Break may stay
+// OFF today and be re-enabled later without a code change.'''
+          if old not in s:
+              raise SystemExit('retirement block not found')
+          s=s.replace(old,new,1)
+          s=s.replace('if (RETIRED_SETUPS.has(raw.setup)) {','if (false) { // kept for compatibility; setup_auto_execute controls availability',1)
+          s=s.replace('if (!RETIRED_SETUPS.has("VERITAS")) {','if (true) {',1)
+          p.write_text(s)
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/scan-signals/index.ts
+          git rm .github/workflows/cleanup-session-retirement.yml
+          git commit -m "fix: restore setup_auto_execute control for session range"
+          git push
