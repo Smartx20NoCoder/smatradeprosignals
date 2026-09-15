@@ -1,0 +1,184 @@
+name: One-time signal alignment
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch signal engine
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, sys
+          p = Path('supabase/functions/scan-signals/index.ts')
+          s = p.read_text()
+          original = s
+
+          # 1) VERITAS: 1H is the directional bias; 15M is the setup anchor;
+          # 5M + explicit 1M confirmation stay exactly where they are.
+          s = s.replace(
+              '  c1m: Candle[] | null,\n  ss: number,',
+              '  c1m: Candle[] | null,\n  c1h: Candle[],\n  ss: number,',
+              1,
+          )
+          s = s.replace(
+              '  if (!VERITAS_PAIRS.has(pair)) return null;\n  if (c5.length < 65 || c15.length < 110) return null;',
+              '  if (!VERITAS_PAIRS.has(pair)) return null;\n  if (c5.length < 65 || c15.length < 110 || c1h.length < 50) return null;',
+              1,
+          )
+          old = '''  // ── PILLAR II: HTF Bias (15M close vs 15-period EMA) ─────────
+  const htfEMA15 = veritasEMA(closes15, 15);
+  const htfEMA   = htfEMA15[htfEMA15.length - 1];
+  const htfLast  = closes15[closes15.length - 1];
+  const htfBull  = htfLast > htfEMA;
+  const htfBear  = htfLast < htfEMA;
+  if (!htfBull && !htfBear) return null;'''
+          new = '''  // ── PILLAR II: 1H Directional Bias ───────────────────────────
+  // The 15M chart defines the setup regime; the 1H chart decides direction.
+  const macroBias = htfBias(c1h);
+  const htfBull = macroBias === "bull";
+  const htfBear = macroBias === "bear";
+  if (!htfBull && !htfBear) return null;'''
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          # VERITAS caller in the main scan loop and in test_strategy mode.
+          s = s.replace(
+              '          pair, d.c5, d.c15, c1m, ssNow,',
+              '          pair, d.c5, d.c15, c1m, d.c1h, ssNow,',
+              1,
+          )
+          s = s.replace(
+              '              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, ss);',
+              '              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, c1hArr, ss);',
+              1,
+          )
+
+          # 2) QSS: always use 1H for directional bias; 15M remains available as
+          # the primary setup/risk timeframe. The 5M volatility regime is now
+          # self-normalized instead of being compared with raw higher-TF ATR.
+          s = s.replace(
+              'function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {',
+              'function qssAVRD(c5: Candle[], _cHtf: Candle[]): QSSRegime {',
+              1,
+          )
+          s = s.replace(
+              '''  const normAtr = atr5.map((a, i) => {
+    const close = c5[i + 15]?.c ?? c5[Math.min(i + 15, c5.length - 1)].c;
+    return close > 0 ? a / close : 0;
+  });''',
+              '''  const alignedCloses = c5.slice(14).map(c => c.c);
+  const normAtr = atr5.map((a, i) => {
+    const close = alignedCloses[i] ?? c5[c5.length - 1].c;
+    return close > 0 ? a / close : 0;
+  });''',
+              1,
+          )
+          s = s.replace(
+              '  const cHtf = isCrypto ? c15 : c1h;\n  if (c5.length < 50 || cHtf.length < 20) return null;',
+              '  const cHtf = c1h;\n  if (c5.length < 50 || c15.length < 30 || cHtf.length < 50) return null;',
+              1,
+          )
+          s = s.replace(
+              'Designed for: FX, Gold, Crypto | 5m entry | 1H macro bias',
+              'Designed for: FX, Gold, Crypto | 15m setup | 5m refinement | 1H macro bias',
+              1,
+          )
+
+          # 3) Source-level pair gate: only explicit true values are scanned.
+          s = s.replace(
+              '.filter((p) => autoCfg[p] !== false)',
+              '.filter((p) => autoCfg[p] === true)',
+              1,
+          )
+          s = s.replace(
+              '    // Filter to pairs enabled in auto-execute config (core pairs always scan).',
+              '    // Scan ONLY pairs explicitly enabled by pair_auto_execute.',
+              1,
+          )
+          s = s.replace(
+              '// Core pairs always scanned regardless of pair_auto_execute setting.\nconst CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);\n// Secondary pairs are always attempted but silently skipped on any fetch failure.\nconst SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);',
+              '// Legacy pair-breadth sets retained only for compatibility; pair_auto_execute is the sole scan gate.\nconst CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);\n// Secondary-pair handling remains unchanged when a pair is explicitly enabled.\nconst SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);',
+              1,
+          )
+
+          # 4) Make report/scanner identity consistently 15M for the trade setup.
+          # 5M is confirmation; candle_time should be the closed 15M setup bar so
+          # duplicate suppression cannot fire multiple times inside one 15M setup.
+          s = s.replace(
+              'const ct = new Date(last.t).toISOString();\n  if (trendUp && touched',
+              'const ct = new Date(c15.at(-1)!.t).toISOString();\n  if (trendUp && touched',
+              1,
+          )
+          s = s.replace(
+              'const ct = new Date(last.t).toISOString();\n  if (e21 > e50 && recent.some',
+              'const ct = new Date(c15.at(-1)!.t).toISOString();\n  if (e21 > e50 && recent.some',
+              1,
+          )
+          # SMC/CHOCH/VERITAS/QSS/PRISM still use 5m confirmation timestamps internally;
+          # normalize their persisted setup fingerprint to the 15m close where appropriate.
+          s = s.replace(
+              'const ct = new Date(last5.t).toISOString();\n  // Displacement sequence',
+              'const ct = new Date(c15.at(-1)!.t).toISOString();\n  // Displacement sequence',
+              1,
+          )
+          s = s.replace(
+              'const ct = new Date(last5.t).toISOString();\n  const tol = a15 * 0.2;',
+              'const ct = new Date(c15.at(-1)!.t).toISOString();\n  const tol = a15 * 0.2;',
+              1,
+          )
+          s = s.replace(
+              'const candleTime = new Date(c5[c5.length - 1].t).toISOString();\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `VERITAS',
+              'const candleTime = new Date(c15[c15.length - 1].t).toISOString();\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `VERITAS',
+              1,
+          )
+          s = s.replace(
+              'const candleTime = new Date(c5[c5.length - 1].t).toISOString();\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `QSS',
+              'const candleTime = new Date(c15[c15.length - 1].t).toISOString();\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `QSS',
+              1,
+          )
+          s = s.replace(
+              'const candleTime = new Date(c5[c5.length - 1].t).toISOString();\n  const direction: "Long" | "Short" = isLong ? "Long" : "Short";\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `PRISM',
+              'const candleTime = new Date(c15[c15.length - 1].t).toISOString();\n  const direction: "Long" | "Short" = isLong ? "Long" : "Short";\n\n  return {\n    pair,\n    timeframe: "15m",\n    setup: `PRISM',
+              1,
+          )
+
+          if s == original:
+              print('No changes detected', file=sys.stderr)
+              sys.exit(2)
+          p.write_text(s)
+          print('Signal alignment patch applied')
+
+      - name: Verify patched source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('supabase/functions/scan-signals/index.ts').read_text()
+          checks={
+            'no hard legacy 55 gate':'if (conf < 55)' not in s,
+            'explicit pair true gate':'.filter((p) => autoCfg[p] === true)' in s,
+            'VERITAS 1H bias':'const macroBias = htfBias(c1h)' in s,
+            'QSS 1H HTF':'const cHtf = c1h;' in s,
+            '15m setup fingerprints':'new Date(c15[c15.length - 1].t).toISOString()' in s,
+            'PRISM 15m ATR':'const atr15m = calcATR14(c15)' in s,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          print(checks)
+          assert not bad, bad
+          PY
+
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/scan-signals/index.ts
+          git rm .github/workflows/one-time-signal-alignment.yml
+          git commit -m "fix: align setup timeframe, 1h bias and trigger fingerprint"
+          git push
