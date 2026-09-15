@@ -1,0 +1,166 @@
+name: One-time scanner repair
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch scanner
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, sys
+
+          p = Path('supabase/functions/scan-signals/index.ts')
+          s = p.read_text()
+          original = s
+
+          # 1) Remove the legacy-only hard 55% empirical gate.
+          pattern = re.compile(
+              r'\n  if \(conf < 55\) \{\n'
+              r'    return \{ signal: null, reason: `Confidence too low \(\$\{conf\}%.*,?'
+              r'[\s\S]*?\n  \}\n\n  return \{\n    signal:',
+              re.M,
+          )
+          m = pattern.search(s)
+          if m:
+              s = s[:m.start()] + '\n\n  return {\n    signal:' + s[m.end():]
+          else:
+              # Safer exact fallback for the current source shape.
+              exact = re.compile(
+                  r'\n  if \(conf < 55\) \{\n'
+                  r'    return \{ signal: null, reason: `Confidence too low \(\$\{conf\}%[^`]*` \};\n'
+                  r'  \}\n'
+                  r'\n  return \{\n    signal:'
+              )
+              s, n = exact.subn('\n\n  return {\n    signal:', s, count=1)
+
+          # 2) Legacy continuation setups: make the setup timeframe/ATR 15m.
+          s = s.replace(
+              'return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Long",\n      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };',
+              'return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Long",\n      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };'
+          )
+          s = s.replace(
+              'return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Short",\n      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };',
+              'return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Short",\n      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };'
+          )
+          s = s.replace(
+              'return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Long",\n      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };',
+              'return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Long",\n      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };'
+          )
+          s = s.replace(
+              'return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Short",\n      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };',
+              'return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Short",\n      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };'
+          )
+
+          # 3) VERITAS: keep 5m/1m confirmation, but make SL/TP and reported ATR 15m-based.
+          s = s.replace(
+              '  const atrVal             = calcATR14(c5);\n',
+              '  const atrVal             = calcATR14(c5);\n  const setupAtrVal         = calcATR14(c15);\n',
+              1,
+          )
+          s = s.replace(
+              '  if (atrVal <= 0) return null;\n  const ps                 = pipSize(pair);',
+              '  if (atrVal <= 0 || setupAtrVal <= 0) return null;\n  const ps                 = pipSize(pair);',
+              1,
+          )
+          s = s.replace(
+              '  const slDist  = slMult * atrVal;\n  const tp2Dist = tpMult * atrVal;',
+              '  const slDist  = slMult * setupAtrVal;\n  const tp2Dist = tpMult * setupAtrVal;',
+              1,
+          )
+          s = s.replace(
+              '    timeframe:     "5m",',
+              '    timeframe:     "15m",',
+              1,
+          )
+          # Replace only VERITAS returned ATR field.
+          s = s.replace(
+              '    atr:           atrVal,\n    candle_time:   candleTime,',
+              '    atr:           setupAtrVal,\n    candle_time:   candleTime,',
+              1,
+          )
+
+          # 4) QSS: preserve 5m setup/refinement logic, but calculate risk targets from 15m ATR.
+          s = s.replace(
+              '  const atr5arr = qssATR(c5, 14);\n  const atr5 = atr5arr[atr5arr.length - 1] ?? 0;\n  if (atr5 <= 0) return null;\n\n  const entry = lv.ce;',
+              '  const atr5arr = qssATR(c5, 14);\n  const atr5 = atr5arr[atr5arr.length - 1] ?? 0;\n  const atr15 = calcATR14(c15);\n  if (atr5 <= 0 || atr15 <= 0) return null;\n\n  const entry = lv.ce;',
+              1,
+          )
+          s = s.replace(
+              '  const slFromAtr = atr5 * regimeMult;\n  const slFromVoid = lv.width * 1.2;\n  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr5 * 3.0);',
+              '  const slFromAtr = atr15 * regimeMult;\n  const slFromVoid = lv.width * 1.2;\n  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr15 * 3.0);',
+              1,
+          )
+          s = s.replace(
+              '    timeframe: "5m",\n    setup: `QSS',
+              '    timeframe: "15m",\n    setup: `QSS',
+              1,
+          )
+          s = s.replace(
+              '    atr: atr5,\n    candle_time: candleTime,',
+              '    atr: atr15,\n    candle_time: candleTime,',
+              1,
+          )
+
+          # 5) PRISM: normalize DI strength to a dimensionless 0..1 ratio, and use 15m ATR for risk.
+          s = s.replace(
+              '  const atr5m = calcATR14(c5);\n  if (atr5m <= 0) return null;\n\n  const { diPlus, diMinus } = calcDI(c5, 14);\n  const diDiff = Math.abs(diPlus - diMinus);\n  const diRatio = diDiff / (atr5m + 1e-10);',
+              '  const atr5m = calcATR14(c5);\n  const atr15m = calcATR14(c15);\n  if (atr5m <= 0 || atr15m <= 0) return null;\n\n  const { diPlus, diMinus } = calcDI(c5, 14);\n  const diDiff = Math.abs(diPlus - diMinus);\n  const diRatio = diDiff / (diPlus + diMinus + 1e-10);',
+              1,
+          )
+          s = s.replace(
+              '  const slRaw = isLong ? entry - atr5m * slMult : entry + atr5m * slMult;',
+              '  const slRaw = isLong ? entry - atr15m * slMult : entry + atr15m * slMult;',
+              1,
+          )
+          s = s.replace(
+              '  const tp1Adj = isLong ? entryAdj + atr5m * 1.0 : entryAdj - atr5m * 1.0;\n  const tp2Adj = isLong ? entryAdj + atr5m * tp2Mult : entryAdj - atr5m * tp2Mult;',
+              '  const tp1Adj = isLong ? entryAdj + atr15m * 1.0 : entryAdj - atr15m * 1.0;\n  const tp2Adj = isLong ? entryAdj + atr15m * tp2Mult : entryAdj - atr15m * tp2Mult;',
+              1,
+          )
+          s = s.replace(
+              '    timeframe: "5m",\n    setup: `PRISM',
+              '    timeframe: "15m",\n    setup: `PRISM',
+              1,
+          )
+          s = s.replace(
+              '    atr: atr5m,\n    candle_time: candleTime,',
+              '    atr: atr15m,\n    candle_time: candleTime,',
+              1,
+          )
+
+          # 6) QSS regime classification must compare volatility on the same timeframe.
+          old = '''function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {\n  const atr5 = qssATR(c5, 14);\n  const atrHtf = qssATR(cHtf, 14);\n  if (atr5.length < 3 || atrHtf.length < 10) return "TRANSITION";\n  const currentAtr5 = atr5[atr5.length - 1];\n  const p20 = qssPercentile(atrHtf, 20);\n  const p60 = qssPercentile(atrHtf, 60);'''
+          new = '''function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {\n  const atr5 = qssATR(c5, 14);\n  if (atr5.length < 20) return "TRANSITION";\n  // Volatility regime is classified on the entry/refinement timeframe itself.\n  // Comparing raw 5m ATR dollars to 1h/15m ATR dollars is dimensionally invalid.\n  const normAtr = atr5.map((a, i) => {\n    const close = c5[i + 15]?.c ?? c5[Math.min(i + 15, c5.length - 1)].c;\n    return close > 0 ? a / close : 0;\n  });\n  const currentAtr5 = normAtr[normAtr.length - 1];\n  const p20 = qssPercentile(normAtr, 20);\n  const p60 = qssPercentile(normAtr, 60);'''
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          # 7) Stale candle-cache fallback for malformed/non-429 TwelveData responses.
+          old = '''  if (!j.values || !Array.isArray(j.values)) {\n    console.error("TwelveData error", pair, tf.label, r.status, j);\n    emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });\n    const err = new Error(`Failed to parse candles for ${pair} ${tf.label}`);\n    (err as any).usedApi = 1;\n    (err as any).usedKey = fetchKey;\n    throw err;\n  }'''
+          new = '''  if (!j.values || !Array.isArray(j.values)) {\n    console.error("TwelveData malformed/error payload", pair, tf.label, r.status, j?.message ?? j);\n    if (cached) {\n      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Malformed TwelveData response (${r.status}) — using last cached candles` });\n      return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };\n    }\n    emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });\n    const err = new Error(`Failed to parse candles for ${pair} ${tf.label}`);\n    (err as any).usedApi = 1;\n    (err as any).usedKey = fetchKey;\n    throw err;\n  }'''
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          if s == original:
+              print('No scanner changes detected', file=sys.stderr)
+              sys.exit(2)
+
+          p.write_text(s)
+          print('Scanner patched')
+
+      - name: Commit repair and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-time-scan-repair.yml
+          git add supabase/functions/scan-signals/index.ts
+          git commit -m "fix: restore legacy confidence and align trade risk to 15m setup"
+          git push
