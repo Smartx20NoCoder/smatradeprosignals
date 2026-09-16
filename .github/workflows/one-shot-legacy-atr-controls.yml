@@ -1,0 +1,121 @@
+name: one-shot legacy ATR controls
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-legacy-atr-controls.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch scanner, settings API, and UI
+        shell: python
+        run: |
+          from pathlib import Path
+
+          scan = Path('supabase/functions/scan-signals/index.ts')
+          text = scan.read_text()
+
+          old = '"veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date"'
+          new = '"veritas_sl_mult, veritas_tp_mult, legacy_atr_multipliers_enabled, legacy_sl_mult, legacy_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date"'
+          if old not in text:
+              raise SystemExit('scanner settings select marker not found')
+          text = text.replace(old, new, 1)
+
+          old = 'const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);\n    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);'
+          new = 'const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);\n    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);\n    const legacyAtrEnabled = !!(veritasCfgRow as any)?.legacy_atr_multipliers_enabled;\n    const legacySlMult     = Number((veritasCfgRow as any)?.legacy_sl_mult ?? 1);\n    const legacyTpMult     = Number((veritasCfgRow as any)?.legacy_tp_mult ?? 1);'
+          if old not in text:
+              raise SystemExit('scanner multiplier marker not found')
+          text = text.replace(old, new, 1)
+
+          marker = '        // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)\n        if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {'
+          insert = '''        // Optional legacy ATR exit expansion. Entry logic is untouched; only the\n        // already-derived 15m stop/target distances are scaled. Disabled = exact\n        // legacy behavior. SL and TP have independent multipliers.\n        const adjustedRaw = legacyAtrEnabled && ["EMA Pullback", "BOS Retest", "SMC OB/FVG", "CHOCH"].includes(name)\n          ? (() => {\n              const slDistance = Math.abs(raw.entry - raw.stop_loss) * Math.max(0.1, legacySlMult);\n              const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);\n              const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);\n              return {\n                ...raw,\n                stop_loss: raw.direction === "Long" ? raw.entry - slDistance : raw.entry + slDistance,\n                tp1: raw.direction === "Long" ? raw.entry + tp1Distance : raw.entry - tp1Distance,\n                tp2: raw.direction === "Long" ? raw.entry + tp2Distance : raw.entry - tp2Distance,\n              };\n            })()\n          : raw;\n        // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)\n        if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {'''
+          if marker not in text:
+              raise SystemExit('scanner setup-loop marker not found')
+          text = text.replace(marker, insert, 1)
+
+          old = 'const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats);'
+          new = 'const q = qualifyAndScore(adjustedRaw, d.c5, bias, currentPrice, empiricalStats);'
+          if old not in text:
+              raise SystemExit('scanner qualification call not found')
+          text = text.replace(old, new, 1)
+
+          old = 'signals, new_signals: toInsert.length,'
+          new = 'signals, new_signals: insertedRows.length,'
+          if old not in text:
+              raise SystemExit('scanner new_signals marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    if (toInsert.length) {\n      const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");\n      insertedRows = (ins as any) ?? [];\n      await sendTelegramAlerts(toInsert, cfg);'''
+          new = '''    if (toInsert.length) {\n      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");\n      if (insertErr) {\n        const msg = `Signal insert failed: ${insertErr.message}`;\n        errors.push(msg);\n        console.error(msg);\n      } else {\n        insertedRows = (ins as any) ?? [];\n        if (insertedRows.length !== toInsert.length) {\n          const msg = `Signal insert count mismatch: expected ${toInsert.length}, inserted ${insertedRows.length}`;\n          errors.push(msg);\n          console.error(msg);\n        }\n        // Telegram must only fire for rows that actually persisted.\n        await sendTelegramAlerts(insertedRows as any, cfg);\n      }'''
+          if old not in text:
+              raise SystemExit('scanner insert block marker not found')
+          text = text.replace(old, new, 1)
+          scan.write_text(text)
+
+          upd = Path('supabase/functions/update-settings/index.ts')
+          ut = upd.read_text()
+          old = '"veritas_sl_mult", "veritas_tp_mult", "veritas_min_hurst",'
+          new = '"veritas_sl_mult", "veritas_tp_mult", "legacy_atr_multipliers_enabled", "legacy_sl_mult", "legacy_tp_mult", "veritas_min_hurst",'
+          if old not in ut:
+              raise SystemExit('update-settings whitelist marker not found')
+          ut = ut.replace(old, new, 1)
+          old = '"veritas_sl_mult","veritas_tp_mult","veritas_min_hurst",'
+          new = '"veritas_sl_mult","veritas_tp_mult","legacy_atr_multipliers_enabled","legacy_sl_mult","legacy_tp_mult","veritas_min_hurst",'
+          if old not in ut:
+              raise SystemExit('update-settings allowlist marker not found')
+          ut = ut.replace(old, new, 1)
+          upd.write_text(ut)
+
+          ui = Path('src/routes/index.tsx')
+          t = ui.read_text()
+
+          old = '  scan_interval_minutes: 5 | 15 | 30;\n  veritas_sl_mult?: number;'
+          new = '  scan_interval_minutes: 5 | 15 | 30;\n  legacy_atr_multipliers_enabled?: boolean;\n  legacy_sl_mult?: number;\n  legacy_tp_mult?: number;\n  veritas_sl_mult?: number;'
+          if old not in t:
+              raise SystemExit('UI AppSettings type marker not found')
+          t = t.replace(old, new, 1)
+
+          old = '  const [scanGates, setScanGates] = useState<Record<ScanGateKey, number>>(initial);\n  const [savedFlash, setSavedFlash] = useState<ScanGateKey | null>(null);'
+          new = '  const [scanGates, setScanGates] = useState<Record<ScanGateKey, number>>(initial);\n  const [legacyAtrEnabled, setLegacyAtrEnabled] = useState(!!appSettings?.legacy_atr_multipliers_enabled);\n  const [legacySlMult, setLegacySlMult] = useState(appSettings?.legacy_sl_mult ?? 1);\n  const [legacyTpMult, setLegacyTpMult] = useState(appSettings?.legacy_tp_mult ?? 1);\n  const [savedFlash, setSavedFlash] = useState<ScanGateKey | null>(null);'
+          if old not in t:
+              raise SystemExit('UI state marker not found')
+          t = t.replace(old, new, 1)
+
+          old = '  useEffect(() => {\n    if (!appSettings) return;\n    setScanGates({'
+          new = '  useEffect(() => {\n    if (!appSettings) return;\n    setLegacyAtrEnabled(!!appSettings.legacy_atr_multipliers_enabled);\n    setLegacySlMult(appSettings.legacy_sl_mult ?? 1);\n    setLegacyTpMult(appSettings.legacy_tp_mult ?? 1);\n    setScanGates({'
+          if old not in t:
+              raise SystemExit('UI effect marker not found')
+          t = t.replace(old, new, 1)
+
+          marker = '''          {renderGroup(\n            "VERITAS Strategy Parameters",'''
+          insert = '''          <div className="pt-3 mt-3 border-t border-border/60">\n            <div className="text-[11px] font-bold uppercase tracking-widest text-primary/90">Legacy 15M ATR Exit Controls</div>\n            <div className="text-[10px] text-muted-foreground mb-2">Optional exit-distance expansion for EMA Pullback, BOS Retest, OB/FVG and CHOCH. Entry logic is unchanged. Disabled = legacy exits.</div>\n            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded bg-background/60 border border-border/60 mb-2">\n              <div>\n                <div className="text-xs font-semibold">Enable ATR multipliers</div>\n                <div className="text-[10px] text-muted-foreground">Scale the existing 15m stop and target distances independently.</div>\n              </div>\n              <Toggle on={legacyAtrEnabled} onChange={(v) => { setLegacyAtrEnabled(v); saveAppSettings({ legacy_atr_multipliers_enabled: v }); }} />\n            </div>\n            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">\n              <label className="text-xs">\n                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">LEGACY SL MULT (×ATR)</div>\n                <input type="number" step={0.1} min={0.5} max={5} value={legacySlMult}\n                  onChange={e => { const n = parseFloat(e.target.value); if (isFinite(n)) setLegacySlMult(n); }}\n                  onBlur={e => { const n = Math.min(5, Math.max(0.5, parseFloat(e.target.value) || 1)); setLegacySlMult(n); saveAppSettings({ legacy_sl_mult: n }); }}\n                  disabled={!legacyAtrEnabled}\n                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40" />\n                <div className="text-[10px] text-muted-foreground/70 mt-0.5">1.0 = original · 1.5 = 50% wider · 2.0 = double</div>\n              </label>\n              <label className="text-xs">\n                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">LEGACY TP MULT (×ATR)</div>\n                <input type="number" step={0.1} min={0.5} max={5} value={legacyTpMult}\n                  onChange={e => { const n = parseFloat(e.target.value); if (isFinite(n)) setLegacyTpMult(n); }}\n                  onBlur={e => { const n = Math.min(5, Math.max(0.5, parseFloat(e.target.value) || 1)); setLegacyTpMult(n); saveAppSettings({ legacy_tp_mult: n }); }}\n                  disabled={!legacyAtrEnabled}\n                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40" />\n                <div className="text-[10px] text-muted-foreground/70 mt-0.5">Independent of SL · 2.0 = double target distance</div>\n              </label>\n            </div>\n            <div className="mt-2 text-[10px] text-muted-foreground font-mono">\n              Active: {legacyAtrEnabled ? `SL ×${legacySlMult} · TP ×${legacyTpMult}` : "OFF · original legacy exits"}\n            </div>\n          </div>\n\n          {renderGroup(\n            "VERITAS Strategy Parameters",'''
+          if marker not in t:
+              raise SystemExit('UI settings render marker not found')
+          t = t.replace(marker, insert, 1)
+          ui.write_text(t)
+
+          # Update the generated Supabase types so TypeScript sees the new setting.
+          types = Path('src/integrations/supabase/types.ts')
+          tt = types.read_text()
+          old = '          legacy_tp_mult: number\n'
+          if old in tt and 'legacy_atr_multipliers_enabled: boolean' not in tt:
+              tt = tt.replace(old, '          legacy_atr_multipliers_enabled: boolean\n          legacy_sl_mult: number\n          legacy_tp_mult: number\n', 1)
+          types.write_text(tt)
+
+      - name: Commit patches and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/scan-signals/index.ts supabase/functions/update-settings/index.ts src/routes/index.tsx src/integrations/supabase/types.ts
+          git rm .github/workflows/one-shot-legacy-atr-controls.yml
+          git commit -m "feat: add toggleable legacy ATR exit controls"
+          git push
