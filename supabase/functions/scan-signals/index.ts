@@ -2055,10 +2055,13 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, legacy_atr_multipliers_enabled, legacy_sl_mult, legacy_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);
+    const legacyAtrEnabled = !!(veritasCfgRow as any)?.legacy_atr_multipliers_enabled;
+    const legacySlMult     = Number((veritasCfgRow as any)?.legacy_sl_mult ?? 1);
+    const legacyTpMult     = Number((veritasCfgRow as any)?.legacy_tp_mult ?? 1);
     const veritasMinHurst  = Number((veritasCfgRow as any)?.veritas_min_hurst  ?? 0.55);
     const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
@@ -2287,6 +2290,22 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
           continue;
         }
+        // Optional legacy ATR exit expansion. Entry logic is untouched; only the
+        // already-derived 15m stop/target distances are scaled. Disabled = exact
+        // legacy behavior. SL and TP have independent multipliers.
+        const adjustedRaw = legacyAtrEnabled && ["EMA Pullback", "BOS Retest", "SMC OB/FVG", "CHOCH"].includes(name)
+          ? (() => {
+              const slDistance = Math.abs(raw.entry - raw.stop_loss) * Math.max(0.1, legacySlMult);
+              const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);
+              const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);
+              return {
+                ...raw,
+                stop_loss: raw.direction === "Long" ? raw.entry - slDistance : raw.entry + slDistance,
+                tp1: raw.direction === "Long" ? raw.entry + tp1Distance : raw.entry - tp1Distance,
+                tp2: raw.direction === "Long" ? raw.entry + tp2Distance : raw.entry - tp2Distance,
+              };
+            })()
+          : raw;
         // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)
         if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
@@ -2307,7 +2326,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
-        const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats);
+        const q = qualifyAndScore(adjustedRaw, d.c5, bias, currentPrice, empiricalStats);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
@@ -2539,9 +2558,21 @@ async function runScanJob(
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
-      const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
-      insertedRows = (ins as any) ?? [];
-      await sendTelegramAlerts(toInsert, cfg);
+      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
+      if (insertErr) {
+        const msg = `Signal insert failed: ${insertErr.message}`;
+        errors.push(msg);
+        console.error(msg);
+      } else {
+        insertedRows = (ins as any) ?? [];
+        if (insertedRows.length !== toInsert.length) {
+          const msg = `Signal insert count mismatch: expected ${toInsert.length}, inserted ${insertedRows.length}`;
+          errors.push(msg);
+          console.error(msg);
+        }
+        // Telegram must only fire for rows that actually persisted.
+        await sendTelegramAlerts(insertedRows as any, cfg);
+      }
 
       // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
       const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
@@ -2625,7 +2656,7 @@ async function runScanJob(
     }
 
     return {
-      signals, new_signals: toInsert.length,
+      signals, new_signals: insertedRows.length,
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),

@@ -137,6 +137,9 @@ type AppSettings = {
   metaapi_live_token_configured: boolean;
   metaapi_is_cent_account_live: boolean;
   scan_interval_minutes: 5 | 15 | 30;
+  legacy_atr_multipliers_enabled?: boolean;
+  legacy_sl_mult?: number;
+  legacy_tp_mult?: number;
   veritas_sl_mult?: number;
   veritas_tp_mult?: number;
   veritas_min_hurst?: number;
@@ -1660,11 +1663,17 @@ function ScanEngineControlsPanel({
   }), []);
 
   const [scanGates, setScanGates] = useState<Record<ScanGateKey, number>>(initial);
+  const [legacyAtrEnabled, setLegacyAtrEnabled] = useState(!!appSettings?.legacy_atr_multipliers_enabled);
+  const [legacySlMult, setLegacySlMult] = useState(appSettings?.legacy_sl_mult ?? 1);
+  const [legacyTpMult, setLegacyTpMult] = useState(appSettings?.legacy_tp_mult ?? 1);
   const [savedFlash, setSavedFlash] = useState<ScanGateKey | null>(null);
   const [open, setOpen] = useState(true);
 
   useEffect(() => {
     if (!appSettings) return;
+    setLegacyAtrEnabled(!!appSettings.legacy_atr_multipliers_enabled);
+    setLegacySlMult(appSettings.legacy_sl_mult ?? 1);
+    setLegacyTpMult(appSettings.legacy_tp_mult ?? 1);
     setScanGates({
       metaapi_min_confidence:      appSettings.metaapi_min_confidence      ?? 82,
       metaapi_min_rr:              appSettings.metaapi_min_rr              ?? 2.0,
@@ -1806,6 +1815,41 @@ function ScanEngineControlsPanel({
             "Applied in metaapi-execute before placing orders.",
             group2,
           )}
+          <div className="pt-3 mt-3 border-t border-border/60">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-primary/90">Legacy 15M ATR Exit Controls</div>
+            <div className="text-[10px] text-muted-foreground mb-2">Optional exit-distance expansion for EMA Pullback, BOS Retest, OB/FVG and CHOCH. Entry logic is unchanged. Disabled = legacy exits.</div>
+            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded bg-background/60 border border-border/60 mb-2">
+              <div>
+                <div className="text-xs font-semibold">Enable ATR multipliers</div>
+                <div className="text-[10px] text-muted-foreground">Scale the existing 15m stop and target distances independently.</div>
+              </div>
+              <Toggle on={legacyAtrEnabled} onChange={(v) => { setLegacyAtrEnabled(v); saveAppSettings({ legacy_atr_multipliers_enabled: v }); }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <label className="text-xs">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">LEGACY SL MULT (×ATR)</div>
+                <input type="number" step={0.1} min={0.5} max={5} value={legacySlMult}
+                  onChange={e => { const n = parseFloat(e.target.value); if (isFinite(n)) setLegacySlMult(n); }}
+                  onBlur={e => { const n = Math.min(5, Math.max(0.5, parseFloat(e.target.value) || 1)); setLegacySlMult(n); saveAppSettings({ legacy_sl_mult: n }); }}
+                  disabled={!legacyAtrEnabled}
+                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40" />
+                <div className="text-[10px] text-muted-foreground/70 mt-0.5">1.0 = original · 1.5 = 50% wider · 2.0 = double</div>
+              </label>
+              <label className="text-xs">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">LEGACY TP MULT (×ATR)</div>
+                <input type="number" step={0.1} min={0.5} max={5} value={legacyTpMult}
+                  onChange={e => { const n = parseFloat(e.target.value); if (isFinite(n)) setLegacyTpMult(n); }}
+                  onBlur={e => { const n = Math.min(5, Math.max(0.5, parseFloat(e.target.value) || 1)); setLegacyTpMult(n); saveAppSettings({ legacy_tp_mult: n }); }}
+                  disabled={!legacyAtrEnabled}
+                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40" />
+                <div className="text-[10px] text-muted-foreground/70 mt-0.5">Independent of SL · 2.0 = double target distance</div>
+              </label>
+            </div>
+            <div className="mt-2 text-[10px] text-muted-foreground font-mono">
+              Active: {legacyAtrEnabled ? `SL ×${legacySlMult} · TP ×${legacyTpMult}` : "OFF · original legacy exits"}
+            </div>
+          </div>
+
           {renderGroup(
             "VERITAS Strategy Parameters",
             "Controls VERITAS signal generation thresholds. Changes take effect on next scan cycle.",
