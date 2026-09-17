@@ -1,0 +1,45 @@
+name: Patch legacy 15m ATR risk floor
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore: remove one-shot legacy risk patch workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout scanner deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: deploy/scanner-auth-refresh-2
+          fetch-depth: 1
+      - name: Patch legacy exit floor
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/functions/scan-signals/index.ts')
+          s = p.read_text()
+          old = '''              const slDistance = Math.abs(raw.entry - raw.stop_loss) * Math.max(0.1, legacySlMult);\n              const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);\n              const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);'''
+          new = '''              // Legacy risk is anchored to the 15m ATR. Preserve a wider structural\n              // stop when the setup already requires one, but never allow the base\n              // stop distance to be smaller than one full 15m ATR. The user multiplier\n              // is then applied on top of that 15m-sized base distance.\n              const baseSlDistance = Math.max(Math.abs(raw.entry - raw.stop_loss), Math.abs(raw.atr));\n              const slDistance = baseSlDistance * Math.max(0.1, legacySlMult);\n              const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);\n              const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);'''
+          if old not in s:
+              raise SystemExit('target legacy exit block not found; refusing to modify')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add supabase/functions/scan-signals/index.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: anchor legacy exits to 15m ATR floor'
+          git push origin HEAD:deploy/scanner-auth-refresh-2
+      - name: Remove one-shot workflow from main
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          git rm .github/workflows/patch-legacy-risk.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: remove one-shot legacy risk patch workflow'
+          git push origin main
