@@ -2295,7 +2295,9 @@ async function runScanJob(
         // legacy behavior. SL and TP have independent multipliers.
         const adjustedRaw = legacyAtrEnabled && ["EMA Pullback", "BOS Retest", "SMC OB/FVG", "CHOCH"].includes(name)
           ? (() => {
-              const slDistance = Math.abs(raw.entry - raw.stop_loss) * Math.max(0.1, legacySlMult);
+              // Anchor legacy stop risk to at least one full 15m ATR before applying the user multiplier.
+              const baseSlDistance = Math.max(Math.abs(raw.entry - raw.stop_loss), Math.abs(raw.atr));
+              const slDistance = baseSlDistance * Math.max(0.1, legacySlMult);
               const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);
               const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);
               return {
