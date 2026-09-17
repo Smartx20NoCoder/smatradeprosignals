@@ -2744,7 +2744,7 @@ Deno.serve(async (req) => {
               const sig = prismSetup(pair, c5Arr, c15Arr, c1hArr, ss);
               result = sig
                 ? { setup, pair, qualified: true, signal: sig,
-                    debug: `DI=${(sig.mfi_score / 100).toFixed(2)} PZ=${sig.setup.match(/PZ[+~\-]+/)?.[0] ?? "?"} Conf=${sig.confidence}` }
+                    debug: `DI=${(Number(sig.mfi_score ?? 0) / 100).toFixed(2)} PZ=${sig.setup.match(/PZ[+~\-]+/)?.[0] ?? "?"} Conf=${sig.confidence}` }
                 : { setup, pair, qualified: false, reason: "No PRISM signal — check regime DI ratio, pressure zone, 1H structure, or TSI momentum" };
             } else if (setup === "EMA Pullback") {
               const sig = emaPullback(pair, c5Arr, c15Arr);
