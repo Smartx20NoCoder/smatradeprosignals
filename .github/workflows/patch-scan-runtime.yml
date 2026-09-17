@@ -1,0 +1,41 @@
+name: Patch scan runtime safety (temporary)
+on:
+  push:
+    branches: [deploy/scanner-auth-refresh-2]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deploy/scanner-auth-refresh-2
+          fetch-depth: 1
+      - name: Patch runtime safety
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('supabase/functions/scan-signals/index.ts')
+          s=p.read_text()
+          old='DI=${(sig.mfi_score / 100).toFixed(2)}'
+          new='DI=${(Number(sig.mfi_score ?? 0) / 100).toFixed(2)}'
+          if old not in s: raise SystemExit('PRISM debug expression not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add supabase/functions/scan-signals/index.ts
+          git diff --cached --quiet || git commit -m 'fix: prevent scan runtime toFixed crash'
+          git push origin HEAD:deploy/scanner-auth-refresh-2
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/patch-scan-runtime.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet || git commit -m 'chore: remove temporary scan runtime patch workflow'
+          git push origin HEAD:deploy/scanner-auth-refresh-2
