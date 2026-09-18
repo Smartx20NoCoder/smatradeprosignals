@@ -4,21 +4,15 @@
 // with an ~7.8s gap and pair+timeframe candle data is cached for at least 10 minutes.
 // One signal per pair per direction (highest confidence wins).
 //
-// v3.1: Disabled legacy setups are kept out of mergeFamily(), so a disabled
-// setup cannot combine with — or silently ride inside — an enabled one.
-//
-// v3.2: Reverted pair scanning to strictly follow pair_auto_execute again.
-// The CORE_PAIRS override (added to fix a confidence-gate deadlock) had a side
-// effect: pairs the user disabled (e.g. GBP/JPY, USD/JPY, ETH/USD, XRP/USD)
-// were still scanned and could generate real, alertable signals — and the
-// alert-suppression logic only ever checked setup_auto_execute, never
-// pair_auto_execute, so those signals reached Telegram and the in-app
-// notification with no way to suppress them short of manual cleanup. Since
-// the actual deadlock cause was the confidence threshold (fixed separately in
-// app_settings), not the scan breadth, pair_auto_execute can safely go back
-// to being the single source of truth for which pairs get scanned at all.
-// CORE_PAIRS is left declared below (unused) rather than removed, in case
-// scan breadth for empirical-stats coverage is revisited later.
+// v3.1: Fixed a leak where a disabled legacy setup (setup_auto_execute[x]=false)
+// could still ride along inside a merged compound signal — e.g. disabling
+// "Session Range Break" didn't stop "EMA Pullback + Session Range Break" from
+// generating, alerting, and saving as a fully-qualified signal, because the
+// merge step's paper_only check only ever inspected the FIRST component of a
+// combined setup name. Disabled-setup signals now go into a separate
+// legacyPaperOnly bucket that never enters mergeFamily(), so a disabled
+// setup can no longer combine with — or silently ride inside — an enabled
+// one. It's still individually paper-tracked on its own, same as before.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkInternalAuth } from "../_shared/auth.ts";
 
@@ -41,9 +35,9 @@ const PAIRS = [
   "AUD/JPY",
   "AUD/USD",
 ];
-// Retired setups are never evaluated or emitted. This code gate is independent
-// of editable setup_auto_execute settings and protects old configuration rows.
-const RETIRED_SETUPS = new Set<string>(["Session Range Break"]);
+// Disabled setups — kept in code but filtered out of signal generation.
+// Previously hard-disabled setups are now controlled via setup_auto_execute (default off).
+const DISABLED_SETUPS = new Set<string>();
 const TFS = [
   { label: "5m", td: "5min" },
   { label: "15m", td: "15min" },
@@ -51,15 +45,6 @@ const TFS = [
 ];
 const CACHE_TTL_MIN_BY_TF: Record<string, number> = { "1m": 4.5, "5m": 4.5, "15m": 14.5, "1h": 59.5 };
 const DEFAULT_CACHE_TTL_MIN = 4.5;
-
-// Keep forming bars out of signal decisions. TwelveData time_series normally
-// includes the current bar; using it for a 15m setup or its 1h bias can make the
-// setup/SL/TP move while the candle is still open.
-function closedCandles(candles: Candle[], timeframeMinutes: number, now = Date.now()): Candle[] {
-  const periodMs = timeframeMinutes * 60_000;
-  return candles.filter((c) => Number(c.t) + periodMs <= now - 1000);
-}
-
 const DAILY_BUDGET = 800;
 // Spacing between every individual TwelveData request: 7.8s → 60000/7800 ≈ 7.7 calls/min,
 // safely under TwelveData's 8/min hard limit. (Previously 4500ms = ~13.3/min — was
@@ -350,10 +335,7 @@ async function fetchCandles(
   // 2. Build URL with currently active key
   const fetchKey: KeyIdx = state.active;
   const primaryKey = keys[fetchKey] ?? keys[state.configured[0]!] ?? "";
-  // Twelve Data otherwise returns each instrument in its exchange timezone.
-  // Treating those wall-clock values as UTC put FX/gold candles hours in the
-  // future, breaking candle fingerprints and trade-resolution ordering.
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&timezone=UTC&apikey=${primaryKey}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair)}&interval=${tf.td}&outputsize=${outputSize}&apikey=${primaryKey}`;
   
   let r: Response;
   try {
@@ -438,11 +420,7 @@ async function fetchCandles(
 
   // Check for normal malformed payloads
   if (!j.values || !Array.isArray(j.values)) {
-    console.error("TwelveData malformed/error payload", pair, tf.label, r.status, j?.message ?? j);
-    if (cached) {
-      emit?.({ type: "progress", pair, timeframe: tf.label, status: "cached", message: `Malformed TwelveData response (${r.status}) — using last cached candles` });
-      return { candles: cached.candles as Candle[], usedApi: 1, usedKey: fetchKey, cached: true };
-    }
+    console.error("TwelveData error", pair, tf.label, r.status, j);
     emit?.({ type: "progress", pair, timeframe: tf.label, status: "error", message: `Fetch failed (${r.status})` });
     const err = new Error(`Failed to parse candles for ${pair} ${tf.label}`);
     (err as any).usedApi = 1;
@@ -451,17 +429,14 @@ async function fetchCandles(
   }
 
   // 5. Format & Merge Cached Data
-  const maxCandleTime = Date.now() + 5 * 60_000;
   let fresh: Candle[] = j.values.map((v: any) => ({
     t: new Date(v.datetime + "Z").getTime(),
     o: +v.open, h: +v.high, l: +v.low, c: +v.close,
     v: v.volume ? +v.volume : undefined,
-  })).filter((c: Candle) => Number.isFinite(c.t) && c.t <= maxCandleTime).reverse();
+  })).reverse();
 
   if (cached) {
-    // Discard legacy future-dated cache rows produced before timezone=UTC was
-    // explicit, then merge only chronologically valid candles.
-    const prev = (cached.candles as Candle[]).filter((c) => Number.isFinite(c.t) && c.t <= maxCandleTime);
+    const prev = cached.candles as Candle[];
     const merged = [...prev];
     const seen = new Set(merged.map((x) => x.t));
     for (const f of fresh) {
@@ -512,18 +487,18 @@ function emaPullback(pair: string, c5: Candle[], c15: Candle[]): RawSignal | nul
   const a15 = atr(c15);
   if (a === 0 || a15 === 0 || Math.abs(e9 - e21v) / a > 0.3) return null;
   const touched = last.l <= Math.max(e9, e21v) && last.h >= Math.min(e9, e21v);
-  const ct = new Date(c15.at(-1)!.t).toISOString();
+  const ct = new Date(last.t).toISOString();
   if (trendUp && touched && last.c > last.o && last.c > prev.h) {
     const entry = (e9 + e21v) / 2, sl = Math.min(e21v, last.l) - a15 * 0.3;
     const risk = entry - sl; if (risk <= 0) return null;
-    return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Long",
-      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
+    return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Long",
+      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
   }
   if (trendDown && touched && last.c < last.o && last.c < prev.l) {
     const entry = (e9 + e21v) / 2, sl = Math.max(e21v, last.h) + a15 * 0.3;
     const risk = sl - entry; if (risk <= 0) return null;
-    return { pair, timeframe: "15m", setup: "EMA Pullback", direction: "Short",
-      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
+    return { pair, timeframe: "5m", setup: "EMA Pullback", direction: "Short",
+      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
   }
   return null;
 }
@@ -544,20 +519,54 @@ function bos(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const structure = c15.slice(-21, -1); if (structure.length < 20) return null;
   const sh = Math.max(...structure.map(x => x.h)), sl = Math.min(...structure.map(x => x.l));
   const recent = c5.slice(-3), last = c5.at(-1)!;
-  const ct = new Date(c15.at(-1)!.t).toISOString();
+  const ct = new Date(last.t).toISOString();
   if (e21 > e50 && recent.some(x => x.c > sh)) {
     if (!(last.l <= sh + a * 0.2 && last.c > sh)) return null;
     const entry = sh, slp = sh - a15 * 0.8, risk = entry - slp;
     if (risk <= 0) return null;
-    return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Long",
-      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a15, candle_time: ct };
+    return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Long",
+      entry, stop_loss: slp, tp1: entry + risk * 1.5, tp2: entry + risk * 3, rr: 3, atr: a, candle_time: ct };
   }
   if (e21 < e50 && recent.some(x => x.c < sl)) {
     if (!(last.h >= sl - a * 0.2 && last.c < sl)) return null;
     const entry = sl, slp = sl + a15 * 0.8, risk = slp - entry;
     if (risk <= 0) return null;
-    return { pair, timeframe: "15m", setup: "BOS Retest", direction: "Short",
-      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a15, candle_time: ct };
+    return { pair, timeframe: "5m", setup: "BOS Retest", direction: "Short",
+      entry, stop_loss: slp, tp1: entry - risk * 1.5, tp2: entry - risk * 3, rr: 3, atr: a, candle_time: ct };
+  }
+  return null;
+}
+
+function sessionRangeBreak(pair: string, c5: Candle[]): RawSignal | null {
+  if (c5.length < 30) return null;
+  const a = atr(c5); if (a === 0) return null;
+  const now = new Date(), hUTC = now.getUTCHours();
+  // 30-minute session range windows: London 07:00–07:30 UTC, NY 13:30–14:00 UTC.
+  let rStartMin: number | null = null;
+  if (hUTC >= 8 && hUTC < 11) rStartMin = 7 * 60;            // London: 07:00–07:30
+  else if (hUTC >= 14 && hUTC < 17) rStartMin = 13 * 60 + 30; // NY: 13:30–14:00
+  if (rStartMin === null) return null;
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const rStart = today.getTime() + rStartMin * 60_000, rEnd = rStart + 30 * 60_000;
+  const range = c5.filter(x => x.t >= rStart && x.t < rEnd);
+  if (range.length < 4) return null;
+  const rh = Math.max(...range.map(x => x.h)), rl = Math.min(...range.map(x => x.l));
+  if (rh - rl > a * 3) return null;
+  const after = c5.filter(x => x.t >= rEnd); if (!after.length) return null;
+  const last = after.at(-1)!;
+  const ct = new Date(last.t).toISOString();
+  if (Math.abs(last.c - last.o) < a * 0.6) return null;
+  if (last.c > rh) {
+    const entry = rh, sl = rl, risk = entry - sl;
+    if (risk <= 0 || risk > a * 4) return null;
+    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Long",
+      entry, stop_loss: sl, tp1: entry + risk * 1.5, tp2: entry + risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
+  }
+  if (last.c < rl) {
+    const entry = rl, sl = rh, risk = sl - entry;
+    if (risk <= 0 || risk > a * 4) return null;
+    return { pair, timeframe: "5m", setup: "Session Range Break", direction: "Short",
+      entry, stop_loss: sl, tp1: entry - risk * 1.5, tp2: entry - risk * 2.5, rr: 2.5, atr: a, candle_time: ct };
   }
   return null;
 }
@@ -568,7 +577,7 @@ function smcOrderBlock(pair: string, c5: Candle[], c15: Candle[]): RawSignal | n
   const e21_15 = ema(c15.map(x => x.c), 21).at(-1)!;
   const e50_15 = ema(c15.map(x => x.c), 50).at(-1)!;
   const last5 = c5.at(-1)!;
-  const ct = new Date(c15.at(-1)!.t).toISOString();
+  const ct = new Date(last5.t).toISOString();
   // Displacement sequence, order block, and FVG identified on 15m — this is what
   // an order block actually is in practice: an HTF point of interest, not a
   // 5-minute one. The 5m chart's only job now is to confirm price has retraced
@@ -626,7 +635,7 @@ function choch(pair: string, c5: Candle[], c15: Candle[]): RawSignal | null {
   const brokeLow = last15.c < ll1.v;
 
   const last5 = c5.at(-1)!;
-  const ct = new Date(c15.at(-1)!.t).toISOString();
+  const ct = new Date(last5.t).toISOString();
   const tol = a15 * 0.2; // 5m retest tolerance around the 15m break level
 
   if (lh1.v < lh2.v && ll1.v < ll2.v && sweptLow && brokeHigh) {
@@ -791,7 +800,6 @@ function veritasSetup(
   c5: Candle[],
   c15: Candle[],
   c1m: Candle[] | null,
-  c1h: Candle[],
   ss: number,
   slMult    = 1.5,
   tpMult    = 2.5,
@@ -802,7 +810,7 @@ function veritasSetup(
 
   // ── Instrument guard ─────────────────────────────────────────
   if (!VERITAS_PAIRS.has(pair)) return null;
-  if (c5.length < 65 || c15.length < 110 || c1h.length < 50) return null;
+  if (c5.length < 65 || c15.length < 110) return null;
 
   const closes5  = c5.map((x) => Number(x.c));
   const closes15 = c15.map((x) => Number(x.c));
@@ -820,11 +828,12 @@ function veritasSetup(
   const hRegime  = hurst > 0.60 || hurst < 0.40 ? "strong" : "moderate";
   const regScore = hRegime === "strong" ? 25 : 20;
 
-  // ── PILLAR II: 1H Directional Bias ───────────────────────────
-  // 15M defines the setup/regime; 1H defines the tradable direction.
-  const macroBias = htfBias(c1h);
-  const htfBull = macroBias === "bull";
-  const htfBear = macroBias === "bear";
+  // ── PILLAR II: HTF Bias (15M close vs 15-period EMA) ─────────
+  const htfEMA15 = veritasEMA(closes15, 15);
+  const htfEMA   = htfEMA15[htfEMA15.length - 1];
+  const htfLast  = closes15[closes15.length - 1];
+  const htfBull  = htfLast > htfEMA;
+  const htfBear  = htfLast < htfEMA;
   if (!htfBull && !htfBear) return null;
 
   // ── PILLAR III: TSI Momentum (5M) ────────────────────────────
@@ -887,8 +896,7 @@ function veritasSetup(
   if (spread5m > maxSpread) return null;
 
   const atrVal             = calcATR14(c5);
-  const setupAtrVal         = calcATR14(c15);
-  if (atrVal <= 0 || setupAtrVal <= 0) return null;
+  if (atrVal <= 0) return null;
   const ps                 = pipSize(pair);
   const [atrMin, atrMax]   = VERITAS_ATR_RANGE[pair] ?? [0, Infinity];
   const atrPips            = atrVal / ps;
@@ -919,8 +927,8 @@ function veritasSetup(
 
   // ── Entry / SL / TP (ATR-based) ───────────────────────────────
   const entry   = Number(last1m.c);
-  const slDist  = slMult * setupAtrVal;
-  const tp2Dist = tpMult * setupAtrVal;
+  const slDist  = slMult * atrVal;
+  const tp2Dist = tpMult * atrVal;
 
   const tp1Dist = tp2Dist * 0.4;
   const sl      = isLong ? entry - slDist  : entry + slDist;
@@ -930,12 +938,12 @@ function veritasSetup(
 
   const regimeLabel = isTrending ? "Trend" : "MeanRev";
   const snrLabel    = snr > 60 ? "SNR++" : "SNR+";
-  const candleTime  = new Date(c15.at(-1)!.t).toISOString();
+  const candleTime  = new Date(last5.t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
     pair,
-    timeframe:     "15m",
+    timeframe:     "5m",
     setup:         `VERITAS (${signalGrade} H=${hurst.toFixed(2)} ${regimeLabel} ${snrLabel})`,
     direction,
     entry:         +entry.toFixed(5),
@@ -943,7 +951,7 @@ function veritasSetup(
     tp1:           +tp1.toFixed(5),
     tp2:           +tp2.toFixed(5),
     rr,
-    atr:           setupAtrVal,
+    atr:           atrVal,
     candle_time:   candleTime,
     session_score: sessScore * 5,
     confidence,
@@ -989,17 +997,11 @@ type QSSRegime = "COMPRESSION" | "EXPANSION_BULL" | "EXPANSION_BEAR" | "TRANSITI
 
 function qssAVRD(c5: Candle[], cHtf: Candle[]): QSSRegime {
   const atr5 = qssATR(c5, 14);
-  if (atr5.length < 20) return "TRANSITION";
-  // Volatility regime is classified on the entry/refinement timeframe itself.
-  // Comparing raw 5m ATR dollars to 1h/15m ATR dollars is dimensionally invalid.
-  const alignedCloses = c5.slice(14).map(c => c.c);
-  const normAtr = atr5.map((a, i) => {
-    const close = alignedCloses[i] ?? c5[c5.length - 1].c;
-    return close > 0 ? a / close : 0;
-  });
-  const currentAtr5 = normAtr[normAtr.length - 1];
-  const p20 = qssPercentile(normAtr, 20);
-  const p60 = qssPercentile(normAtr, 60);
+  const atrHtf = qssATR(cHtf, 14);
+  if (atr5.length < 3 || atrHtf.length < 10) return "TRANSITION";
+  const currentAtr5 = atr5[atr5.length - 1];
+  const p20 = qssPercentile(atrHtf, 20);
+  const p60 = qssPercentile(atrHtf, 60);
 
   if (currentAtr5 < p20) {
     const last5 = c5.slice(-5);
@@ -1174,8 +1176,8 @@ function qssSetup(
 ): Signal | null {
   const isCrypto = pair.includes("BTC") || pair.includes("ETH") || pair.includes("XRP");
   const sym = pair.toUpperCase();
-  const cHtf = c1h;
-  if (c5.length < 50 || c15.length < 30 || cHtf.length < 50) return null;
+  const cHtf = isCrypto ? c15 : c1h;
+  if (c5.length < 50 || cHtf.length < 20) return null;
 
   const regime = qssAVRD(c5, cHtf);
   if (regime === "COMPRESSION" || regime === "TRANSITION") return null;
@@ -1202,14 +1204,13 @@ function qssSetup(
 
   const atr5arr = qssATR(c5, 14);
   const atr5 = atr5arr[atr5arr.length - 1] ?? 0;
-  const atr15 = calcATR14(c15);
-  if (atr5 <= 0 || atr15 <= 0) return null;
+  if (atr5 <= 0) return null;
 
   const entry = lv.ce;
   const regimeMult = 1.5;
-  const slFromAtr = atr15 * regimeMult;
+  const slFromAtr = atr5 * regimeMult;
   const slFromVoid = lv.width * 1.2;
-  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr15 * 3.0);
+  const slDist = Math.min(Math.max(slFromAtr, slFromVoid), atr5 * 3.0);
   const sl = lv.isLong ? entry - slDist : entry + slDist;
 
   const rrTarget = vwsaScore >= 90 ? 2.5
@@ -1237,11 +1238,11 @@ function qssSetup(
 
   const orderType = lv.isLong ? "Buy Limit" : "Sell Limit";
   const regimeLabel = regime === "EXPANSION_BULL" ? "ExpBull" : "ExpBear";
-  const candleTime = new Date(c15[c15.length - 1].t).toISOString();
+  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
 
   return {
     pair,
-    timeframe: "15m",
+    timeframe: "5m",
     setup: `QSS (${regimeLabel} VWSA=${vwsaScore})`,
     direction: lv.isLong ? "Long" : "Short",
     entry: +entry.toFixed(5),
@@ -1249,7 +1250,7 @@ function qssSetup(
     tp1: +tp1.toFixed(5),
     tp2: +tp2.toFixed(5),
     rr: +rrTarget.toFixed(2),
-    atr: atr15,
+    atr: atr5,
     candle_time: candleTime,
     session_score: sessionScoreVal,
     confidence,
@@ -1268,7 +1269,7 @@ function qssSetup(
 // Unique ScalpEdge proprietary setup — not a known public system.
 // Five-layer mechanical filter: regime must confirm, pressure zone
 // must qualify, structure must align, momentum must be igniting NOW.
-// Designed for: FX, Gold, Crypto | 15m setup | 5m refinement | 1H macro bias
+// Designed for: FX, Gold, Crypto | 5m entry | 1H macro bias
 // ═══════════════════════════════════════════════════════════════
 
 // DI+/DI- calculation (Directional Index, 14-period)
@@ -1455,12 +1456,11 @@ function prismSetup(
 ): Signal | null {
   if (c5.length < 60 || c15.length < 70 || c1h.length < 55) return null;
   const atr5m = calcATR14(c5);
-  const atr15m = calcATR14(c15);
-  if (atr5m <= 0 || atr15m <= 0) return null;
+  if (atr5m <= 0) return null;
 
   const { diPlus, diMinus } = calcDI(c5, 14);
   const diDiff = Math.abs(diPlus - diMinus);
-  const diRatio = diDiff / (diPlus + diMinus + 1e-10);
+  const diRatio = diDiff / (atr5m + 1e-10);
   if (diRatio < 0.15) return null;
 
   const regimeIsStrong = diRatio >= 0.35;
@@ -1504,7 +1504,7 @@ function prismSetup(
 
   const entry = pz.mid;
   const slMult = regimeIsStrong ? 1.2 : regimeIsModerate ? 1.5 : 1.8;
-  const slRaw = isLong ? entry - atr15m * slMult : entry + atr15m * slMult;
+  const slRaw = isLong ? entry - atr5m * slMult : entry + atr5m * slMult;
   const spread = spreadPrice(pair);
   const entryAdj = isLong ? entry + spread : entry - spread;
   const slAdj = isLong ? slRaw - spread : slRaw + spread;
@@ -1512,8 +1512,8 @@ function prismSetup(
   if (risk <= 0) return null;
 
   const tp2Mult = pzScore >= 22 ? 3.0 : pzScore >= 18 ? 2.5 : 2.0;
-  const tp1Adj = isLong ? entryAdj + atr15m * 1.0 : entryAdj - atr15m * 1.0;
-  const tp2Adj = isLong ? entryAdj + atr15m * tp2Mult : entryAdj - atr15m * tp2Mult;
+  const tp1Adj = isLong ? entryAdj + atr5m * 1.0 : entryAdj - atr5m * 1.0;
+  const tp2Adj = isLong ? entryAdj + atr5m * tp2Mult : entryAdj - atr5m * tp2Mult;
   const rrActual = Math.abs(tp2Adj - entryAdj) / risk;
   if (rrActual < 1.8) return null;
 
@@ -1522,12 +1522,12 @@ function prismSetup(
 
   const regimeLabel = regimeIsStrong ? "STR" : "MOD";
   const pzLabel = pzScore >= 22 ? "PZ++" : pzScore >= 18 ? "PZ+" : "PZ~";
-  const candleTime = new Date(c15[c15.length - 1].t).toISOString();
+  const candleTime = new Date(c5[c5.length - 1].t).toISOString();
   const direction: "Long" | "Short" = isLong ? "Long" : "Short";
 
   return {
     pair,
-    timeframe: "15m",
+    timeframe: "5m",
     setup: `PRISM (${regimeLabel} DI=${diRatio.toFixed(2)} ${pzLabel})`,
     direction,
     entry: +entryAdj.toFixed(5),
@@ -1535,7 +1535,7 @@ function prismSetup(
     tp1: +tp1Adj.toFixed(5),
     tp2: +tp2Adj.toFixed(5),
     rr: +rrActual.toFixed(2),
-    atr: atr15m,
+    atr: atr5m,
     candle_time: candleTime,
     session_score: sessionScoreVal,
     confidence,
@@ -1714,6 +1714,9 @@ function qualifyAndScore(
   let conf = emp.pct;
   if (news) conf -= 15; // genuine external risk factor, independent of the setup's own historical rate
   conf = Math.max(1, Math.min(99, conf));
+  if (conf < 55) {
+    return { signal: null, reason: `Confidence too low (${conf}%, from ${emp.n} historical ${pair} ${family} trades${emp.n < MIN_SAMPLE ? " — thin sample, still shrunk toward pair average" : ""})` };
+  }
 
   return {
     signal: {
@@ -1770,6 +1773,7 @@ function setupFamilyOf(setupName: string): string {
   if (base.startsWith("PRISM")) return "PRISM";
   if (base === "EMA Pullback") return "EMA Pullback";
   if (base === "BOS Retest") return "BOS Retest";
+  if (base === "Session Range Break") return "Session Range Break";
   if (base === "SMC OB/FVG" || base === "OB+FVG" || base === "Order Block") return "SMC OB/FVG";
   if (base === "CHOCH") return "CHOCH";
   return base;
@@ -1873,9 +1877,7 @@ type ActiveSettings = {
   metaapi_is_cent_account_live: boolean;
 };
 
-// NOTE: no longer used by the pair filter below (see v3.2 note at top of file) —
-// pair_auto_execute alone decides what gets scanned now. Left declared, unused,
-// in case scan-breadth-for-stats is revisited later.
+// Core pairs always scanned regardless of pair_auto_execute setting.
 const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
@@ -2033,7 +2035,7 @@ async function runScanJob(
   emit?: ProgressEmitter,
   source: string = "manual",
 ) {
-    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 60 : 120) : (tf === "1h" ? 80 : 150);
+    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 30 : 8) : (tf === "1h" ? 60 : 80);
     const tfsToFetch = TFS;
     const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
     const initialExhausted = new Set<KeyIdx>();
@@ -2055,13 +2057,10 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, legacy_atr_multipliers_enabled, legacy_sl_mult, legacy_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
-    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);
-    const legacyAtrEnabled = !!(veritasCfgRow as any)?.legacy_atr_multipliers_enabled;
-    const legacySlMult     = Number((veritasCfgRow as any)?.legacy_sl_mult ?? 1);
-    const legacyTpMult     = Number((veritasCfgRow as any)?.legacy_tp_mult ?? 1);
+    const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
     const veritasMinHurst  = Number((veritasCfgRow as any)?.veritas_min_hurst  ?? 0.55);
     const veritasMinSnr    = Number((veritasCfgRow as any)?.veritas_min_snr    ?? 40);
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
@@ -2108,15 +2107,15 @@ async function runScanJob(
       console.warn("key threshold rotation check failed", e);
     }
 
-    // Filter pair list for market hours AND pair_auto_execute. pair_auto_execute
-    // is now the single source of truth for what gets scanned at all (v3.2) —
-    // see the note at the top of this file for why the CORE_PAIRS override was
-    // removed.
+    // Filter pair list for weekend / Friday-late: only BTC trades.
+    // Filter to pairs enabled in auto-execute config (core pairs always scan).
     const autoCfg = settings.pair_auto_execute ?? {};
     const setupAutoExec = ((settings as any)?.setup_auto_execute ?? {}) as Record<string, boolean>;
+    // pair_auto_execute is now a TRUE gate: disabled pairs are skipped entirely,
+    // before any candle fetch, regardless of the global auto_trade toggle.
     const allowedPairs = PAIRS
       .filter((p) => isPairAllowedNow(p, nowDate))
-      .filter((p) => autoCfg[p] === true)
+      .filter((p) => autoCfg[p] !== false)
       .sort((a, b) => {
         const aIsVeritas = VERITAS_PAIRS.has(a) ? 0 : 1;
         const bIsVeritas = VERITAS_PAIRS.has(b) ? 0 : 1;
@@ -2170,7 +2169,7 @@ async function runScanJob(
             fetches.push(f);
             accumulateCall(f.usedApi, f.usedKey);
           }
-          pairData[pair] = { c5: closedCandles(fetches[0].candles, 5), c15: closedCandles(fetches[1].candles, 15), c1h: closedCandles(fetches[2].candles, 60), cached: fetches.every(f => f.cached) };
+          pairData[pair] = { c5: fetches[0].candles, c15: fetches[1].candles, c1h: fetches[2].candles, cached: fetches.every(f => f.cached) };
           emit?.({ type: "pair_done", pair, status: "done", message: `${pair} candles ready` });
         } catch (e) {
           accumulateCall(((e as any)?.usedApi ?? 0), ((e as any)?.usedKey ?? keyState.active));
@@ -2190,7 +2189,7 @@ async function runScanJob(
           const size1m = mode === "latest" ? 30 : 60;
           try {
             const f1m = await fetchCandles(supabase, keys, keyState, pair, tf1m, size1m, emit, source);
-            c1m       = closedCandles(f1m.candles, 1);
+            c1m       = f1m.candles;
             c1mCached = f1m.cached;
             accumulateCall(f1m.usedApi, f1m.usedKey);
           } catch (e) {
@@ -2206,9 +2205,9 @@ async function runScanJob(
           accumulateCall(f.usedApi, f.usedKey);
         }
         // tfsToFetch is always TFS (5m, 15m, 1h) — 1h is index 2.
-        const c5  = closedCandles(fetches[0].candles, 5);
-        const c15 = closedCandles(fetches[1].candles, 15);
-        const c1h = closedCandles(fetches[2].candles, 60);
+        const c5  = fetches[0].candles;
+        const c15 = fetches[1].candles;
+        const c1h = fetches[2].candles;
 
         pairData[pair] = {
           c5, c15, c1h, c1m,
@@ -2256,7 +2255,15 @@ async function runScanJob(
     const prismCandidates:   Signal[] = [];
     const legacyCandidates:  Signal[] = [];
     // Disabled-setup signals land here instead of legacyCandidates so they can
-    // never combine with an enabled setup via mergeFamily().
+    // NEVER combine with an enabled setup via mergeFamily(). Previously a
+    // disabled setup (e.g. "Session Range Break") still went into the same
+    // pool as everything else, so if it fired on the same pair+direction as
+    // an enabled setup (e.g. "EMA Pullback") in the same scan cycle, they'd
+    // merge into "EMA Pullback + Session Range Break" — and since
+    // setupFamilyOf() on a merged name only checks the FIRST component, the
+    // disabled half rode along undetected: full alert, full save, as if
+    // 100% enabled. Keeping them fully separate here closes that gap while
+    // still preserving standalone paper-tracking for the disabled setup.
     const legacyPaperOnly:   Signal[] = [];
 
     for (const pair of allowedPairs) {
@@ -2277,11 +2284,14 @@ async function runScanJob(
       const ccys         = pairCurrencies(pair);
       const hits         = blackoutHits(events, ccys, nowDate);
 
-      // ── Legacy setups (EMA Pullback, BOS Retest, SMC, CHOCH) ──
+      // ── Legacy setups (EMA Pullback, BOS Retest, Session, SMC, CHOCH) ──
       const adx15 = calcADX(d.c15);
       const setups: Array<[string, RawSignal | null]> = [
         ["EMA Pullback",        emaPullback(pair, d.c5, d.c15)],
         ["BOS Retest",          bos(pair, d.c5, d.c15)],
+        // Session Range Break is retired from signal generation. Keep the report
+        // slot so the Edge breakdown remains stable, but never call the strategy.
+        ["Session Range Break", null],
         ["SMC OB/FVG",          smcOrderBlock(pair, d.c5, d.c15)],
         ["CHOCH",               choch(pair, d.c5, d.c15)],
       ];
@@ -2290,29 +2300,13 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "none", reason: "No setup pattern" });
           continue;
         }
-        // Optional legacy ATR exit expansion. Entry logic is untouched; only the
-        // already-derived 15m stop/target distances are scaled. Disabled = exact
-        // legacy behavior. SL and TP have independent multipliers.
-        const adjustedRaw = legacyAtrEnabled && ["EMA Pullback", "BOS Retest", "SMC OB/FVG", "CHOCH"].includes(name)
-          ? (() => {
-              const slDistance = Math.abs(raw.entry - raw.stop_loss) * Math.max(0.1, legacySlMult);
-              const tp1Distance = Math.abs(raw.tp1 - raw.entry) * Math.max(0.1, legacyTpMult);
-              const tp2Distance = Math.abs(raw.tp2 - raw.entry) * Math.max(0.1, legacyTpMult);
-              return {
-                ...raw,
-                stop_loss: raw.direction === "Long" ? raw.entry - slDistance : raw.entry + slDistance,
-                tp1: raw.direction === "Long" ? raw.entry + tp1Distance : raw.entry - tp1Distance,
-                tp2: raw.direction === "Long" ? raw.entry + tp2Distance : raw.entry - tp2Distance,
-              };
-            })()
-          : raw;
         // ADX ranging filter — only applied to trend-based setups (EMA Pullback + BOS Retest)
         if ((name === "EMA Pullback" || name === "BOS Retest") && minADX > 0 && adx15 < minADX) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction,
             reason: `ADX ${adx15} < ${minADX} — ranging market` });
           continue;
         }
-        if (RETIRED_SETUPS.has(raw.setup)) {
+        if (DISABLED_SETUPS.has(raw.setup)) {
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `Setup disabled: ${raw.setup}` });
           continue;
         }
@@ -2326,7 +2320,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
-        const q = qualifyAndScore(adjustedRaw, d.c5, bias, currentPrice, empiricalStats);
+        const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
@@ -2348,10 +2342,10 @@ async function runScanJob(
       }
 
       // ── VERITAS (isolated — no merge with legacy) ──
-      if (!RETIRED_SETUPS.has("VERITAS")) {
+      if (!DISABLED_SETUPS.has("VERITAS")) {
         const ssNow   = sessionScore(pair, nowDate);
         const veritas = veritasSetup(
-          pair, d.c5, d.c15, c1m, d.c1h, ssNow,
+          pair, d.c5, d.c15, c1m, ssNow,
           veritasSlMult, veritasTpMult,
           veritasMinHurst, veritasMinSnr,
           veritasMinConf,
@@ -2558,21 +2552,9 @@ async function runScanJob(
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
-      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
-      if (insertErr) {
-        const msg = `Signal insert failed: ${insertErr.message}`;
-        errors.push(msg);
-        console.error(msg);
-      } else {
-        insertedRows = (ins as any) ?? [];
-        if (insertedRows.length !== toInsert.length) {
-          const msg = `Signal insert count mismatch: expected ${toInsert.length}, inserted ${insertedRows.length}`;
-          errors.push(msg);
-          console.error(msg);
-        }
-        // Telegram must only fire for rows that actually persisted.
-        await sendTelegramAlerts(insertedRows as any, cfg);
-      }
+      const { data: ins } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
+      insertedRows = (ins as any) ?? [];
+      await sendTelegramAlerts(toInsert, cfg);
 
       // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
       const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
@@ -2656,7 +2638,7 @@ async function runScanJob(
     }
 
     return {
-      signals, new_signals: insertedRows.length,
+      signals, new_signals: toInsert.length,
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: DAILY_BUDGET - newCalls, mode,
       errors, report, scanned_at: new Date().toISOString(),
@@ -2707,7 +2689,7 @@ Deno.serve(async (req) => {
           const c5  = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "5m",  td: "5min" },  100, undefined, "manual");
           const c15 = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "15m", td: "15min" }, 100, undefined, "manual");
           const c1h = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1h",  td: "1h" },    100, undefined, "manual");
-          c5Arr = closedCandles(c5.candles, 5); c15Arr = closedCandles(c15.candles, 15); c1hArr = closedCandles(c1h.candles, 60);
+          c5Arr = c5.candles; c15Arr = c15.candles; c1hArr = c1h.candles;
         } catch (e) {
           for (const setup of testSetups) {
             results[pair][setup] = { setup, pair, qualified: false, reason: `Candle fetch failed: ${String((e as Error).message ?? e)}` };
@@ -2724,10 +2706,10 @@ Deno.serve(async (req) => {
               if (VERITAS_PAIRS.has(pair)) {
                 try {
                   const f1m = await fetchCandles(supabase, keys, activeKeyRef, pair, { label: "1m", td: "1min" }, 30, undefined, "manual");
-                  c1mArr = closedCandles(f1m.candles, 1);
+                  c1mArr = f1m.candles;
                 } catch { /* 1m fetch failure — VERITAS micro-confirm will correctly return null */ }
               }
-              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, c1hArr, ss);
+              const sig = veritasSetup(pair, c5Arr, c15Arr, c1mArr, ss);
               result = sig
                 ? { setup, pair, qualified: true, signal: sig,
                     debug: `H=${sig.setup.match(/H=([\d.]+)/)?.[1] ?? "?"} SNR=${sig.mfi_score}` }
