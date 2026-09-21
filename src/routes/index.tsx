@@ -634,17 +634,25 @@ function ScalpEdge() {
       update.outcome_r = outcome_r;
       update.closed_at = new Date().toISOString();
     }
-    const { error } = await supabase.from("signals").update(update).eq("id", s.id);
-    if (error) { console.error("setStatus failed", error); alert(`Failed to update status: ${error.message}`); return; }
+    try {
+      const res = await fetch("/api/internal/update-signal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id, status }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.error) { alert(`Failed to update status: ${body?.error ?? res.status}`); return; }
+    } catch (err) { alert(`Failed to update status: ${err instanceof Error ? err.message : "network error"}`); return; }
     await loadSignals();
   }
   async function markPartialTp1Be(s: Signal) {
-    const risk = Math.abs(s.entry - s.stop_loss);
-    const tp1R = risk > 0 ? Math.abs(s.tp1 - s.entry) / risk : 0;
-    const blended = +(tp1R / 2).toFixed(2);
-    await supabase.from("signals")
-      .update({ status: "tp1", partial_close: true, outcome_r: blended, closed_at: new Date().toISOString() })
-      .eq("id", s.id);
+    try {
+      const res = await fetch("/api/internal/update-signal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id, status: "tp1", partial: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.error) { alert(`Failed to mark partial: ${body?.error ?? res.status}`); return; }
+    } catch (err) { alert(`Failed to mark partial: ${err instanceof Error ? err.message : "network error"}`); return; }
     await loadSignals();
   }
 
