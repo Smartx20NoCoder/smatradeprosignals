@@ -1669,6 +1669,7 @@ function empiricalConfidence(stats: EmpiricalStats, pair: string, family: string
 function qualifyAndScore(
   raw: RawSignal, c5: Candle[], bias: "bull" | "bear" | "neutral", currentPrice: number,
   stats: EmpiricalStats,
+  legacySlMult: number, legacyTpMult: number,
 ): { signal: Signal | null; reason?: string } {
   const pair = raw.pair, ps = pipSize(pair), a = raw.atr;
   const atrPips = a / ps;
@@ -1685,9 +1686,27 @@ function qualifyAndScore(
     return { signal: null, reason: `${raw.setup} needs a confirmed 1H trend, not neutral` };
   }
 
+  // Apply the legacy SL/TP multiplier (ATR-based, DB-configurable via
+  // legacy_sl_mult / legacy_tp_mult) on top of each setup's own entry level.
+  // This was added to app_settings but never wired in here — each legacy
+  // setup function still computed its own fixed, tight SL/TP distances
+  // regardless of the configured multiplier. Each setup's own tp1:tp2 ratio
+  // is preserved (e.g. EMA Pullback's native 1.5:3 shape becomes
+  // legacySlMult:legacyTpMult, but tp1 still sits at the same fraction of
+  // the way to tp2 that the setup originally intended).
+  const isLongRaw = raw.direction === "Long";
+  const origReward2 = Math.abs(raw.tp2 - raw.entry);
+  const tp1Frac = origReward2 > 0 ? Math.abs(raw.tp1 - raw.entry) / origReward2 : 0.5;
+  const slDistBase = legacySlMult * a;
+  const tp2DistBase = legacyTpMult * a;
+  const tp1DistBase = tp2DistBase * tp1Frac;
+  const baseSl  = isLongRaw ? raw.entry - slDistBase  : raw.entry + slDistBase;
+  const baseTp1 = isLongRaw ? raw.entry + tp1DistBase : raw.entry - tp1DistBase;
+  const baseTp2 = isLongRaw ? raw.entry + tp2DistBase : raw.entry - tp2DistBase;
+
   const spread = spreadPrice(pair);
   const sDisp = spreadDisplay(pair);
-  let entry = raw.entry, sl = raw.stop_loss, tp1 = raw.tp1, tp2 = raw.tp2;
+  let entry = raw.entry, sl = baseSl, tp1 = baseTp1, tp2 = baseTp2;
   if (raw.direction === "Long") {
     entry += spread; sl -= spread; tp1 += spread; tp2 += spread;
   } else {
@@ -1714,8 +1733,18 @@ function qualifyAndScore(
   let conf = emp.pct;
   if (news) conf -= 15; // genuine external risk factor, independent of the setup's own historical rate
   conf = Math.max(1, Math.min(99, conf));
-  if (conf < 55) {
-    return { signal: null, reason: `Confidence too low (${conf}%, from ${emp.n} historical ${pair} ${family} trades${emp.n < MIN_SAMPLE ? " — thin sample, still shrunk toward pair average" : ""})` };
+  // NOTE: there used to be a hardcoded `if (conf < 55) return null` here.
+  // Empirical (shrinkage-based) confidence is mathematically bounded to
+  // roughly 38-48% by construction (see engine-learnings) — a fixed 55%
+  // floor could never be cleared, so it silently discarded every single
+  // legacy setup (EMA Pullback, BOS Retest, SMC OB+FVG, CHOCH) on every
+  // scan, forever, with only a per-pair "reason" string in the report to
+  // show for it. The DB-configurable metaapi_min_confidence gate applied
+  // later (in the toInsert filter) is the real, tunable floor — this
+  // function no longer duplicates it with a stricter, unreachable one.
+  if (emp.n < MIN_SAMPLE) {
+    // Keep this purely informational — thin-sample signals still qualify,
+    // they're just flagged as lower-confidence in the report/log.
   }
 
   return {
@@ -2057,7 +2086,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_key_rotation_threshold, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date, legacy_sl_mult, legacy_tp_mult")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult    ?? 2.5);
@@ -2066,6 +2095,11 @@ async function runScanJob(
     const veritasMinConf   = Number((veritasCfgRow as any)?.veritas_min_conf   ?? 72);
     const veritasMinRR     = Number((veritasCfgRow as any)?.veritas_min_rr     ?? 1.60);
     const minADX           = Number((veritasCfgRow as any)?.metaapi_min_adx    ?? 20);
+    // Legacy setup (EMA Pullback / BOS Retest / SMC OB+FVG / CHOCH) SL/TP
+    // multiplier — was already added to app_settings but never read/applied
+    // in qualifyAndScore until now.
+    const legacySlMult     = Number((veritasCfgRow as any)?.legacy_sl_mult    ?? 2);
+    const legacyTpMult     = Number((veritasCfgRow as any)?.legacy_tp_mult    ?? 2.5);
 
     // ── TwelveData usage-threshold rotation: mark keys as exhausted when they
     // hit the daily usage threshold. Counters reset at UTC midnight.
@@ -2320,7 +2354,7 @@ async function runScanJob(
           pairReport.checks.push({ setup: name, status: "filtered", direction: raw.direction, reason: `News blackout: ${h.title} (${h.ccy})` });
           continue;
         }
-        const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats);
+        const q = qualifyAndScore(raw, d.c5, bias, currentPrice, empiricalStats, legacySlMult, legacyTpMult);
         if (!q.signal) {
           pairReport.checks.push({ setup: name, status: "filtered", reason: q.reason, direction: raw.direction });
         } else {
