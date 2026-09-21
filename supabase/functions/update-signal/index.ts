@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     });
   }
   try {
-    const { id, status } = await req.json();
+    const { id, status, partial } = await req.json();
     if (!id || !status) throw new Error("id and status required");
     const allowed = ["pending", "executed", "win", "loss", "be", "tp1", "tp2", "expired"];
     if (!allowed.includes(status)) throw new Error("invalid status");
@@ -27,10 +27,14 @@ Deno.serve(async (req) => {
       .from("signals").select("*").eq("id", id).maybeSingle();
     if (!sig) throw new Error("signal not found");
 
+    const isPartial = status === "tp1" && !!partial;
     let outcome_r: number | null = null;
     const risk = Math.abs(sig.entry - sig.stop_loss);
     if (risk > 0) {
-      if (status === "tp1") outcome_r = Math.abs(sig.tp1 - sig.entry) / risk;
+      if (status === "tp1") {
+        const tp1R = Math.abs(sig.tp1 - sig.entry) / risk;
+        outcome_r = isPartial ? +(tp1R / 2).toFixed(2) : tp1R;
+      }
       else if (status === "tp2" || status === "win") outcome_r = Math.abs(sig.tp2 - sig.entry) / risk;
       else if (status === "loss") outcome_r = -1;
       else if (status === "be") outcome_r = 0;
@@ -46,6 +50,7 @@ Deno.serve(async (req) => {
     } else {
       update.outcome_r = outcome_r;
       update.closed_at = new Date().toISOString();
+      if (status === "tp1") update.partial_close = isPartial;
     }
 
     const { error } = await supabase.from("signals").update(update).eq("id", id);
