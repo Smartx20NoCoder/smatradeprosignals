@@ -1708,12 +1708,18 @@ function qualifyAndScore(
   const now = new Date();
   const ss = sessionScore(pair, now);
   const news = newsFlag(now, pair);
-  const mb = mfiBoost(c5, raw.direction); // kept for display only — historically didn't separate winners from losers, no longer feeds the confidence number
-  const family = setupFamilyOf(raw.setup);
-  const emp = empiricalConfidence(stats, pair, family);
-  let conf = emp.pct;
-  if (news) conf -= 15; // genuine external risk factor, independent of the setup's own historical rate
-  conf = Math.max(1, Math.min(99, conf));
+  const mb = mfiBoost(c5, raw.direction);
+  // Technical confidence must qualify NEW trades. Historical outcome confidence is
+  // diagnostic only until the database has a meaningful resolved sample; otherwise
+  // a handful of early losses creates a self-locking feedback loop where no new
+  // candidates can ever be collected.
+  const rrScore = Math.min(15, Math.max(0, (rr - 1) * 7.5));
+  const sessionComponent = Math.min(20, Math.max(0, (ss - 50) * 0.4));
+  const mfiComponent = Math.min(15, Math.max(0, mb.value * 0.15));
+  let conf = 50 + rrScore + sessionComponent + mfiComponent + (mb.div ? 5 : 0);
+  if (bias !== "neutral") conf += 5;
+  if (news) conf -= 15;
+  conf = Math.round(Math.max(1, Math.min(99, conf)));
 
   return {
     signal: {
@@ -2381,7 +2387,6 @@ async function runScanJob(
           // all (its own min-confidence gate ran inside veritasSetup) — the number
           // attached to the signal itself is now the empirical rate, same as every
           // other setup family, so "confidence" means the same thing everywhere.
-          veritas.confidence = empiricalConfidence(empiricalStats, pair, "VERITAS").pct;
           veritasCandidates.push(veritas);
         }
       }
@@ -2407,7 +2412,6 @@ async function runScanJob(
             direction: qss.direction,
             reason: isPausedQ ? "QSS disabled in Settings — paper tracked only, no alert" : undefined,
           });
-          qss.confidence = empiricalConfidence(empiricalStats, pair, "QSS").pct;
           qssCandidates.push(qss);
         }
       }
@@ -2434,7 +2438,6 @@ async function runScanJob(
             direction: prism.direction,
             reason: isPausedP ? "PRISM disabled in Settings — paper tracked only, no alert" : undefined,
           });
-          prism.confidence = empiricalConfidence(empiricalStats, pair, "PRISM").pct;
           prismCandidates.push(prism);
         }
       }
@@ -2534,8 +2537,8 @@ async function runScanJob(
     // signals are unaffected.
     // Reuse the already-loaded settings object (no redundant DB read).
     const cfg: any = settings;
-    const minConf = Number((veritasCfgRow as any)?.metaapi_min_confidence ?? cfg?.metaapi_min_confidence ?? 71);
-    const minRR = Number((veritasCfgRow as any)?.metaapi_min_rr ?? cfg?.metaapi_min_rr ?? 1.8);
+    const minConf = Number((veritasCfgRow as any)?.signal_min_confidence ?? cfg?.signal_min_confidence ?? 65);
+    const minRR = Number((veritasCfgRow as any)?.signal_min_rr ?? cfg?.signal_min_rr ?? 1.8);
     // Upstream quality gate — enforced regardless of auto_execute state.
     // Skips insert, Telegram alert, and paper tracking for sub-threshold signals.
     const toInsert = dedupedInsert.filter(s => {
