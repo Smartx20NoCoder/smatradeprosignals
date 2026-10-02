@@ -2061,7 +2061,7 @@ async function runScanJob(
     // VERITAS-specific tuning params (UI-adjustable, stored in app_settings).
     // Single read shared by the veritasSetup call and the toInsert RR filter below.
     const { data: veritasCfgRow } = await supabase.from("app_settings")
-      .select("veritas_sl_mult, veritas_tp_mult, legacy_atr_multipliers_enabled, legacy_sl_mult, legacy_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, metaapi_min_adx, metaapi_min_confidence, metaapi_min_rr, twelvedata_key_threshold, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
+      .select("veritas_sl_mult, veritas_tp_mult, legacy_atr_multipliers_enabled, legacy_sl_mult, legacy_tp_mult, veritas_min_hurst, veritas_min_snr, veritas_min_conf, veritas_min_rr, signal_min_adx, signal_min_confidence, signal_min_rr, twelvedata_key_threshold, twelvedata_key_1_used, twelvedata_key_2_used, twelvedata_key_3_used, twelvedata_key_reset_date")
       .eq("id", "singleton").maybeSingle();
     const veritasSlMult    = Number((veritasCfgRow as any)?.veritas_sl_mult    ?? 1.5);
     const veritasTpMult    = Number((veritasCfgRow as any)?.veritas_tp_mult   ?? 2.5);
