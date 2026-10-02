@@ -1500,7 +1500,7 @@ function SettingsPanel({
 
       <div className="border border-border rounded bg-card p-4 text-xs text-muted-foreground space-y-1">
         <div className="text-[10px] uppercase tracking-wider mb-2">Risk Rules</div>
-        <div>• Max {appSettings.metaapi_max_trades} concurrent open trades</div>
+        <div>• One active trade per pair/direction is enforced by scanner deduplication</div>
         <div>• EUR/USD ↔ GBP/USD: max 1 same-direction</div>
         <div>• GBP/JPY ↔ EUR/JPY: max 1 same-direction</div>
         <div>• XAU/USD: independent</div>
@@ -2618,12 +2618,7 @@ function HealthPanel({
 
   return (
     <div className="mt-4 space-y-3">
-      <BrokerHealthCard />
-
-    <BridgeTelemetryCard />
-
-
-      <SymbolKeepaliveCard appSettings={appSettings} />
+      <BridgeTelemetryCard />
 
 
       <div className="border border-border rounded bg-card p-4">
