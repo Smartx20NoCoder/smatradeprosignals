@@ -170,13 +170,13 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
   custom_overrides: {},
 };
 
-const DAILY_BUDGET = 800;
+const DAILY_BUDGET_PER_KEY = 750;
 const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
 const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/USD","ETH/USD"]);
 const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
-const CRON_INTERVAL_MIN = 5;
+
 // Notional account size used by risk meter (1% per trade assumed)
 const NOTIONAL_ACCOUNT = 10000;
 const RISK_PER_TRADE_PCT = 1.0;
@@ -732,7 +732,7 @@ function ScalpEdge() {
 
   const pendingSignals = signals.filter((s) => stageOf(s) === 1);
   const openSignals = signals.filter((s) => stageOf(s) === 2);
-  const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
+  const budgetPct = Math.min(100, (budgetToday / (DAILY_BUDGET_PER_KEY * 3)) * 100);
 
   // Server cron projected budget — actual scans run at the app-level interval.
   const autoCallsPerScan = 14;
@@ -753,7 +753,7 @@ function ScalpEdge() {
   }
   const lastCron = scanRuns.find((r) => r.source === "cron" && r.finished_at) ?? scanRuns.find((r) => r.source === "cron");
   const nextCronAt = lastCron
-    ? new Date(new Date(lastCron.started_at).getTime() + CRON_INTERVAL_MIN * 60_000)
+    ? new Date(new Date(lastCron.started_at).getTime() + (appSettings.scan_interval_minutes || 15) * 60_000)
     : null;
 
   return (
@@ -776,7 +776,7 @@ function ScalpEdge() {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <div className="text-[10px] uppercase text-muted-foreground tracking-wider">API Budget</div>
-              <div className="text-sm font-semibold">{budgetToday} / {DAILY_BUDGET}</div>
+              <div className="text-sm font-semibold">{budgetToday} / {DAILY_BUDGET_PER_KEY * 3}</div>
               <div className="w-32 h-1 mt-1 bg-secondary rounded overflow-hidden">
                 <div className="h-full transition-all" style={{
                   width: `${budgetPct}%`,
@@ -1482,8 +1482,6 @@ function SettingsPanel({
         </div>
       </div>
 
-      <MetaApiPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
-
       <ScanEngineControlsPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
 
@@ -1502,7 +1500,7 @@ function SettingsPanel({
 
       <div className="border border-border rounded bg-card p-4 text-xs text-muted-foreground space-y-1">
         <div className="text-[10px] uppercase tracking-wider mb-2">Risk Rules</div>
-        <div>• Max {appSettings.metaapi_max_trades} concurrent open trades</div>
+        <div>• One active trade per pair/direction is enforced by scanner deduplication</div>
         <div>• EUR/USD ↔ GBP/USD: max 1 same-direction</div>
         <div>• GBP/JPY ↔ EUR/JPY: max 1 same-direction</div>
         <div>• XAU/USD: independent</div>
@@ -2609,7 +2607,7 @@ function HealthPanel({
     : "red";
   const statusColor = status === "green" ? "var(--bull)" : status === "amber" ? "var(--chart-4)" : "var(--bear)";
   const statusLabel = status === "green" ? "HEALTHY" : status === "amber" ? "DEGRADED" : "STALLED";
-  const budgetPct = Math.min(100, (budgetToday / DAILY_BUDGET) * 100);
+  const budgetPct = Math.min(100, (budgetToday / (DAILY_BUDGET_PER_KEY * 3)) * 100);
 
   // Group cache rows by pair
   const cacheByPair: Record<string, Record<string, string>> = {};
@@ -2620,12 +2618,7 @@ function HealthPanel({
 
   return (
     <div className="mt-4 space-y-3">
-      <BrokerHealthCard />
-
-    <BridgeTelemetryCard />
-
-
-      <SymbolKeepaliveCard appSettings={appSettings} />
+      <BridgeTelemetryCard />
 
 
       <div className="border border-border rounded bg-card p-4">
@@ -2653,7 +2646,7 @@ function HealthPanel({
           </div>
           <div className="bg-secondary/40 px-2 py-1.5 rounded">
             <div className="text-[9px] uppercase text-muted-foreground tracking-wider">API Today</div>
-            <div className="font-semibold">{budgetToday} / {DAILY_BUDGET}</div>
+            <div className="font-semibold">{budgetToday} / {DAILY_BUDGET_PER_KEY * 3}</div>
             <div className="w-full h-1 mt-1 bg-secondary rounded overflow-hidden">
               <div className="h-full" style={{
                 width: `${budgetPct}%`,
