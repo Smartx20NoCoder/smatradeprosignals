@@ -17,6 +17,7 @@ import { Route as ApiPublicBridgeReportExecutionRouteImport } from './routes/api
 import { Route as ApiPublicBridgeReportCloseRouteImport } from './routes/api/public/bridge-report-close'
 import { Route as ApiPublicBridgeGetSignalsRouteImport } from './routes/api/public/bridge-get-signals'
 import { Route as ApiInternalScanRouteImport } from './routes/api/internal/scan'
+import { Route as ApiInternalUpdateSignalRouteImport } from './routes/api/internal/update-signal'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 
 const McpRoute = McpRouteImport.update({
@@ -64,6 +65,11 @@ const ApiInternalScanRoute = ApiInternalScanRouteImport.update({
   path: '/api/internal/scan',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalUpdateSignalRoute = ApiInternalUpdateSignalRouteImport.update({
+  id: '/api/internal/update-signal',
+  path: '/api/internal/update-signal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const Char91DotmcpChar93InvokeToolToolRoute =
   Char91DotmcpChar93InvokeToolToolRouteImport.update({
     id: '/.mcp/invoke-tool/$tool',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/internal/update-signal': typeof ApiInternalUpdateSignalRoute
   '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
   '/api/public/bridge-report-execution': typeof ApiPublicBridgeReportExecutionRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/internal/update-signal': typeof ApiInternalUpdateSignalRoute
   '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
   '/api/public/bridge-report-execution': typeof ApiPublicBridgeReportExecutionRoute
@@ -101,6 +109,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/api/internal/scan': typeof ApiInternalScanRoute
+  '/api/internal/update-signal': typeof ApiInternalUpdateSignalRoute
   '/api/public/bridge-get-signals': typeof ApiPublicBridgeGetSignalsRoute
   '/api/public/bridge-report-close': typeof ApiPublicBridgeReportCloseRoute
   '/api/public/bridge-report-execution': typeof ApiPublicBridgeReportExecutionRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/internal/update-signal'
     | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
     | '/api/public/bridge-report-execution'
@@ -125,6 +135,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/internal/update-signal'
     | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
     | '/api/public/bridge-report-execution'
@@ -136,6 +147,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/.mcp/invoke-tool/$tool'
     | '/api/internal/scan'
+    | '/api/internal/update-signal'
     | '/api/public/bridge-get-signals'
     | '/api/public/bridge-report-close'
     | '/api/public/bridge-report-execution'
@@ -148,6 +160,7 @@ export interface RootRouteChildren {
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiInternalScanRoute: typeof ApiInternalScanRoute
+  ApiInternalUpdateSignalRoute: typeof ApiInternalUpdateSignalRoute
   ApiPublicBridgeGetSignalsRoute: typeof ApiPublicBridgeGetSignalsRoute
   ApiPublicBridgeReportCloseRoute: typeof ApiPublicBridgeReportCloseRoute
   ApiPublicBridgeReportExecutionRoute: typeof ApiPublicBridgeReportExecutionRoute
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInternalScanRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/update-signal': {
+      id: '/api/internal/update-signal'
+      path: '/api/internal/update-signal'
+      fullPath: '/api/internal/update-signal'
+      preLoaderRoute: typeof ApiInternalUpdateSignalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.mcp/invoke-tool/$tool': {
       id: '/.mcp/invoke-tool/$tool'
       path: '/.mcp/invoke-tool/$tool'
@@ -229,6 +249,7 @@ const rootRouteChildren: RootRouteChildren = {
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiInternalScanRoute: ApiInternalScanRoute,
+  ApiInternalUpdateSignalRoute: ApiInternalUpdateSignalRoute,
   ApiPublicBridgeGetSignalsRoute: ApiPublicBridgeGetSignalsRoute,
   ApiPublicBridgeReportCloseRoute: ApiPublicBridgeReportCloseRoute,
   ApiPublicBridgeReportExecutionRoute: ApiPublicBridgeReportExecutionRoute,
