@@ -154,23 +154,16 @@ export const checkSymbolsMetaApiFn = createServerFn({ method: "POST" })
     };
   });
 
-// MetaApi retry execution — re-runs metaapi-execute with force_retry bypassing the
-// "already processed" early exit; all other risk gates still apply.
+// Bridge retry — requeues a still-valid signal for the EA bridge. No MetaAPI call.
 export const retryExecutionFn = createServerFn({ method: "POST" })
   .inputValidator((input: { signal_id: string }) =>
-    z.object({ signal_id: z.string().min(1).max(64) }).parse(input),
+    z.object({ signal_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { status, data: resp } = await callEdge("metaapi-execute", {
-      signal_id: data.signal_id,
-      force_retry: true,
-    });
+    const { status, data: resp } = await callEdge("bridge-retry-signal", { signal_id: data.signal_id });
     const d = (resp ?? {}) as any;
     if (status >= 400 || d?.ok === false) {
-      return {
-        ok: false as boolean,
-        reason: String(d?.reason ?? d?.error ?? `Retry failed (${status})`).slice(0, 240),
-      };
+      return { ok: false as boolean, reason: String(d?.reason ?? d?.error ?? `Bridge retry failed (${status})`).slice(0, 240) };
     }
     return { ok: true as boolean, reason: undefined as string | undefined };
   });
