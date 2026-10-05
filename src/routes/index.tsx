@@ -14,6 +14,7 @@ import {
   retryExecutionFn,
   testTradeMetaApiFn,
   updateAppSettingsFn,
+  updateSignalFn,
 } from "@/lib/api.functions";
 
 import {
@@ -635,23 +636,15 @@ function ScalpEdge() {
       update.closed_at = new Date().toISOString();
     }
     try {
-      const res = await fetch("/api/internal/update-signal", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: s.id, status }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.error) { alert(`Failed to update status: ${body?.error ?? res.status}`); return; }
+      const result = await updateSignalFn({ data: { id: s.id, status } });
+      if (!result.ok) { alert(`Failed to update status: ${result.error ?? "unknown error"}`); return; }
     } catch (err) { alert(`Failed to update status: ${err instanceof Error ? err.message : "network error"}`); return; }
     await loadSignals();
   }
   async function markPartialTp1Be(s: Signal) {
     try {
-      const res = await fetch("/api/internal/update-signal", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: s.id, status: "tp1", partial: true }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.error) { alert(`Failed to mark partial: ${body?.error ?? res.status}`); return; }
+      const result = await updateSignalFn({ data: { id: s.id, status: "tp1", partial: true } });
+      if (!result.ok) { alert(`Failed to mark partial: ${result.error ?? "unknown error"}`); return; }
     } catch (err) { alert(`Failed to mark partial: ${err instanceof Error ? err.message : "network error"}`); return; }
     await loadSignals();
   }
