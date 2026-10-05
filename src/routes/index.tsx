@@ -1117,9 +1117,9 @@ function SignalRow({
   const signalAgeMs = Date.now() - new Date(s.created_at).getTime();
   const retryEligible =
     retryStatusEligible &&
-    signalAgeMs < 3 * 60 * 60 * 1000 &&
-    !!appSettings.metaapi_auto_trade &&
-    (appSettings.pair_auto_execute?.[s.pair] !== false);
+    signalAgeMs < 6 * 60 * 60 * 1000 &&
+    s.status !== "executed" &&
+    (appSettings.pair_auto_execute?.[s.pair] === true);
 
   async function handleRetry() {
     setRetryState({ kind: "loading" });
@@ -1178,7 +1178,7 @@ function SignalRow({
           )}
           {s.metaapi_execution_status === "failed" && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
-              MT FAILED
+              BRIDGE FAILED
             </span>
           )}
           {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
@@ -1213,7 +1213,7 @@ function SignalRow({
               type="button"
               onClick={handleRetry}
               disabled={isRetrying || retryState.kind === "loading" || retryState.kind === "sent"}
-              title="Retry auto-execution. Only available within 3 hours of signal. All risk gates still apply."
+              title="Requeue this still-valid signal for the EA bridge. Available until the signal expires at 6 hours."
               className={`px-1.5 py-0.5 text-[10px] font-bold rounded border uppercase tracking-wider transition-colors ${
                 retryState.kind === "sent"
                   ? "border-bull/60 text-bull bg-bull/10"
