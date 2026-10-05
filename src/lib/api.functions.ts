@@ -4,6 +4,24 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { callEdge } from "./api.server";
 
+
+export const updateSignalFn = createServerFn({ method: "POST" })
+  .inputValidator((input: { id: string; status: string; partial?: boolean }) =>
+    z.object({
+      id: z.string().uuid(),
+      status: z.enum(["pending", "executed", "win", "loss", "be", "tp1", "tp2", "expired"]),
+      partial: z.boolean().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { status, data: body } = await callEdge("update-signal", data);
+    if (status >= 400) {
+      const msg = (body as any)?.error ?? `Failed to update signal (${status})`;
+      return { ok: false as const, error: String(msg).slice(0, 200) };
+    }
+    return { ok: true as const, error: null };
+  });
+
 export const updateAppSettingsFn = createServerFn({ method: "POST" })
   .inputValidator((input) => z.record(z.string(), z.unknown()).parse(input))
   .handler(async ({ data }) => {

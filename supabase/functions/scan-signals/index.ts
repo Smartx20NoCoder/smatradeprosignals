@@ -1805,7 +1805,11 @@ function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: 
 async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
-  if (!token || !chatId || !signals.length) return;
+  if (!signals.length) return;
+  if (!token || !chatId) {
+    console.error("Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing");
+    return;
+  }
   const balance = Number(cfg?.metaapi_last_balance ?? 0);
   const riskPct = Number(cfg?.metaapi_risk_per_trade_pct ?? 3);
   const minLot = Number(cfg?.metaapi_min_lot ?? 0.01);
@@ -1843,12 +1847,29 @@ async function sendTelegramAlerts(signals: Signal[], cfg: any) {
       `Session: ${session}` +
       (s.htf_bias && s.htf_bias !== "neutral" ? `  ·  1H ${s.htf_bias}` : "");
     try {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      const telegramResponse = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+        // Plain text is deliberate: a setup/pair containing Telegram Markdown
+        // metacharacters must never make an otherwise valid alert fail.
+        body: JSON.stringify({ chat_id: chatId, text: text.replace(/[\`*_]/g, "") }),
       });
-    } catch (_) { /* skip silently */ }
+      const telegramBody = await telegramResponse.text();
+      if (!telegramResponse.ok) {
+        console.error("Telegram alert failed", {
+          pair: s.pair,
+          status: telegramResponse.status,
+          body: telegramBody.slice(0, 500),
+        });
+      } else {
+        console.log("Telegram alert sent", { pair: s.pair, status: telegramResponse.status });
+      }
+    } catch (error) {
+      console.error("Telegram alert transport error", {
+        pair: s.pair,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 
