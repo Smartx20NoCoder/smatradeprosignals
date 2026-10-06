@@ -31,22 +31,27 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
         try {
           const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
           const ticket = Number(body["ticket"] ?? 0);
+          const positionId = Number(body["position_id"] ?? ticket);
+          const dealTicket = Number(body["deal_ticket"] ?? ticket);
           const closePrice = Number(body["close_price"] ?? 0);
           const pnl = Number(body["pnl"] ?? 0);
           const closedAtEpoch = Number(body["closed_at_epoch"] ?? 0);
 
-          if (!ticket) return json({ error: "ticket required" }, 400);
+          if (!positionId) return json({ error: "position_id or ticket required" }, 400);
 
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
           const { data: s } = await supabaseAdmin
             .from("signals")
             .select("id, direction, order_type, entry, stop_loss, tp1, tp2")
-            .eq("metaapi_position_id", String(ticket))
+            .eq("metaapi_position_id", String(positionId))
             .maybeSingle();
 
           // Unknown ticket — nothing to reconcile; ack so the EA stops retrying.
-          if (!s) return json({ ok: true, matched: false });
+          if (!s) {
+            console.warn("bridge-report-close unmatched", { positionId, dealTicket, ticket });
+            return json({ ok: true, matched: false, position_id: positionId, deal_ticket: dealTicket });
+          }
 
           const isLong =
             String(s.direction ?? "").toLowerCase().includes("long") ||
@@ -93,7 +98,7 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
               status: mapped,
               outcome_r: Number.isFinite(rMultiple) ? Number(rMultiple.toFixed(2)) : null,
               closed_at: closedAt,
-              notes: `Bridge close ${closedStatus} pnl=${pnl.toFixed(2)} R=${rMultiple.toFixed(2)}`,
+              notes: `Bridge close ${closedStatus} pnl=${pnl.toFixed(2)} R=${rMultiple.toFixed(2)} position=${positionId} deal=${dealTicket}`,
             })
             .eq("id", s.id);
           if (error) throw error;
@@ -103,6 +108,8 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
             matched: true,
             status: mapped,
             outcome_r: Number(rMultiple.toFixed(2)),
+            position_id: positionId,
+            deal_ticket: dealTicket,
           });
         } catch (e) {
           console.error("bridge-report-close error", e);
