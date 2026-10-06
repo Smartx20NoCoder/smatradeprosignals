@@ -2384,6 +2384,143 @@ async function runScanJob(
       }
     }
 
+    // ── Paper outcome tracker (bridge-independent) ───────────────────────
+    // Valid signals that are intentionally not executed (e.g. pair already active
+    // or setup execution disabled) are still followed from cached market candles.
+    // This preserves strategy statistics without adding broker/API dependencies.
+    let paperTriggered = 0, paperResolved = 0, paperExpired = 0, paperAmbiguous = 0;
+    try {
+      const paperSince = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const { data: paperRows } = await supabase.from("signals")
+        .select("id,pair,direction,order_type,entry,stop_loss,tp2,rr,created_at,paper_status,status")
+        .eq("paper_only", true)
+        .in("paper_status", ["watching", "triggered"])
+        .gte("created_at", paperSince);
+
+      for (const s of (paperRows ?? []) as any[]) {
+        const d = pairData[String(s.pair)];
+        if (!d) continue;
+
+        const use1m = Array.isArray(d.c1m) && (d.c1m?.length ?? 0) >= 3;
+        const bars = (use1m ? d.c1m! : d.c5).slice().sort((a, b) => a.t - b.t);
+        const tfMs = (use1m ? 1 : 5) * 60_000;
+        const createdMs = new Date(String(s.created_at)).getTime();
+        if (!Number.isFinite(createdMs)) continue;
+
+        // Only use bars that BEGIN after the signal existed. This avoids letting
+        // pre-signal price action inside the source candle decide a paper outcome.
+        const firstEligibleBar = Math.ceil(createdMs / tfMs) * tfMs;
+
+        const signalDay = new Date(createdMs);
+        const sessionEndMs = Date.UTC(
+          signalDay.getUTCFullYear(), signalDay.getUTCMonth(), signalDay.getUTCDate(),
+          settings.trading_hours_end_utc, 0, 0, 0,
+        );
+        const validityEndMs = Math.min(createdMs + 6 * 3600_000, sessionEndMs);
+        const evalBars = bars.filter((b) => b.t >= firstEligibleBar && b.t < sessionEndMs);
+
+        const entry = Number(s.entry), sl = Number(s.stop_loss), tp2 = Number(s.tp2);
+        const risk = Math.abs(entry - sl);
+        if (!(risk > 0) || !Number.isFinite(tp2)) continue;
+
+        const isLong = String(s.direction).toLowerCase() === "long";
+        const ot = String(s.order_type ?? "").toLowerCase();
+        const isMarket = ot.includes("market") || (!ot.includes("stop") && !ot.includes("limit"));
+
+        let triggered = String(s.paper_status) === "triggered";
+        let triggerIdx = triggered ? 0 : -1;
+
+        if (!triggered) {
+          if (isMarket && evalBars.length > 0) {
+            triggerIdx = 0;
+            triggered = true;
+          } else {
+            triggerIdx = evalBars.findIndex((b) => b.l <= entry && b.h >= entry);
+            triggered = triggerIdx >= 0;
+          }
+
+          if (triggered) {
+            await supabase.from("signals").update({
+              paper_status: "triggered",
+              paper_hit: new Date(evalBars[triggerIdx].t + tfMs).toISOString(),
+            }).eq("id", s.id);
+            paperTriggered++;
+          } else if (Date.now() >= validityEndMs) {
+            await supabase.from("signals").update({
+              paper_status: "expired",
+              status: "expired",
+              outcome_r: 0,
+              paper_hit: new Date(validityEndMs).toISOString(),
+            }).eq("id", s.id);
+            paperExpired++;
+            continue;
+          } else {
+            continue;
+          }
+        }
+
+        const startIdx = Math.max(0, triggerIdx);
+        let finalPatch: Record<string, unknown> | null = null;
+
+        for (let bi = startIdx; bi < evalBars.length; bi++) {
+          const b = evalBars[bi];
+          const hitSL = isLong ? b.l <= sl : b.h >= sl;
+          const hitTP = isLong ? b.h >= tp2 : b.l <= tp2;
+
+          // With OHLC alone we cannot know intrabar ordering. Never invent it.
+          if (hitSL && hitTP) {
+            finalPatch = {
+              paper_status: "ambiguous",
+              status: "expired",
+              outcome_r: null,
+              paper_hit: new Date(b.t + tfMs).toISOString(),
+            };
+            paperAmbiguous++;
+            break;
+          }
+          if (hitTP) {
+            const r = isLong ? (tp2 - entry) / risk : (entry - tp2) / risk;
+            finalPatch = {
+              paper_status: "tp2_hit",
+              status: "tp2",
+              outcome_r: Number(r.toFixed(2)),
+              paper_hit: new Date(b.t + tfMs).toISOString(),
+            };
+            paperResolved++;
+            break;
+          }
+          if (hitSL) {
+            finalPatch = {
+              paper_status: "sl_hit",
+              status: "loss",
+              outcome_r: -1,
+              paper_hit: new Date(b.t + tfMs).toISOString(),
+            };
+            paperResolved++;
+            break;
+          }
+        }
+
+        // If a paper trade survives to the session cutoff, close it at the last
+        // completed in-session candle instead of carrying a scalping trade overnight.
+        if (!finalPatch && Date.now() >= sessionEndMs && evalBars.length > 0) {
+          const last = evalBars.at(-1)!;
+          const r = isLong ? (last.c - entry) / risk : (entry - last.c) / risk;
+          finalPatch = {
+            paper_status: "session_closed",
+            status: "closed",
+            outcome_r: Number(r.toFixed(2)),
+            paper_hit: new Date(sessionEndMs).toISOString(),
+          };
+          paperResolved++;
+        }
+
+        if (finalPatch) await supabase.from("signals").update(finalPatch).eq("id", s.id);
+      }
+    } catch (e) {
+      console.error("paper outcome tracker failed", e);
+    }
+
     // Persist active key + any newly-exhausted keys (in case a failover happened).
     {
       const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -2621,6 +2758,28 @@ async function runScanJob(
       return Array.from(byKey.values());
     }
 
+    // Snapshot currently occupied pairs. Scanner uses this to mark new same-pair
+    // signals as paper-only before Telegram; bridge-get-signals independently
+    // enforces the same rule as the final execution guard.
+    const activeByPair = new Map<string, { id: string; direction: string }>();
+    try {
+      const activeCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
+      const { data: filledActive } = await supabase.from("signals")
+        .select("id,pair,direction")
+        .eq("metaapi_execution_status", "filled")
+        .gte("executed_at", activeCutoff);
+      const { data: claimedActive } = await supabase.from("signals")
+        .select("id,pair,direction")
+        .eq("metaapi_execution_status", "bridge_claimed");
+      for (const r of [...(filledActive ?? []), ...(claimedActive ?? [])] as any[]) {
+        if (!activeByPair.has(String(r.pair))) {
+          activeByPair.set(String(r.pair), { id: String(r.id), direction: String(r.direction) });
+        }
+      }
+    } catch (e) {
+      console.error("active pair snapshot failed", e);
+    }
+
     const mergedLegacy  = mergeFamily(legacyCandidates);
     const mergedVeritas = mergeFamily(veritasCandidates);
     const mergedQss     = mergeFamily(qssCandidates);
@@ -2633,13 +2792,26 @@ async function runScanJob(
       ...mergedQss,
       ...mergedPrism,
     ];
-    // Tag paper_only and attach AUCTION_SHADOW_V1 context.
-    // Auction context is observational only: it does NOT qualify, block, alter
-    // confidence, change entry/SL/TP, suppress Telegram, or affect bridge eligibility.
+    // Tag paper-only execution state and attach AUCTION_SHADOW_V1 context.
+    // Auction remains observational. Pair occupancy affects execution only, not
+    // whether a valid strategy signal is persisted and measured.
     const auctionByPair = new Map<string, AuctionShadow>();
     for (const s of merged) {
       const family = setupFamilyOf(s.setup);
-      (s as any).paper_only = isComponentDisabledForPair(setupAutoExec, s.pair, family);
+      const setupPaperOnly = isComponentDisabledForPair(setupAutoExec, s.pair, family);
+      const active = activeByPair.get(s.pair);
+      const pairBlocked = !!active;
+      (s as any).paper_only = setupPaperOnly || pairBlocked;
+
+      if (pairBlocked && active) {
+        const relation = String(active.direction).toLowerCase() === String(s.direction).toLowerCase()
+          ? "confirmation" : "contradiction";
+        (s as any).metaapi_execution_status = "skipped";
+        (s as any).metaapi_execution_error = `Pair already active — paper tracked only (${relation})`;
+        (s as any).paper_status = "watching";
+        (s as any).notes = `PAIR_GUARD_V1|blocked_by=${active.id}|relation=${relation}`;
+      }
+
       const d = pairData[s.pair];
       if (d) {
         let a = auctionByPair.get(s.pair);
@@ -2647,7 +2819,10 @@ async function runScanJob(
           a = buildAuctionShadow(d.c5, d.c15, nowDate);
           auctionByPair.set(s.pair, a);
         }
-        (s as any).notes = auctionShadowNote(s.direction, a);
+        const auctionNote = auctionShadowNote(s.direction, a);
+        (s as any).notes = (s as any).notes
+          ? `${auctionNote}|${(s as any).notes}`
+          : auctionNote;
       }
     }
     signals.push(...merged);
@@ -2674,29 +2849,19 @@ async function runScanJob(
       },
     }));
 
-    // Dedupe vs last 90min same pair+direction (any setup).
-    // Include "tp1" in the active-signal filter: a partially-closed trade is still
-    // in-flight (runner B is still open) and must block a re-fire of the same setup.
-    // Also block by candle_time: if the exact same pair+direction+candle_time already
-    // exists in the DB (any status), this is structurally the same signal and must not
-    // be duplicated regardless of how the original resolved.
+    // Dedupe only the same strategy fingerprint. A different strategy on the
+    // same pair/direction must still be persisted so it can act as confirmation
+    // (or contradiction) and receive an independent paper outcome.
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
     const { data: recent } = await supabase.from("signals")
-      .select("pair, direction, status, candle_time").gte("created_at", since);
+      .select("pair,direction,setup,candle_time").gte("created_at", since);
 
-    // Block same pair+direction if any signal is still active (pending, in-trade, or partial tp1)
-    const seen = new Set((recent ?? [])
-      .filter((r: any) => r.status === "pending" || r.status === "executed" || r.status === "tp1")
-      .map((r: any) => `${r.pair}|${r.direction}`));
-
-    // Also block by exact candle_time fingerprint — same candle = same structural signal
-    const seenCandle = new Set((recent ?? [])
+    const seenFingerprint = new Set((recent ?? [])
       .filter((r: any) => r.candle_time != null)
-      .map((r: any) => `${r.pair}|${r.direction}|${r.candle_time}`));
+      .map((r: any) => `${r.pair}|${r.direction}|${r.setup}|${r.candle_time}`));
 
     const dedupedInsert = merged.filter(s =>
-      !seen.has(`${s.pair}|${s.direction}`) &&
-      !seenCandle.has(`${s.pair}|${s.direction}|${s.candle_time}`)
+      !seenFingerprint.has(`${s.pair}|${s.direction}|${s.setup}|${s.candle_time}`)
     );
     // Apply manual-trading threshold gate: signals below min_confidence or min_rr
     // are NOT saved and NOT alerted (keeps signals tab + Telegram aligned with what
@@ -2807,6 +2972,7 @@ async function runScanJob(
 
     return {
       signals, new_signals: insertedRows.length,
+      paper_tracker: { triggered: paperTriggered, resolved: paperResolved, expired: paperExpired, ambiguous: paperAmbiguous },
       api_calls_used: apiCalls, api_calls_today: newCalls,
       budget_remaining: Math.max(0, keyState.configured.length * PER_KEY_DAILY_TARGET - newCalls), mode,
       errors, report, scanned_at: new Date().toISOString(),
