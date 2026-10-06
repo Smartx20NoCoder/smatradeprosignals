@@ -2151,8 +2151,10 @@ function hourInWindow(h: number, start: number, end: number): boolean {
 }
 
 function isWithinTradingHours(d: Date, settings: ActiveSettings): boolean {
+  const day = d.getUTCDay();
+  if (day === 0 || day === 6) return false; // hard weekend guard for the scalping engine
   const h = d.getUTCHours();
-  const dow = String(d.getUTCDay()); // 0=Sun..6=Sat
+  const dow = String(day); // 0=Sun..6=Sat
   const cfg = settings.session_config ?? DEFAULT_SESSION_CONFIG;
   const override = cfg.custom_overrides?.[dow];
   if (override && typeof override.start === "number" && typeof override.end === "number") {
