@@ -2603,6 +2603,8 @@ async function runScanJob(
       // Execution is deliberately decoupled from signal generation.
       // The EA bridge discovers eligible persisted signals through bridge-get-signals.
       // Scanner success and Telegram delivery must never depend on any broker connector.
+    }
+
     const day = new Date().toISOString().slice(0, 10);
     // Atomic per-key increments — safe under concurrent scan runs.
     let newCalls = 0;
