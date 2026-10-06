@@ -55,8 +55,10 @@ function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: 
 }
 
 function isWithinTradingHours(d: Date, c: any): boolean {
+  const day = d.getUTCDay();
+  if (day === 0 || day === 6) return false; // hard weekend guard for the scalping engine
   const h = d.getUTCHours();
-  const dow = String(d.getUTCDay());
+  const dow = String(day);
   const cfg: SessionConfig = (c?.session_config as SessionConfig) ?? DEFAULT_SESSION_CONFIG;
   const override = cfg.custom_overrides?.[dow];
   if (override && typeof override.start === "number" && typeof override.end === "number") {
