@@ -216,6 +216,137 @@ function htfBias(c1h: Candle[]): "bull" | "bear" | "neutral" {
   return "neutral";
 }
 
+
+type AuctionShadow = {
+  valid: boolean;
+  profile: "5m_time_price";
+  poc?: number;
+  vah?: number;
+  val?: number;
+  location?: "above_value" | "below_value" | "near_vah" | "near_val" | "inside_value";
+  failed_long?: boolean;
+  failed_short?: boolean;
+};
+
+function auctionBullConfirmation(c: Candle, atr5: number): boolean {
+  const body = Math.abs(c.c - c.o);
+  if (c.c <= c.o || atr5 <= 0 || body < atr5 * 0.35 || body > atr5 * 1.50) return false;
+  const lower = Math.min(c.o, c.c) - c.l;
+  return lower >= body * 1.20 || c.c >= c.h - atr5 * 0.15;
+}
+
+function auctionBearConfirmation(c: Candle, atr5: number): boolean {
+  const body = Math.abs(c.c - c.o);
+  if (c.c >= c.o || atr5 <= 0 || body < atr5 * 0.35 || body > atr5 * 1.50) return false;
+  const upper = c.h - Math.max(c.o, c.c);
+  return upper >= body * 1.20 || c.c <= c.l + atr5 * 0.15;
+}
+
+// Shadow-only adaptation of MicroScalp Auction V1.
+// The MT5 EA used M1 broker tick-volume. TwelveData supplies no usable volume for
+// our FX/Gold/BTC candles, so this deliberately measures TIME/PRICE OCCUPANCY
+// instead: each closed 5m bar contributes equal weight across every price bin it
+// touched. This must not be presented as a volume profile.
+function buildAuctionShadow(c5: Candle[], c15: Candle[], now: Date): AuctionShadow {
+  const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  const start = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 7, 0, 0);
+  const end   = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 20, 0, 0);
+  const bars = c5.filter(x => x.t >= start && x.t < end);
+  if (bars.length < 20) return { valid: false, profile: "5m_time_price" };
+
+  const lo = Math.min(...bars.map(x => x.l));
+  const hi = Math.max(...bars.map(x => x.h));
+  const a15 = atr(c15);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo || a15 <= 0 || (hi - lo) < a15 * 0.50)
+    return { valid: false, profile: "5m_time_price" };
+
+  const bins = 48;
+  const step = (hi - lo) / bins;
+  if (step <= 0) return { valid: false, profile: "5m_time_price" };
+
+  const weight = Array<number>(bins).fill(0);
+  let total = 0;
+  for (const bar of bars) {
+    let first = Math.floor((bar.l - lo) / step);
+    let last  = Math.floor((bar.h - lo) / step);
+    first = Math.max(0, Math.min(bins - 1, first));
+    last  = Math.max(0, Math.min(bins - 1, last));
+    const n = Math.max(1, last - first + 1);
+    const part = 1 / n;
+    for (let k = first; k <= last; k++) weight[k] += part;
+    total += 1;
+  }
+  if (total <= 0) return { valid: false, profile: "5m_time_price" };
+
+  let pocIdx = 0;
+  for (let k = 1; k < bins; k++) if (weight[k] > weight[pocIdx]) pocIdx = k;
+
+  const target = total * 0.70;
+  let area = weight[pocIdx], left = pocIdx, right = pocIdx;
+  while (area < target && (left > 0 || right < bins - 1)) {
+    const lw = left > 0 ? weight[left - 1] : -1;
+    const rw = right < bins - 1 ? weight[right + 1] : -1;
+    if (rw >= lw && right < bins - 1) { right++; area += weight[right]; }
+    else if (left > 0) { left--; area += weight[left]; }
+    else break;
+  }
+
+  const poc = lo + (pocIdx + 0.5) * step;
+  const val = lo + left * step;
+  const vah = lo + (right + 1) * step;
+  const atr5 = atr(c5);
+  const edge = Math.max(step, atr5 * 0.10);
+  const lastBar = c5.at(-1);
+  if (!lastBar || atr5 <= 0) return { valid: true, profile: "5m_time_price", poc, vah, val };
+
+  let location: AuctionShadow["location"] = "inside_value";
+  if (lastBar.c > vah + edge) location = "above_value";
+  else if (lastBar.c < val - edge) location = "below_value";
+  else if (lastBar.c >= vah - edge) location = "near_vah";
+  else if (lastBar.c <= val + edge) location = "near_val";
+
+  const prior3 = c5.slice(-4, -1);
+  const failedLong = prior3.some(x => x.c < val - edge) && lastBar.c > val && auctionBullConfirmation(lastBar, atr5);
+  const failedShort = prior3.some(x => x.c > vah + edge) && lastBar.c < vah && auctionBearConfirmation(lastBar, atr5);
+
+  return { valid: true, profile: "5m_time_price", poc, vah, val, location, failed_long: failedLong, failed_short: failedShort };
+}
+
+function auctionAlignment(direction: "Long" | "Short", a: AuctionShadow): string {
+  if (!a.valid) return "unavailable";
+  if (direction === "Long") {
+    if (a.failed_long) return "support_reversal";
+    if (a.failed_short) return "contradiction_failed_upper";
+    if (a.location === "above_value") return "support_continuation";
+    if (a.location === "near_val") return "support_value_reversion";
+    if (a.location === "below_value") return "contradiction_below_value";
+    return "neutral";
+  }
+  if (a.failed_short) return "support_reversal";
+  if (a.failed_long) return "contradiction_failed_lower";
+  if (a.location === "below_value") return "support_continuation";
+  if (a.location === "near_vah") return "support_value_reversion";
+  if (a.location === "above_value") return "contradiction_above_value";
+  return "neutral";
+}
+
+function auctionShadowNote(direction: "Long" | "Short", a: AuctionShadow): string {
+  if (!a.valid) return "AUCTION_SHADOW_V1|profile=5m_time_price|valid=0";
+  const f = (n: number | undefined) => Number.isFinite(n) ? Number(n).toFixed(6) : "";
+  return [
+    "AUCTION_SHADOW_V1",
+    "profile=5m_time_price",
+    "valid=1",
+    `location=${a.location ?? "unknown"}`,
+    `alignment=${auctionAlignment(direction, a)}`,
+    `failed_long=${a.failed_long ? 1 : 0}`,
+    `failed_short=${a.failed_short ? 1 : 0}`,
+    `poc=${f(a.poc)}`,
+    `vah=${f(a.vah)}`,
+    `val=${f(a.val)}`,
+  ].join("|");
+}
+
 function sessionScore(pair: string, dUTC: Date): number {
   const h = dUTC.getUTCHours();
   const isOverlap = h >= 12 && h < 16;
@@ -472,7 +603,7 @@ async function fetchCandles(
       }
     }
     merged.sort((a, b) => a.t - b.t);
-    fresh = merged.slice(-200);
+    fresh = merged.slice(-(tf.label === "5m" ? 700 : 200));
   }
 
   // 6. Persist to Cache Database Table
@@ -2060,7 +2191,10 @@ async function runScanJob(
   emit?: ProgressEmitter,
   source: string = "manual",
 ) {
-    const sizeFor = (tf: string) => mode === "latest" ? (tf === "1h" ? 60 : 120) : (tf === "1h" ? 80 : 150);
+    const sizeFor = (tf: string) => {
+      if (tf === "5m") return 600; // ~50h: enough for the previous completed 07:00-20:00 UTC auction session
+      return mode === "latest" ? (tf === "1h" ? 60 : 120) : (tf === "1h" ? 80 : 150);
+    };
     const tfsToFetch = TFS;
     const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter(k => !!keys[k]);
     const initialExhausted = new Set<KeyIdx>();
@@ -2499,10 +2633,22 @@ async function runScanJob(
       ...mergedQss,
       ...mergedPrism,
     ];
-    // Tag paper_only based on setup_auto_execute — controls Telegram alert suppression.
+    // Tag paper_only and attach AUCTION_SHADOW_V1 context.
+    // Auction context is observational only: it does NOT qualify, block, alter
+    // confidence, change entry/SL/TP, suppress Telegram, or affect bridge eligibility.
+    const auctionByPair = new Map<string, AuctionShadow>();
     for (const s of merged) {
       const family = setupFamilyOf(s.setup);
       (s as any).paper_only = isComponentDisabledForPair(setupAutoExec, s.pair, family);
+      const d = pairData[s.pair];
+      if (d) {
+        let a = auctionByPair.get(s.pair);
+        if (!a) {
+          a = buildAuctionShadow(d.c5, d.c15, nowDate);
+          auctionByPair.set(s.pair, a);
+        }
+        (s as any).notes = auctionShadowNote(s.direction, a);
+      }
     }
     signals.push(...merged);
 
