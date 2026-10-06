@@ -1102,6 +1102,19 @@ function SignalRow({
     ? (isGold(s.pair) ? `$0.40 spread` : isBTC(s.pair) ? `$2.00 spread` : `${s.spread_pips}p spread`)
     : null;
 
+  const auction = (() => {
+    if (!s.notes?.startsWith("AUCTION_SHADOW_V1|")) return null;
+    const parts: Record<string, string> = {};
+    for (const token of s.notes.split("|").slice(1)) {
+      const eq = token.indexOf("=");
+      if (eq > 0) parts[token.slice(0, eq)] = token.slice(eq + 1);
+    }
+    if (parts.valid !== "1") return { label: "AUCTION N/A", align: "unavailable", title: s.notes };
+    const loc = (parts.location ?? "unknown").replaceAll("_", " ").toUpperCase();
+    const align = parts.alignment ?? "neutral";
+    return { label: `AUCTION · ${loc}`, align, title: s.notes };
+  })();
+
   // Correlation blocks moving to In-Trade
   const blockedExecute = warning && s.status === "pending";
 
@@ -1160,6 +1173,20 @@ function SignalRow({
             <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded ${
               s.htf_bias === "bull" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
             }`}>1H {s.htf_bias}</span>
+          )}
+          {auction && (
+            <span
+              title={auction.title}
+              className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-semibold ${
+                auction.align.startsWith("support")
+                  ? "bg-bull/15 text-bull"
+                  : auction.align.startsWith("contradiction")
+                  ? "bg-destructive/15 text-destructive"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {auction.label} · {auction.align.replaceAll("_", " ").toUpperCase()}
+            </span>
           )}
           {s.mfi_divergence && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary">MFI div</span>
