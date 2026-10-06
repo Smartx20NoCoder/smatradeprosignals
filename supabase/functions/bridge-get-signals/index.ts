@@ -130,12 +130,13 @@ Deno.serve(async (req) => {
     // Expire stale claims first — anything the bridge grabbed but never filled
     // within the expiry window. Marked failed so a fresh signal generates
     // naturally rather than the EA chasing a stale entry price forever.
-    const expiryCutoff = new Date(Date.now() - claimExpiryMin * 60_000).toISOString();
+    const claimExpiryCutoff = new Date(Date.now() - claimExpiryMin * 60_000).toISOString();
+    const signalValidityCutoff = new Date(Date.now() - 6 * 3600_000).toISOString();
     const { data: staleClaims } = await supabase
       .from("signals")
       .select("id")
       .eq("metaapi_execution_status", "bridge_claimed")
-      .lt("bridge_claimed_at", expiryCutoff);
+      .lt("bridge_claimed_at", claimExpiryCutoff);
     if (staleClaims && staleClaims.length > 0) {
       await supabase.from("signals").update({
         metaapi_execution_status: "failed",
@@ -147,39 +148,60 @@ Deno.serve(async (req) => {
 
     // Don't hand out NEW claims once scanning has stopped — only keep tracking
     // claims already in flight so they can still fill or expire cleanly.
-    const { data: alreadyClaimed } = await supabase
+    const { data: claimedRows } = await supabase
       .from("signals")
-      .select("id, pair, direction, order_type, entry, stop_loss, tp2")
+      .select("id,pair,direction,order_type,entry,stop_loss,tp2,bridge_claimed_at")
       .eq("metaapi_execution_status", "bridge_claimed")
-      .in("pair", bridgePairs);
+      .in("pair", bridgePairs)
+      .order("bridge_claimed_at", { ascending: true });
 
-    // Active-trade count. "filled" rows are time-bounded to the last 48h so a
-    // single dropped close-report can't wedge the slot counter forever;
-    // "bridge_claimed" already self-expires via bridge_claim_expiry_min.
+    // One active execution slot per pair. Filled positions are time-bounded so a
+    // dropped close report cannot wedge a pair forever; claimed rows self-expire.
     const filledCutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
-    const { count: filledCount } = await supabase
+    const { data: filledRows } = await supabase
       .from("signals")
-      .select("id", { count: "exact", head: true })
+      .select("id,pair,direction")
       .eq("metaapi_execution_status", "filled")
       .gte("executed_at", filledCutoff);
-    const { count: claimedCount } = await supabase
-      .from("signals")
-      .select("id", { count: "exact", head: true })
-      .eq("metaapi_execution_status", "bridge_claimed");
-    const activeCount = (filledCount ?? 0) + (claimedCount ?? 0);
-    const roomForMore = activeCount < maxTrades;
 
+    const occupied = new Map<string, { id: string; direction: string }>();
+    for (const r of (filledRows ?? []) as any[]) {
+      occupied.set(String(r.pair), { id: String(r.id), direction: String(r.direction) });
+    }
 
+    // Preserve only the first still-claimed signal per pair. Any extra claim is
+    // converted to paper-only before it can become a second live position.
+    const alreadyClaimed: any[] = [];
+    for (const r of (claimedRows ?? []) as any[]) {
+      const pair = String(r.pair);
+      if (occupied.has(pair)) {
+        const active = occupied.get(pair)!;
+        const relation = String(active.direction).toLowerCase() === String(r.direction).toLowerCase()
+          ? "confirmation" : "contradiction";
+        await supabase.from("signals").update({
+          metaapi_execution_status: "skipped",
+          metaapi_execution_error: `Pair already active — paper tracked only (${relation})`,
+          paper_only: true,
+          paper_status: "watching",
+        }).eq("id", r.id).eq("metaapi_execution_status", "bridge_claimed");
+        continue;
+      }
+      occupied.set(pair, { id: String(r.id), direction: String(r.direction) });
+      alreadyClaimed.push(r);
+    }
+
+    let remainingSlots = Math.max(0, maxTrades - occupied.size);
     const freshClaimed: any[] = [];
-    if (roomForMore && scanningActive) {
+
+    if (scanningActive) {
       const { data: candidates } = await supabase
         .from("signals")
-        .select("id, pair, direction, order_type, entry, stop_loss, tp2, confidence, rr, setup")
+        .select("id,pair,direction,order_type,entry,stop_loss,tp2,confidence,rr,setup,notes")
         .in("pair", bridgePairs)
         .eq("metaapi_execution_status", "none")
-        .gte("created_at", expiryCutoff)
-        .order("created_at", { ascending: false })
-        .limit(10);
+        .gte("created_at", signalValidityCutoff)
+        .order("created_at", { ascending: true })
+        .limit(20);
 
       for (const s of (candidates ?? []) as any[]) {
         if (Number(s.confidence) < minConf || Number(s.rr) < minRR) continue;
@@ -187,6 +209,32 @@ Deno.serve(async (req) => {
         const setupComponents = String(s.setup ?? "")
           .split("+").map((x: string) => x.split("(")[0].trim()).filter(Boolean);
         if (!setupComponents.every((comp: string) => !isComponentDisabledForPair(setupConfig, String(s.pair), comp))) continue;
+
+        const pair = String(s.pair);
+        const active = occupied.get(pair);
+        if (active) {
+          const relation = String(active.direction).toLowerCase() === String(s.direction).toLowerCase()
+            ? "confirmation" : "contradiction";
+          const guardNote = `PAIR_GUARD_V1|blocked_by=${active.id}|relation=${relation}`;
+          await supabase.from("signals").update({
+            metaapi_execution_status: "skipped",
+            metaapi_execution_error: `Pair already active — paper tracked only (${relation})`,
+            paper_only: true,
+            paper_status: "watching",
+            notes: s.notes ? `${s.notes}|${guardNote}` : guardNote,
+          }).eq("id", s.id).eq("metaapi_execution_status", "none");
+          continue;
+        }
+
+        if (remainingSlots <= 0) {
+          await supabase.from("signals").update({
+            metaapi_execution_status: "skipped",
+            metaapi_execution_error: "Account active-trade limit reached — paper tracked only",
+            paper_only: true,
+            paper_status: "watching",
+          }).eq("id", s.id).eq("metaapi_execution_status", "none");
+          continue;
+        }
 
         // Optimistic-lock claim: only succeeds if still unclaimed at write time.
         const { data: claimedRow, error } = await supabase
@@ -198,13 +246,18 @@ Deno.serve(async (req) => {
           })
           .eq("id", s.id)
           .eq("metaapi_execution_status", "none")
-          .select("id, pair, direction, order_type, entry, stop_loss, tp2")
+          .select("id,pair,direction,order_type,entry,stop_loss,tp2")
           .maybeSingle();
-        if (!error && claimedRow) freshClaimed.push(claimedRow);
+
+        if (!error && claimedRow) {
+          freshClaimed.push(claimedRow);
+          occupied.set(pair, { id: String(claimedRow.id), direction: String(claimedRow.direction) });
+          remainingSlots--;
+        }
       }
     }
 
-    const signals = [...(alreadyClaimed ?? []), ...freshClaimed];
+    const signals = [...alreadyClaimed, ...freshClaimed];
     return new Response(JSON.stringify({ ok: true, scanning_active: scanningActive, risk, signals }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
