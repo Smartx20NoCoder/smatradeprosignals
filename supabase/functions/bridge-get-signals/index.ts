@@ -190,7 +190,8 @@ Deno.serve(async (req) => {
       alreadyClaimed.push(r);
     }
 
-    let remainingSlots = Math.max(0, maxTrades - occupied.size);
+    const activeExecutionCount = (filledRows ?? []).length + alreadyClaimed.length;
+    let remainingSlots = Math.max(0, maxTrades - activeExecutionCount);
     const freshClaimed: any[] = [];
 
     if (scanningActive) {
@@ -200,7 +201,7 @@ Deno.serve(async (req) => {
         .in("pair", bridgePairs)
         .eq("metaapi_execution_status", "none")
         .gte("created_at", signalValidityCutoff)
-        .order("created_at", { ascending: true })
+.order("created_at", { ascending: false })
         .limit(20);
 
       for (const s of (candidates ?? []) as any[]) {
