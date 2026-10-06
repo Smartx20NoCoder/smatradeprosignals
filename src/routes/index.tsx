@@ -70,6 +70,7 @@ type Signal = {
   metaapi_pnl?: number | null;
   paper_status?: string | null;
   paper_hit?: string | null;
+  paper_only?: boolean | null;
   metaapi_execution_channel?: "bridge" | "metaapi" | null;
 };
 
@@ -195,10 +196,17 @@ function fmtPrice(p: number, pair: string) {
   if (isBTC(pair)) return p.toFixed(1);
   return p.toFixed(pair.includes("JPY") ? 3 : 5);
 }
-function fmtCandle(iso: string | null, tf: string) {
+function fmtUtcWat(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return `${tf} candle · ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
+  const utc = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
+  const watDate = new Date(d.getTime() + 60 * 60_000);
+  const wat = `${String(watDate.getUTCHours()).padStart(2, "0")}:${String(watDate.getUTCMinutes()).padStart(2, "0")} WAT`;
+  return `${utc} · ${wat}`;
+}
+function fmtCandle(iso: string | null, tf: string) {
+  if (!iso) return "—";
+  return `${tf} setup candle · ${fmtUtcWat(iso)}`;
 }
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -240,7 +248,7 @@ function playBeep() {
 }
 
 // Stage helpers
-const CLOSED_STATUSES = ["tp1", "tp2", "be", "loss", "win", "expired"];
+const CLOSED_STATUSES = ["tp1", "tp2", "be", "loss", "win", "expired", "closed"];
 function stageOf(s: Signal): 1 | 2 | 3 {
   if (CLOSED_STATUSES.includes(s.status)) return 3;
   if (s.status === "executed") return 2;
@@ -1132,6 +1140,7 @@ function SignalRow({
     retryStatusEligible &&
     signalAgeMs < 6 * 60 * 60 * 1000 &&
     s.status !== "executed" &&
+    !s.paper_only &&
     (appSettings.pair_auto_execute?.[s.pair] === true);
 
   async function handleRetry() {
@@ -1197,6 +1206,12 @@ function SignalRow({
           {s.partial_close && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/20 text-chart-4">partial</span>
           )}
+          {s.paper_only && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-chart-4/15 text-chart-4 font-bold"
+              title={s.metaapi_execution_error ?? "Valid signal tracked on paper only"}>
+              PAPER ONLY
+            </span>
+          )}
           {s.metaapi_position_id && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/20 text-primary font-bold"
               title={`Position ${s.metaapi_position_id}${s.metaapi_filled_price ? ` @ ${s.metaapi_filled_price}` : ""}`}>
@@ -1213,20 +1228,24 @@ function SignalRow({
               ↳ {s.metaapi_execution_error}
             </span>
           )}
-          {s.paper_status === "triggered" && (!s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">TRIGGERED</span>
+          {s.paper_status === "triggered" && (s.paper_only || !s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">PAPER TRIGGERED</span>
           )}
-          {(!s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
+          {(s.paper_only || !s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
             const ps = s.paper_status;
             const cls =
               ps === "tp1_hit" ? "bg-bull/20 text-bull" :
               ps === "tp2_hit" ? "bg-bull/30 text-bull" :
               ps === "sl_hit" ? "bg-destructive/20 text-destructive" :
+              ps === "ambiguous" ? "bg-chart-4/20 text-chart-4" :
+              ps === "session_closed" ? "bg-muted text-foreground" :
               "bg-muted text-muted-foreground";
             const label =
               ps === "tp1_hit" ? "TP1 ✓" :
               ps === "tp2_hit" ? "TP2 ✓" :
               ps === "sl_hit" ? "SL ✗" :
+              ps === "ambiguous" ? "AMBIGUOUS" :
+              ps === "session_closed" ? "SESSION CLOSE" :
               ps === "expired" ? "EXPIRED" : "TRACKING";
             return (
               <span className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-bold ${cls}`}
@@ -1277,7 +1296,9 @@ function SignalRow({
       </div>
 
       <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
+        <span>Signal generated · {fmtUtcWat(s.created_at)}</span>
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
+        {s.executed_at && <span>Live execution · {fmtUtcWat(s.executed_at)}</span>}
         {spreadLabel && <span>· {spreadLabel} applied</span>}
       </div>
 
