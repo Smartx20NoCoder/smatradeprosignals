@@ -2401,11 +2401,15 @@ async function runScanJob(
         const d = pairData[String(s.pair)];
         if (!d) continue;
 
-        const use1m = Array.isArray(d.c1m) && (d.c1m?.length ?? 0) >= 3;
-        const bars = (use1m ? d.c1m! : d.c5).slice().sort((a, b) => a.t - b.t);
-        const tfMs = (use1m ? 1 : 5) * 60_000;
         const createdMs = new Date(String(s.created_at)).getTime();
         if (!Number.isFinite(createdMs)) continue;
+
+        const oneMinuteBars = Array.isArray(d.c1m) ? d.c1m! : [];
+        // Prefer 1m only when its retained history actually reaches the signal.
+        // Older signals fall back to the much deeper 5m cache.
+        const use1m = oneMinuteBars.length >= 3 && oneMinuteBars[0].t <= createdMs + 60_000;
+        const bars = (use1m ? oneMinuteBars : d.c5).slice().sort((a, b) => a.t - b.t);
+        const tfMs = (use1m ? 1 : 5) * 60_000;
 
         // Only use bars that BEGIN after the signal existed. This avoids letting
         // pre-signal price action inside the source candle decide a paper outcome.
