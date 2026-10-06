@@ -2584,7 +2584,7 @@ async function runScanJob(
     console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
     if (toInsert.length) {
-      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("id, pair, direction, confidence, rr");
+      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("*");
       if (insertErr) {
         const msg = `Signal insert failed: ${insertErr.message}`;
         errors.push(msg);
@@ -2600,31 +2600,9 @@ async function runScanJob(
         await sendTelegramAlerts(insertedRows as any, cfg);
       }
 
-      // Fire-and-forget MetaApi auto-execution for signals meeting threshold.
-      const autoTrade = !!(cfg as any)?.metaapi_auto_trade;
-
-      if (autoTrade) {
-        const fnSecret = Deno.env.get("INTERNAL_FN_SECRET") ?? "";
-        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-        const baseUrl = Deno.env.get("SUPABASE_URL")!;
-        for (const row of insertedRows) {
-          if (Number(row.confidence) < minConf || Number(row.rr) < minRR) continue;
-          if (autoCfg[row.pair] === false) continue; // pair disabled for auto-execute
-          // Fire-and-forget — don't block the scan.
-          // Send both auth headers so checkInternalAuth passes regardless of which
-          // it validates against (x-fn-secret OR Bearer service-role).
-          fetch(`${baseUrl}/functions/v1/metaapi-execute`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-fn-secret": fnSecret,
-              "Authorization": `Bearer ${serviceKey}`,
-              "apikey": serviceKey,
-            },
-            body: JSON.stringify({ signal_id: row.id }),
-          }).catch((e) => console.error("metaapi-execute trigger failed", row.id, e));
-        }
-      }
+      // Execution is deliberately decoupled from signal generation.
+      // The EA bridge discovers eligible persisted signals through bridge-get-signals.
+      // Scanner success and Telegram delivery must never depend on any broker connector.
     }
 
     const day = new Date().toISOString().slice(0, 10);
