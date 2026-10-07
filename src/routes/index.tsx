@@ -159,6 +159,7 @@ type AppSettings = {
   bridge_last_seen?: string | null;
   // --- ADDED INTERFACE DATA PROPS TYPE ---
   bridge_claim_expiry_min: number;
+  edge_reference_balance?: number | null;
 };
 
 
@@ -324,6 +325,7 @@ function ScalpEdge() {
     veritas_sl_mult: 1.5, veritas_tp_mult: 2.5, veritas_min_hurst: 0.55,
     veritas_min_snr: 40, veritas_min_conf: 72, veritas_min_rr: 1.60,
     bridge_claim_expiry_min: 45,
+    edge_reference_balance: null,
   });
   const [todaysEvents, setTodaysEvents] = useState<EconomicEvent[]>([]);
 
@@ -455,6 +457,7 @@ function ScalpEdge() {
       bridge_last_seen: (cfg.bridge_last_seen as string | null) ?? null,
       // --- ADDED THE DATA EXTRACTION PROP ENTRY ---
       bridge_claim_expiry_min: Number((cfg as any).bridge_claim_expiry_min ?? 45),
+      edge_reference_balance: (cfg as any).edge_reference_balance != null ? Number((cfg as any).edge_reference_balance) : null,
 
     });
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
@@ -663,10 +666,13 @@ function ScalpEdge() {
 
   // Correlation / exposure check
   function exposureCheck(s: Signal): string | null {
-    const open = signals.filter(x => stageOf(x) === 2);
-    if (open.length >= (appSettings.metaapi_max_trades ?? 3)) {
-      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} concurrent open trades already`;
+    const liveOpen = signals.filter(x => !x.paper_only && (x.metaapi_execution_status === "filled" || x.status === "executed"));
+    const claimed = signals.filter(x => !x.paper_only && x.metaapi_execution_status === "bridge_claimed");
+    const executionSlotsUsed = liveOpen.length + claimed.length;
+    if (executionSlotsUsed >= (appSettings.metaapi_max_trades ?? 3)) {
+      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} live/claimed execution slots already in use`;
     }
+    const open = liveOpen;
     for (const [a, b] of CORRELATIONS) {
       if (s.pair === a || s.pair === b) {
         const conflict = open.find(x => (x.pair === a || x.pair === b) && x.direction === s.direction && x.id !== s.id);
@@ -732,8 +738,19 @@ function ScalpEdge() {
       .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
       .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
     const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
-    return { summary, curve, totalR: cum, totalN: closed.length, winRate: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [signals]);
+    const riskPct = Number(appSettings.metaapi_risk_per_trade_pct ?? 0);
+    const referenceBalance = Number(appSettings.edge_reference_balance ?? 0);
+    const oneRDollars = referenceBalance > 0 && riskPct > 0 ? referenceBalance * (riskPct / 100) : 0;
+    const totalDollarEquivalent = oneRDollars > 0 ? cum * oneRDollars : null;
+    const actualLivePnl = closed
+      .filter((s) => !s.paper_only && s.metaapi_pnl != null)
+      .reduce((sum, s) => sum + Number(s.metaapi_pnl ?? 0), 0);
+    return {
+      summary, curve, totalR: cum, totalN: closed.length,
+      winRate: closed.length ? (wins / closed.length) * 100 : 0,
+      oneRDollars, totalDollarEquivalent, actualLivePnl,
+    };
+  }, [signals, appSettings.metaapi_risk_per_trade_pct, appSettings.edge_reference_balance]);
 
   const pendingSignals = signals.filter((s) => stageOf(s) === 1);
   const openSignals = signals.filter((s) => stageOf(s) === 2);
@@ -745,9 +762,12 @@ function ScalpEdge() {
   const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
   const projectedDaily = scansPerDay * autoCallsPerScan;
 
-  // Risk exposure (open / In-Trade signals)
-  const openOnly = signals.filter((s) => stageOf(s) === 2);
-  const openRiskPct = openOnly.length * RISK_PER_TRADE_PCT;
+  // Execution exposure: paper trades are research only and never consume live slots.
+  const liveOpenOnly = signals.filter((s) => !s.paper_only && (s.metaapi_execution_status === "filled" || s.status === "executed"));
+  const claimedOnly = signals.filter((s) => !s.paper_only && s.metaapi_execution_status === "bridge_claimed");
+  const paperOpenOnly = signals.filter((s) => s.paper_only && s.paper_status === "triggered");
+  const openOnly = liveOpenOnly;
+  const openRiskPct = liveOpenOnly.length * Number(appSettings.metaapi_risk_per_trade_pct ?? 0);
   const correlationWarnings: string[] = [];
   for (const [a, b] of CORRELATIONS) {
     const sameDirOpen = openOnly.filter((s) => (s.pair === a || s.pair === b));
@@ -907,17 +927,20 @@ function ScalpEdge() {
         {tab === "signals" && (
           <>
             <RiskExposureWidget
-              openSignals={openOnly}
+              openSignals={liveOpenOnly}
+              claimedSignals={claimedOnly}
+              paperSignals={paperOpenOnly}
               openRiskPct={openRiskPct}
               correlationWarnings={correlationWarnings}
               maxTrades={appSettings.metaapi_max_trades ?? 3}
+              referenceBalance={appSettings.edge_reference_balance ?? null}
             />
             <SignalList signals={signals} onStatus={setStatus} onPartial={markPartialTp1Be}
               exposureCheck={exposureCheck} newsRiskCheck={newsRiskCheck}
               appSettings={appSettings} onRefresh={loadSignals} />
           </>
         )}
-        {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "edge" && <EdgePanel stats={stats} appSettings={appSettings} saveAppSettings={saveAppSettings} />}
         {tab === "history" && <HistoryPanel signals={signals} />}
         {tab === "news" && (
           <NewsPanel
@@ -2585,30 +2608,34 @@ function MetaApiPanel({
 
 
 function RiskExposureWidget({
-  openSignals, openRiskPct, correlationWarnings, maxTrades,
+  openSignals, claimedSignals, paperSignals, openRiskPct, correlationWarnings, maxTrades, referenceBalance,
 }: {
   openSignals: Signal[];
+  claimedSignals: Signal[];
+  paperSignals: Signal[];
   openRiskPct: number;
   correlationWarnings: string[];
   maxTrades: number;
+  referenceBalance: number | null;
 }) {
-  const overCap = openSignals.length >= maxTrades;
-  const meterPct = Math.min(100, (openSignals.length / maxTrades) * 100);
+  const executionSlotsUsed = openSignals.length + claimedSignals.length;
+  const overCap = executionSlotsUsed >= maxTrades;
+  const meterPct = Math.min(100, (executionSlotsUsed / maxTrades) * 100);
   const meterColor = overCap ? "var(--bear)" : openSignals.length >= 2 ? "var(--chart-4)" : "var(--bull)";
   return (
     <div className="mt-4 border border-border rounded bg-card p-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Open Risk Exposure</div>
         <div className="text-xs text-muted-foreground">
-          Notional <span className="text-foreground">${NOTIONAL_ACCOUNT.toLocaleString()}</span>
-          {" · "}{RISK_PER_TRADE_PCT}% per trade
+          Max live slots <span className="text-foreground">{maxTrades}</span>
+          {" · "}paper trades do not consume slots
         </div>
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
-          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Open Trades</div>
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Live + Claimed</div>
           <div className="font-semibold text-base" style={{ color: overCap ? "var(--bear)" : "var(--foreground)" }}>
-            {openSignals.length} / {maxTrades}
+            {executionSlotsUsed} / {maxTrades}
           </div>
         </div>
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
@@ -2618,8 +2645,12 @@ function RiskExposureWidget({
         <div className="bg-secondary/40 px-2 py-1.5 rounded">
           <div className="text-[9px] uppercase text-muted-foreground tracking-wider">$ At Risk</div>
           <div className="font-semibold text-base">
-            ${((openRiskPct / 100) * NOTIONAL_ACCOUNT).toFixed(0)}
+            {referenceBalance && referenceBalance > 0 ? `${((openRiskPct / 100) * referenceBalance).toFixed(2)}` : "—"}
           </div>
+        </div>
+        <div className="bg-secondary/40 px-2 py-1.5 rounded">
+          <div className="text-[9px] uppercase text-muted-foreground tracking-wider">Paper In-Trade</div>
+          <div className="font-semibold text-base">{paperSignals.length}</div>
         </div>
       </div>
       <div className="mt-2 w-full h-1 bg-secondary rounded overflow-hidden">
@@ -3124,20 +3155,47 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 function EdgePanel({
-  stats,
+  stats, appSettings, saveAppSettings,
 }: {
   stats: {
     summary: { setup: string; n: number; winRate: number; avgR: number; expectancy: number }[];
     curve: { i: number; r: number }[];
     totalR: number; totalN: number; winRate: number;
+    oneRDollars: number; totalDollarEquivalent: number | null; actualLivePnl: number;
   };
+  appSettings: AppSettings;
+  saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
 }) {
   return (
     <div className="mt-4 space-y-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <KPI label="CLOSED" value={stats.totalN.toString()} />
         <KPI label="WIN RATE" value={`${stats.winRate.toFixed(1)}%`} color={stats.winRate >= 50 ? "bull" : "bear"} />
         <KPI label="TOTAL R" value={`${stats.totalR >= 0 ? "+" : ""}${stats.totalR.toFixed(2)}R`} color={stats.totalR >= 0 ? "bull" : "bear"} />
+        <KPI label="R EQUIV $" value={stats.totalDollarEquivalent == null ? "SET BALANCE" : `${stats.totalDollarEquivalent >= 0 ? "+" : "-"}${Math.abs(stats.totalDollarEquivalent).toFixed(2)}`} color={stats.totalDollarEquivalent == null || stats.totalDollarEquivalent >= 0 ? "bull" : "bear"} />
+        <KPI label="ACTUAL LIVE $" value={`${stats.actualLivePnl >= 0 ? "+" : "-"}${Math.abs(stats.actualLivePnl).toFixed(2)}`} color={stats.actualLivePnl >= 0 ? "bull" : "bear"} />
+      </div>
+
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Dollar-equivalent basis</div>
+        <div className="flex items-end gap-3 flex-wrap">
+          <label className="text-xs">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reference balance ($)</div>
+            <input type="number" min={1} step={1}
+              value={appSettings.edge_reference_balance ?? ""}
+              placeholder="e.g. 600"
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : Number(e.target.value);
+                if (v === null || (Number.isFinite(v) && v > 0)) void saveAppSettings({ edge_reference_balance: v });
+              }}
+              className="w-36 bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+          </label>
+          <div className="text-xs text-muted-foreground pb-1.5">
+            {stats.oneRDollars > 0
+              ? `1R = ${stats.oneRDollars.toFixed(2)} at ${appSettings.metaapi_risk_per_trade_pct}% risk`
+              : "Set a reference balance to convert R into a hypothetical dollar equivalent."}
+          </div>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded p-3">
