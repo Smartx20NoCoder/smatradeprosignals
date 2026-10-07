@@ -71,6 +71,8 @@ type Signal = {
   metaapi_pnl?: number | null;
   paper_status?: string | null;
   paper_hit?: string | null;
+  paper_triggered_at?: string | null;
+  paper_closed_at?: string | null;
   paper_only?: boolean | null;
   metaapi_execution_channel?: "bridge" | "metaapi" | null;
 };
@@ -1316,11 +1318,12 @@ function SignalRow({
         <span>Signal · {fmtWat(s.created_at)}</span>
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
         {s.executed_at && <span>Live execution · {fmtWat(s.executed_at)}</span>}
-        {s.closed_at && <span>Closed · {fmtWat(s.closed_at)}</span>}
-        {!s.closed_at && s.paper_hit && ["tp2_hit","sl_hit","ambiguous","session_closed","expired"].includes(s.paper_status ?? "") && (
-          <span>{s.paper_status === "expired" ? "Expired" : "Paper resolved"} · {fmtWat(s.paper_hit)}</span>
+        {s.paper_only && s.paper_triggered_at && <span>Paper execution · {fmtWat(s.paper_triggered_at)}</span>}
+        {s.closed_at && !s.paper_only && <span>Closed · {fmtWat(s.closed_at)}</span>}
+        {s.paper_only && s.paper_closed_at && (
+          <span>{s.paper_status === "expired" ? "Paper expired" : "Paper close"} · {fmtWat(s.paper_closed_at)}</span>
         )}
-        {!s.closed_at && !s.paper_hit && !CLOSED_STATUSES.includes(s.status) && (
+        {!s.closed_at && !s.paper_closed_at && !s.paper_triggered_at && !CLOSED_STATUSES.includes(s.status) && (
           <span>Valid until · {fmtWat(signalValidUntil(s.created_at))}</span>
         )}
         {spreadLabel && <span>· {spreadLabel} applied</span>}

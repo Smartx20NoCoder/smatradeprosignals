@@ -2446,9 +2446,11 @@ async function runScanJob(
           }
 
           if (triggered) {
+            const triggeredAt = new Date(evalBars[triggerIdx].t + tfMs).toISOString();
             await supabase.from("signals").update({
               paper_status: "triggered",
-              paper_hit: new Date(evalBars[triggerIdx].t + tfMs).toISOString(),
+              paper_hit: triggeredAt,
+              paper_triggered_at: triggeredAt,
             }).eq("id", s.id);
             paperTriggered++;
           } else if (Date.now() >= validityEndMs) {
@@ -2457,6 +2459,7 @@ async function runScanJob(
               status: "expired",
               outcome_r: 0,
               paper_hit: new Date(validityEndMs).toISOString(),
+              paper_closed_at: new Date(validityEndMs).toISOString(),
             }).eq("id", s.id);
             paperExpired++;
             continue;
@@ -2480,6 +2483,7 @@ async function runScanJob(
               status: "expired",
               outcome_r: null,
               paper_hit: new Date(b.t + tfMs).toISOString(),
+              paper_closed_at: new Date(b.t + tfMs).toISOString(),
             };
             paperAmbiguous++;
             break;
@@ -2491,6 +2495,7 @@ async function runScanJob(
               status: "tp2",
               outcome_r: Number(r.toFixed(2)),
               paper_hit: new Date(b.t + tfMs).toISOString(),
+              paper_closed_at: new Date(b.t + tfMs).toISOString(),
             };
             paperResolved++;
             break;
@@ -2501,6 +2506,7 @@ async function runScanJob(
               status: "loss",
               outcome_r: -1,
               paper_hit: new Date(b.t + tfMs).toISOString(),
+              paper_closed_at: new Date(b.t + tfMs).toISOString(),
             };
             paperResolved++;
             break;
@@ -2517,6 +2523,7 @@ async function runScanJob(
             status: "closed",
             outcome_r: Number(r.toFixed(2)),
             paper_hit: new Date(sessionEndMs).toISOString(),
+            paper_closed_at: new Date(sessionEndMs).toISOString(),
           };
           paperResolved++;
         }
@@ -2898,18 +2905,25 @@ async function runScanJob(
       return true;
     });
 
-    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: toInsert.length, minConf, minRR } }));
+    const insertPayload = toInsert.map((s: any) => ({
+      ...s,
+      // DB column is NOT NULL. Never let an explicit null from a strategy object
+      // override the database default.
+      metaapi_execution_status: s.metaapi_execution_status ?? "none",
+    }));
+
+    console.log(JSON.stringify({ scan_dedupe: { candidates: merged.length, deduped: merged.length - dedupedInsert.length, below_threshold: dedupedInsert.length - toInsert.length, to_insert: insertPayload.length, minConf, minRR } }));
     let insertedRows: Array<{ id: string; pair: string; direction: string; confidence: number; rr: number }> = [];
-    if (toInsert.length) {
-      const { data: ins, error: insertErr } = await supabase.from("signals").insert(toInsert).select("*");
+    if (insertPayload.length) {
+      const { data: ins, error: insertErr } = await supabase.from("signals").insert(insertPayload).select("*");
       if (insertErr) {
         const msg = `Signal insert failed: ${insertErr.message}`;
         errors.push(msg);
         console.error(msg);
       } else {
         insertedRows = (ins as any) ?? [];
-        if (insertedRows.length !== toInsert.length) {
-          const msg = `Signal insert count mismatch: expected ${toInsert.length}, inserted ${insertedRows.length}`;
+        if (insertedRows.length !== insertPayload.length) {
+          const msg = `Signal insert count mismatch: expected ${insertPayload.length}, inserted ${insertedRows.length}`;
           errors.push(msg);
           console.error(msg);
         }
