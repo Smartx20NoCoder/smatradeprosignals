@@ -17,7 +17,7 @@ const ALLOWED_KEYS = new Set([
   "metaapi_account_id", "metaapi_region", "metaapi_auto_trade",
   "metaapi_min_confidence", "metaapi_min_rr", "metaapi_fixed_lot",
   "metaapi_symbol_suffix", "metaapi_token",
-  "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct",
+  "metaapi_max_trades", "metaapi_expiry_hours", "metaapi_max_daily_loss_pct", "edge_reference_balance",
   "metaapi_risk_per_trade_pct", "metaapi_min_lot", "metaapi_max_lot",
   "metaapi_is_cent_account", "metaapi_is_cent_account_live",
   "pair_auto_execute", "setup_auto_execute",
@@ -43,7 +43,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     "veritas_min_snr","veritas_min_conf","veritas_min_rr","metaapi_min_stop_points",
     "metaapi_trail_lock_r","metaapi_min_adx","metaapi_key_rotation_threshold",
     "twelvedata_key_threshold","twelvedata_key_1_used","twelvedata_key_2_used",
-    "twelvedata_key_3_used","bridge_claim_expiry_min"
+    "twelvedata_key_3_used","bridge_claim_expiry_min","edge_reference_balance"
   ];
   for (const f of numericFields) {
     if (f in patch && typeof patch[f] === "string" && patch[f] !== "") {
@@ -78,6 +78,7 @@ function sanitize(patch: Record<string, unknown>): Record<string, unknown> {
     if (k === "bridge_claim_expiry_min" && (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 1440)) continue;
     if (k === "metaapi_max_daily_loss_pct" && (typeof v !== "number" || v < 0 || v > 100)) continue;
     if (k === "metaapi_risk_per_trade_pct" && (typeof v !== "number" || v < 0.1 || v > 10)) continue;
+    if (k === "edge_reference_balance" && v !== null && (typeof v !== "number" || v <= 0 || v > 100000000)) continue;
     if (k === "metaapi_min_lot" && (typeof v !== "number" || v < 0.01 || v > 1)) continue;
     if (k === "metaapi_max_lot" && (typeof v !== "number" || v < 0.01 || v > 10)) continue;
     if (k === "metaapi_is_cent_account" && typeof v !== "boolean") continue;
