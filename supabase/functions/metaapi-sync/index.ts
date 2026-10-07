@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
 
     const { data: openSignals } = await supabase
       .from("signals")
-      .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_filled_price, metaapi_execution_status, metaapi_executed_lot")
+      .select("id, pair, direction, order_type, entry, stop_loss, tp1, tp2, created_at, metaapi_position_id, metaapi_filled_price, metaapi_execution_status, metaapi_executed_lot, notes")
       .eq("metaapi_execution_status", "filled");
 
     let updated = 0;
@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
             status:                    "expired",
             metaapi_execution_status:  "closed",
             closed_at:                 new Date().toISOString(),
-            notes: `[Time exit: ${isCryptoSignal ? "2h" : "4h"} limit reached]`,
+            notes: [s.notes, `TIME_EXIT|limit=${isCryptoSignal ? "2h" : "4h"}`].filter(Boolean).join("|"),
           }).eq("id", s.id);
 
           closes++;
@@ -303,7 +303,7 @@ Deno.serve(async (req) => {
           status: statusMap[closedStatus] ?? "closed",
           outcome_r: Number.isFinite(rMultiple) ? Number(rMultiple.toFixed(2)) : null,
           closed_at: lastTime ?? new Date().toISOString(),
-          notes: `MetaApi auto-close ${closedStatus} pnl=${totalPnl.toFixed(2)} R=${rMultiple.toFixed(2)}`,
+          notes: [s.notes, `METAAPI_CLOSE|status=${closedStatus}|pnl=${totalPnl.toFixed(2)}|R=${rMultiple.toFixed(2)}`].filter(Boolean).join("|"),
         }).eq("id", s.id);
         closes++;
         updated++;

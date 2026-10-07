@@ -1111,11 +1111,26 @@ function SignalRow({
     : null;
 
   const auction = (() => {
-    if (!s.notes?.startsWith("AUCTION_SHADOW_V1|")) return null;
+    if (!s.notes) return null;
+    const marker = "AUCTION_SHADOW_V1|";
+    const start = s.notes.indexOf(marker);
+    if (start < 0) return null;
+
+    // Auction fields are immutable signal-time context. Other lifecycle notes
+    // may be appended later (PAIR_GUARD, BRIDGE_CLOSE, etc.), so parse only
+    // recognized auction keys instead of assuming AUCTION is the whole notes field.
+    const auctionKeys = new Set([
+      "profile", "valid", "location", "alignment",
+      "failed_long", "failed_short", "poc", "vah", "val",
+    ]);
     const parts: Record<string, string> = {};
-    for (const token of s.notes.split("|").slice(1)) {
+    const tail = s.notes.slice(start + marker.length);
+    for (const token of tail.split("|")) {
       const eq = token.indexOf("=");
-      if (eq > 0) parts[token.slice(0, eq)] = token.slice(eq + 1);
+      if (eq <= 0) continue;
+      const key = token.slice(0, eq);
+      if (!auctionKeys.has(key)) continue;
+      parts[key] = token.slice(eq + 1);
     }
     if (parts.valid !== "1") return { label: "AUCTION N/A", align: "unavailable", title: s.notes };
     const loc = (parts.location ?? "unknown").replaceAll("_", " ").toUpperCase();
