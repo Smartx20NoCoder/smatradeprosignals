@@ -54,6 +54,7 @@ type Signal = {
   outcome_r: number | null;
   created_at: string;
   executed_at: string | null;
+  closed_at: string | null;
   partial_close: boolean;
   order_type: string | null;
   candle_time: string | null;
@@ -196,17 +197,18 @@ function fmtPrice(p: number, pair: string) {
   if (isBTC(pair)) return p.toFixed(1);
   return p.toFixed(pair.includes("JPY") ? 3 : 5);
 }
-function fmtUtcWat(iso: string | null) {
+function fmtWat(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
-  const utc = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
   const watDate = new Date(d.getTime() + 60 * 60_000);
-  const wat = `${String(watDate.getUTCHours()).padStart(2, "0")}:${String(watDate.getUTCMinutes()).padStart(2, "0")} WAT`;
-  return `${utc} · ${wat}`;
+  return `${String(watDate.getUTCHours()).padStart(2, "0")}:${String(watDate.getUTCMinutes()).padStart(2, "0")} WAT`;
 }
 function fmtCandle(iso: string | null, tf: string) {
   if (!iso) return "—";
-  return `${tf} setup candle · ${fmtUtcWat(iso)}`;
+  return `${tf} setup candle · ${fmtWat(iso)}`;
+}
+function signalValidUntil(createdAt: string) {
+  return new Date(new Date(createdAt).getTime() + 6 * 60 * 60_000).toISOString();
 }
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -251,7 +253,7 @@ function playBeep() {
 const CLOSED_STATUSES = ["tp1", "tp2", "be", "loss", "win", "expired", "closed"];
 function stageOf(s: Signal): 1 | 2 | 3 {
   if (CLOSED_STATUSES.includes(s.status)) return 3;
-  if (s.status === "executed") return 2;
+  if (s.status === "executed" || (s.paper_only && s.paper_status === "triggered")) return 2;
   return 1;
 }
 
@@ -1244,7 +1246,7 @@ function SignalRow({
             </span>
           )}
           {s.paper_status === "triggered" && (s.paper_only || !s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-muted text-muted-foreground font-bold">PAPER TRIGGERED</span>
+            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/15 text-primary font-bold">PAPER IN-TRADE</span>
           )}
           {(s.paper_only || !s.metaapi_execution_status || s.metaapi_execution_status === "none") && s.paper_status && (() => {
             const ps = s.paper_status;
@@ -1311,9 +1313,16 @@ function SignalRow({
       </div>
 
       <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground uppercase tracking-wider flex-wrap">
-        <span>Signal generated · {fmtUtcWat(s.created_at)}</span>
+        <span>Signal · {fmtWat(s.created_at)}</span>
         <span>{fmtCandle(s.candle_time, s.timeframe)}</span>
-        {s.executed_at && <span>Live execution · {fmtUtcWat(s.executed_at)}</span>}
+        {s.executed_at && <span>Live execution · {fmtWat(s.executed_at)}</span>}
+        {s.closed_at && <span>Closed · {fmtWat(s.closed_at)}</span>}
+        {!s.closed_at && s.paper_hit && ["tp2_hit","sl_hit","ambiguous","session_closed","expired"].includes(s.paper_status ?? "") && (
+          <span>{s.paper_status === "expired" ? "Expired" : "Paper resolved"} · {fmtWat(s.paper_hit)}</span>
+        )}
+        {!s.closed_at && !s.paper_hit && !CLOSED_STATUSES.includes(s.status) && (
+          <span>Valid until · {fmtWat(signalValidUntil(s.created_at))}</span>
+        )}
         {spreadLabel && <span>· {spreadLabel} applied</span>}
       </div>
 
@@ -1340,9 +1349,11 @@ function SignalRow({
       <div className="mt-3">
         <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Status — click to set</div>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-          <StatusTile label="Pending"  active={s.status === "pending"}  onClick={() => onStatus(s, "pending")} />
-          <StatusTile label="In-Trade" active={s.status === "executed"} onClick={() => onStatus(s, "executed")}
-            disabled={!!blockedExecute && s.status !== "executed"} tone="primary" />
+          <StatusTile label="Pending"  active={s.status === "pending" && !(s.paper_only && s.paper_status === "triggered")}  onClick={() => onStatus(s, "pending")} />
+          <StatusTile label={s.paper_only && s.paper_status === "triggered" ? "Paper In-Trade" : "In-Trade"}
+            active={s.status === "executed" || (s.paper_only && s.paper_status === "triggered")}
+            onClick={() => onStatus(s, "executed")}
+            disabled={(!!blockedExecute && s.status !== "executed") || !!s.paper_only} tone="primary" />
           <StatusTile label="TP 1"     active={s.status === "tp1" && !s.partial_close} onClick={() => onStatus(s, "tp1")} tone="bull" />
           <StatusTile label="TP 2"     active={s.status === "tp2"}     onClick={() => onStatus(s, "tp2")} tone="bull" />
           <StatusTile label="BE"       active={s.status === "be"}      onClick={() => onStatus(s, "be")} />

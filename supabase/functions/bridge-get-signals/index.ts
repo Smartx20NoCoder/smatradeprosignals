@@ -148,38 +148,6 @@ Deno.serve(async (req) => {
       }).in("id", staleClaims.map((r: any) => r.id));
     }
 
-    // Re-open pair-guarded signals when their blocking live trade has since closed.
-    // These signals remain strategy-valid for up to 6h; the EA still applies its
-    // normal entry-tolerance checks before any actual order can fill.
-    const { data: deferredRows } = await supabase
-      .from("signals")
-      .select("id,pair,status,paper_status,metaapi_execution_error,notes,created_at")
-      .eq("metaapi_execution_status", "skipped")
-      .eq("paper_only", true)
-      .eq("status", "pending")
-      .in("paper_status", ["watching", "triggered"])
-      .gte("created_at", signalValidityCutoff)
-      .like("metaapi_execution_error", "Pair already active%");
-
-    for (const s of (deferredRows ?? []) as any[]) {
-      const pair = String(s.pair);
-      // If any filled/claimed row still occupies the pair, keep it deferred.
-      const { count: activePairCount } = await supabase
-        .from("signals")
-        .select("id", { count: "exact", head: true })
-        .eq("pair", pair)
-        .in("metaapi_execution_status", ["filled", "bridge_claimed"]);
-      if ((activePairCount ?? 0) > 0) continue;
-
-      await supabase.from("signals").update({
-        metaapi_execution_status: "none",
-        metaapi_execution_error: null,
-        paper_only: false,
-      }).eq("id", s.id)
-        .eq("metaapi_execution_status", "skipped")
-        .eq("status", "pending");
-    }
-
     // Don't hand out NEW claims once scanning has stopped — only keep tracking
     // claims already in flight so they can still fill or expire cleanly.
     const { data: claimedRows } = await supabase
