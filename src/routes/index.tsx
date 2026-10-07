@@ -258,6 +258,13 @@ function stageOf(s: Signal): 1 | 2 | 3 {
   if (s.status === "executed" || (s.paper_only && s.paper_status === "triggered")) return 2;
   return 1;
 }
+function occupiesLiveBridgeSlot(s: Signal): boolean {
+  if (s.paper_only) return false;
+  return s.metaapi_execution_status === "filled" || s.metaapi_execution_status === "bridge_claimed";
+}
+function isLiveFilledPosition(s: Signal): boolean {
+  return !s.paper_only && (s.status === "executed" || s.metaapi_execution_status === "filled");
+}
 
 function ScalpEdge() {
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -284,6 +291,7 @@ function ScalpEdge() {
   // Settings
   // (Auto-scan is server-side cron now; no client toggle state needed.)
   const [soundOn, setSoundOn] = useState(true);
+  const [edgeModelBalance, setEdgeModelBalance] = useState(100);
   const [scanRuns, setScanRuns] = useState<ScanRun[]>([]);
   const [cacheRows, setCacheRows] = useState<CacheRow[]>([]);
   const [priceHealth, setPriceHealth] = useState<PriceHealthRow[]>([]);
@@ -340,13 +348,14 @@ function ScalpEdge() {
       try {
         const s = JSON.parse(raw);
         if (typeof s.soundOn === "boolean") setSoundOn(s.soundOn);
+        if (Number.isFinite(Number(s.edgeModelBalance)) && Number(s.edgeModelBalance) > 0) setEdgeModelBalance(Number(s.edgeModelBalance));
       } catch { /* ignore */ }
     }
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn }));
-  }, [soundOn]);
+    window.localStorage.setItem("scalpedge-settings", JSON.stringify({ soundOn, edgeModelBalance }));
+  }, [soundOn, edgeModelBalance]);
 
   async function loadSignals() {
     const { data } = await supabase
@@ -663,14 +672,15 @@ function ScalpEdge() {
 
   // Correlation / exposure check
   function exposureCheck(s: Signal): string | null {
-    const open = signals.filter(x => stageOf(x) === 2);
-    if (open.length >= (appSettings.metaapi_max_trades ?? 3)) {
-      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} concurrent open trades already`;
+    const liveSlots = signals.filter(occupiesLiveBridgeSlot);
+    const liveFilled = signals.filter(isLiveFilledPosition);
+    if (liveSlots.length >= (appSettings.metaapi_max_trades ?? 3)) {
+      return `Hard cap: ${appSettings.metaapi_max_trades ?? 3} live bridge slots already occupied`;
     }
     for (const [a, b] of CORRELATIONS) {
       if (s.pair === a || s.pair === b) {
-        const conflict = open.find(x => (x.pair === a || x.pair === b) && x.direction === s.direction && x.id !== s.id);
-        if (conflict) return `Correlation conflict: ${conflict.pair} ${conflict.direction} already open`;
+        const conflict = liveFilled.find(x => (x.pair === a || x.pair === b) && x.direction === s.direction && x.id !== s.id);
+        if (conflict) return `Correlation conflict: ${conflict.pair} ${conflict.direction} already live`;
       }
     }
     return null;
@@ -712,6 +722,8 @@ function ScalpEdge() {
       return setupName;
     };
     const closed = signals.filter((s) => stageOf(s) === 3 && s.outcome_r !== null);
+    const riskPct = Number(appSettings.metaapi_risk_per_trade_pct ?? 2);
+    const modeledRiskDollars = edgeModelBalance * (riskPct / 100);
     const bySetup: Record<string, { n: number; wins: number; rSum: number }> = {};
     for (const s of closed) {
       const fam = edgeFamily(s.setup);
@@ -726,17 +738,32 @@ function ScalpEdge() {
       winRate: v.n ? (v.wins / v.n) * 100 : 0,
       avgR: v.n ? v.rSum / v.n : 0,
       expectancy: v.n ? v.rSum / v.n : 0,
+      modelDollars: v.rSum * modeledRiskDollars,
     }));
     let cum = 0;
     const curve = [...closed]
       .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
       .map((s, i) => { cum += s.outcome_r ?? 0; return { i: i + 1, r: +cum.toFixed(2) }; });
     const wins = closed.filter((s) => (s.outcome_r ?? 0) > 0).length;
-    return { summary, curve, totalR: cum, totalN: closed.length, winRate: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [signals]);
+    const actualLiveDollars = closed
+      .filter((s) => !s.paper_only && s.metaapi_pnl != null)
+      .reduce((sum, s) => sum + Number(s.metaapi_pnl ?? 0), 0);
+    return {
+      summary, curve,
+      totalR: cum,
+      totalN: closed.length,
+      winRate: closed.length ? (wins / closed.length) * 100 : 0,
+      modelDollars: cum * modeledRiskDollars,
+      actualLiveDollars,
+      modeledRiskDollars,
+      riskPct,
+    };
+  }, [signals, edgeModelBalance, appSettings.metaapi_risk_per_trade_pct]);
 
   const pendingSignals = signals.filter((s) => stageOf(s) === 1);
   const openSignals = signals.filter((s) => stageOf(s) === 2);
+  const liveSlotSignals = signals.filter(occupiesLiveBridgeSlot);
+  const activePaperSignals = signals.filter((s) => s.paper_only && ["watching","triggered","tp1_hit"].includes(s.paper_status ?? ""));
   const budgetPct = Math.min(100, (budgetToday / (DAILY_BUDGET_PER_KEY * 3)) * 100);
 
   // Server cron projected budget — actual scans run at the app-level interval.
@@ -745,9 +772,9 @@ function ScalpEdge() {
   const scansPerDay = Math.floor((24 * 60) / effectiveIntervalMin);
   const projectedDaily = scansPerDay * autoCallsPerScan;
 
-  // Risk exposure (open / In-Trade signals)
-  const openOnly = signals.filter((s) => stageOf(s) === 2);
-  const openRiskPct = openOnly.length * RISK_PER_TRADE_PCT;
+  // Risk exposure is live broker exposure only; paper in-trade signals are research-only.
+  const openOnly = signals.filter(isLiveFilledPosition);
+  const openRiskPct = openOnly.length * Number(appSettings.metaapi_risk_per_trade_pct ?? RISK_PER_TRADE_PCT);
   const correlationWarnings: string[] = [];
   for (const [a, b] of CORRELATIONS) {
     const sameDirOpen = openOnly.filter((s) => (s.pair === a || s.pair === b));
@@ -888,7 +915,7 @@ function ScalpEdge() {
 
         <nav className="mt-6 flex gap-1 border-b border-border overflow-x-auto">
           {([
-            ["signals", `SIGNALS (${pendingSignals.length}/${openSignals.length})`],
+            ["signals", `SIGNALS (${pendingSignals.length} pending · ${liveSlotSignals.length} live · ${activePaperSignals.length} paper)`],
             ["edge", "EDGE"],
             ["history", "HISTORY"],
             ["news", "NEWS"],
@@ -917,7 +944,7 @@ function ScalpEdge() {
               appSettings={appSettings} onRefresh={loadSignals} />
           </>
         )}
-        {tab === "edge" && <EdgePanel stats={stats} />}
+        {tab === "edge" && <EdgePanel stats={stats} modelBalance={edgeModelBalance} setModelBalance={setEdgeModelBalance} />}
         {tab === "history" && <HistoryPanel signals={signals} />}
         {tab === "news" && (
           <NewsPanel
@@ -2309,10 +2336,13 @@ function MetaApiPanel({
 
       <div className="grid grid-cols-3 gap-2">
         <label className="text-xs">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Open Trades</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Max Live Bridge Trades</div>
           <input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
             onChange={(e) => saveAppSettings({ metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
+          <div className="text-[10px] text-muted-foreground mt-1">
+            Counts only live/claimed bridge slots. Paper-tracked signals do not use this limit.
+          </div>
         </label>
         <label className="text-xs">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pending Expiry (hours)</div>
@@ -3124,20 +3154,47 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 function EdgePanel({
-  stats,
+  stats, modelBalance, setModelBalance,
 }: {
   stats: {
-    summary: { setup: string; n: number; winRate: number; avgR: number; expectancy: number }[];
+    summary: { setup: string; n: number; winRate: number; avgR: number; expectancy: number; modelDollars: number }[];
     curve: { i: number; r: number }[];
     totalR: number; totalN: number; winRate: number;
+    modelDollars: number; actualLiveDollars: number; modeledRiskDollars: number; riskPct: number;
   };
+  modelBalance: number;
+  setModelBalance: (v: number) => void;
 }) {
   return (
     <div className="mt-4 space-y-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <KPI label="CLOSED" value={stats.totalN.toString()} />
         <KPI label="WIN RATE" value={`${stats.winRate.toFixed(1)}%`} color={stats.winRate >= 50 ? "bull" : "bear"} />
         <KPI label="TOTAL R" value={`${stats.totalR >= 0 ? "+" : ""}${stats.totalR.toFixed(2)}R`} color={stats.totalR >= 0 ? "bull" : "bear"} />
+        <KPI label="MODEL $" value={`${stats.modelDollars >= 0 ? "+" : "-"}${Math.abs(stats.modelDollars).toFixed(2)}`} color={stats.modelDollars >= 0 ? "bull" : "bear"} />
+        <KPI label="ACTUAL LIVE $" value={`${stats.actualLiveDollars >= 0 ? "+" : "-"}${Math.abs(stats.actualLiveDollars).toFixed(2)}`} color={stats.actualLiveDollars >= 0 ? "bull" : "bear"} />
+      </div>
+
+      <div className="bg-card border border-border rounded p-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model Dollar Equivalent</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Simulates every resolved signal at {stats.riskPct.toFixed(2)}% risk. 1R = ${stats.modeledRiskDollars.toFixed(2)} at the selected model balance.
+            </div>
+          </div>
+          <label className="text-xs min-w-[180px]">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Model Balance ($)</span>
+            <input
+              type="number" min={1} step={10} value={modelBalance}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v) && v > 0) setModelBalance(v);
+              }}
+              className="mt-1 w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono"
+            />
+          </label>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded p-3">
@@ -3174,6 +3231,7 @@ function EdgePanel({
                 <th className="text-right">Win%</th>
                 <th className="text-right">Avg R</th>
                 <th className="text-right">Expectancy</th>
+                <th className="text-right">Model $</th>
               </tr>
             </thead>
             <tbody>
@@ -3187,6 +3245,9 @@ function EdgePanel({
                   </td>
                   <td className="text-right" style={{ color: r.expectancy >= 0 ? "var(--bull)" : "var(--bear)" }}>
                     {r.expectancy >= 0 ? "+" : ""}{r.expectancy.toFixed(2)}R
+                  </td>
+                  <td className="text-right font-semibold" style={{ color: r.modelDollars >= 0 ? "var(--bull)" : "var(--bear)" }}>
+                    {r.modelDollars >= 0 ? "+" : "-"}${Math.abs(r.modelDollars).toFixed(2)}
                   </td>
                 </tr>
               ))}
