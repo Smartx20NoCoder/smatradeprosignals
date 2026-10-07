@@ -2340,10 +2340,10 @@ function MetaApiPanel({
           <input type="number" min={1} max={50} step={1} value={appSettings.metaapi_max_trades}
             onChange={(e) => saveAppSettings({ metaapi_max_trades: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })}
             className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono" />
-        </label>
           <div className="text-[10px] text-muted-foreground mt-1">
             Counts only live/claimed bridge slots. Paper-tracked signals do not use this limit.
           </div>
+        </label>
         <label className="text-xs">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pending Expiry (hours)</div>
           <input type="number" min={1} max={168} step={1} value={appSettings.metaapi_expiry_hours}
