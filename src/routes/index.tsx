@@ -1256,16 +1256,22 @@ function SignalRow({
               ⚡ MT {s.metaapi_pnl != null ? `${s.metaapi_pnl >= 0 ? "+" : ""}${s.metaapi_pnl.toFixed(2)}` : "live"}
             </span>
           )}
-          {s.metaapi_execution_status === "failed" && (
-            <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold">
-              BRIDGE FAILED
-            </span>
-          )}
-          {s.metaapi_execution_status === "failed" && s.metaapi_execution_error && (
-            <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
-              ↳ {s.metaapi_execution_error}
-            </span>
-          )}
+          {s.metaapi_execution_status === "failed" && (() => {
+            const claimExpired = (s.metaapi_execution_error ?? "").toLowerCase().startsWith("bridge claim expired");
+            return (
+              <>
+                <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-destructive/20 text-destructive font-bold"
+                  title={claimExpired ? s.metaapi_execution_error ?? undefined : undefined}>
+                  {claimExpired ? "BRIDGE CLAIM EXPIRED" : "BRIDGE FAILED"}
+                </span>
+                {!claimExpired && s.metaapi_execution_error && (
+                  <span className="text-[10px] text-destructive block mt-0.5 truncate max-w-[240px]" title={s.metaapi_execution_error}>
+                    ↳ {s.metaapi_execution_error}
+                  </span>
+                )}
+              </>
+            );
+          })()}
           {s.paper_status === "triggered" && (s.paper_only || !s.metaapi_execution_status || s.metaapi_execution_status === "none") && (
             <span className="px-1.5 py-0.5 text-[9px] uppercase rounded bg-primary/15 text-primary font-bold">PAPER IN-TRADE</span>
           )}
