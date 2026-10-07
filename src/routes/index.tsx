@@ -183,10 +183,6 @@ const TFS = ["5m", "15m", "1h"] as const;
 
 const EXPIRE_HOURS = 24;
 
-// Notional account size used by risk meter (1% per trade assumed)
-const NOTIONAL_ACCOUNT = 10000;
-const RISK_PER_TRADE_PCT = 1.0;
-
 // Correlation pairs (same direction → blocked when one is In-Trade)
 const CORRELATIONS: [string, string][] = [
   ["EUR/USD", "GBP/USD"],
