@@ -43,7 +43,7 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
 
           const { data: s } = await supabaseAdmin
             .from("signals")
-            .select("id, direction, order_type, entry, stop_loss, tp1, tp2")
+            .select("id, direction, order_type, entry, stop_loss, tp1, tp2, notes")
             .eq("metaapi_position_id", String(positionId))
             .maybeSingle();
 
@@ -98,7 +98,8 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
               status: mapped,
               outcome_r: Number.isFinite(rMultiple) ? Number(rMultiple.toFixed(2)) : null,
               closed_at: closedAt,
-              notes: `Bridge close ${closedStatus} pnl=${pnl.toFixed(2)} R=${rMultiple.toFixed(2)} position=${positionId} deal=${dealTicket}`,
+              notes: [s.notes, `BRIDGE_CLOSE|status=${closedStatus}|pnl=${pnl.toFixed(2)}|R=${rMultiple.toFixed(2)}|position=${positionId}|deal=${dealTicket}`]
+                .filter(Boolean).join("|"),
             })
             .eq("id", s.id);
           if (error) throw error;
