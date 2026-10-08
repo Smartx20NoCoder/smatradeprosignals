@@ -36,7 +36,23 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
           const closePrice = Number(body["close_price"] ?? 0);
           const pnl = Number(body["pnl"] ?? 0);
           const closedAtEpoch = Number(body["closed_at_epoch"] ?? 0);
-
+          const optionalNumber = (key: string) => {
+            const value = Number(body[key]);
+            return Number.isFinite(value) ? value : null;
+          };
+          const mfeR = optionalNumber("mfe_r");
+          const maeR = optionalNumber("mae_r");
+          const mfePrice = optionalNumber("mfe_price");
+          const maePrice = optionalNumber("mae_price");
+          const mfeMoney = optionalNumber("mfe_money");
+          const maeMoney = optionalNumber("mae_money");
+          const holdSecondsRaw = Number(body["hold_seconds"]);
+          const holdSeconds = Number.isFinite(holdSecondsRaw) && holdSecondsRaw >= 0 ? Math.round(holdSecondsRaw) : null;
+          const exitReasonRaw = String(body["exit_reason"] ?? "other");
+          const allowedExitReasons = new Set(["sl", "tp", "stopout", "expert", "manual_desktop", "manual_mobile", "manual_web", "other"]);
+          const exitReason = allowedExitReasons.has(exitReasonRaw) ? exitReasonRaw : "other";
+          const trackingComplete = body["excursion_tracking_complete"] === true;
+          
           if (!positionId) return json({ error: "position_id or ticket required" }, 400);
 
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -90,6 +106,11 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
           const closedAt =
             closedAtEpoch > 0 ? new Date(closedAtEpoch * 1000).toISOString() : new Date().toISOString();
 
+          const capturePct =
+            trackingComplete && mfeR != null && mfeR > 0 && rMultiple > 0
+              ? (rMultiple / mfeR) * 100
+              : null;
+
           const { error } = await supabaseAdmin
             .from("signals")
             .update({
@@ -98,8 +119,21 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
               status: mapped,
               outcome_r: Number.isFinite(rMultiple) ? Number(rMultiple.toFixed(2)) : null,
               closed_at: closedAt,
-              notes: [s.notes, `BRIDGE_CLOSE|status=${closedStatus}|pnl=${pnl.toFixed(2)}|R=${rMultiple.toFixed(2)}|position=${positionId}|deal=${dealTicket}`]
-                .filter(Boolean).join("|"),
+              mfe_r: mfeR,
+              mae_r: maeR,
+              mfe_price: mfePrice && mfePrice > 0 ? mfePrice : null,
+              mae_price: maePrice && maePrice > 0 ? maePrice : null,
+              mfe_money: mfeMoney,
+              mae_money: maeMoney,
+              hold_seconds: holdSeconds,
+              exit_reason: exitReason,
+              profit_capture_pct: capturePct == null ? null : Number(capturePct.toFixed(2)),
+              excursion_tracking_complete: trackingComplete,
+              notes: [
+                s.notes,
+                `BRIDGE_CLOSE|status=${closedStatus}|pnl=${pnl.toFixed(2)}|R=${rMultiple.toFixed(2)}|position=${positionId}|deal=${dealTicket}`,
+                `EXCURSION|complete=${trackingComplete ? 1 : 0}|mfe_r=${mfeR?.toFixed(3) ?? "na"}|mae_r=${maeR?.toFixed(3) ?? "na"}|capture=${capturePct?.toFixed(1) ?? "na"}|hold_s=${holdSeconds ?? "na"}|exit=${exitReason}`,
+              ].filter(Boolean).join("|"),
             })
             .eq("id", s.id);
           if (error) throw error;
@@ -111,6 +145,12 @@ export const Route = createFileRoute("/api/public/bridge-report-close")({
             outcome_r: Number(rMultiple.toFixed(2)),
             position_id: positionId,
             deal_ticket: dealTicket,
+            mfe_r: mfeR,
+            mae_r: maeR,
+            profit_capture_pct: capturePct == null ? null : Number(capturePct.toFixed(2)),
+            hold_seconds: holdSeconds,
+            exit_reason: exitReason,
+            excursion_tracking_complete: trackingComplete,
           });
         } catch (e) {
           console.error("bridge-report-close error", e);
