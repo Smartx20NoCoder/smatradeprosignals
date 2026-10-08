@@ -75,6 +75,16 @@ type Signal = {
   paper_closed_at?: string | null;
   paper_only?: boolean | null;
   metaapi_execution_channel?: "bridge" | "metaapi" | null;
+  mfe_r?: number | null;
+  mae_r?: number | null;
+  mfe_price?: number | null;
+  mae_price?: number | null;
+  mfe_money?: number | null;
+  mae_money?: number | null;
+  hold_seconds?: number | null;
+  exit_reason?: string | null;
+  profit_capture_pct?: number | null;
+  excursion_tracking_complete?: boolean | null;
 };
 
 type ReportCheck = { setup: string; status: "qualified" | "filtered" | "none"; reason?: string; direction?: string };
@@ -741,10 +751,23 @@ function ScalpEdge() {
     const actualLivePnl = closed
       .filter((s) => !s.paper_only && s.metaapi_pnl != null)
       .reduce((sum, s) => sum + Number(s.metaapi_pnl ?? 0), 0);
+    const exactExcursions = closed.filter((s) =>
+      !s.paper_only && s.excursion_tracking_complete === true &&
+      s.mfe_r != null && Number(s.mfe_r) >= 0 && s.mae_r != null
+    );
+    const totalMfeR = exactExcursions.reduce((sum, s) => sum + Number(s.mfe_r ?? 0), 0);
+    const capturedPositiveR = exactExcursions.reduce((sum, s) => sum + Math.max(0, Number(s.outcome_r ?? 0)), 0);
+    const weightedCapturePct = totalMfeR > 0 ? (capturedPositiveR / totalMfeR) * 100 : null;
+    const avgMfeR = exactExcursions.length ? totalMfeR / exactExcursions.length : null;
+    const avgMaeR = exactExcursions.length
+      ? exactExcursions.reduce((sum, s) => sum + Number(s.mae_r ?? 0), 0) / exactExcursions.length
+      : null;
     return {
       summary, curve, totalR: cum, totalN: closed.length,
       winRate: closed.length ? (wins / closed.length) * 100 : 0,
       oneRDollars, totalDollarEquivalent, actualLivePnl,
+      exactExcursionN: exactExcursions.length,
+      totalMfeR, capturedPositiveR, weightedCapturePct, avgMfeR, avgMaeR,
     };
   }, [signals, appSettings.metaapi_risk_per_trade_pct, appSettings.edge_reference_balance]);
 
@@ -3164,6 +3187,8 @@ function EdgePanel({
     curve: { i: number; r: number }[];
     totalR: number; totalN: number; winRate: number;
     oneRDollars: number; totalDollarEquivalent: number | null; actualLivePnl: number;
+    exactExcursionN: number; totalMfeR: number; capturedPositiveR: number;
+    weightedCapturePct: number | null; avgMfeR: number | null; avgMaeR: number | null;
   };
   appSettings: AppSettings;
   saveAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
@@ -3197,6 +3222,20 @@ function EdgePanel({
               ? `1R = ${stats.oneRDollars.toFixed(2)} at ${appSettings.metaapi_risk_per_trade_pct}% risk`
               : "Set a reference balance to convert R into a hypothetical dollar equivalent."}
           </div>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Exact MT5 Excursion Analytics</div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+          <Cell label="Exact trades" value={stats.exactExcursionN.toString()} />
+          <Cell label="Avg MFE" value={stats.avgMfeR == null ? "—" : `+${stats.avgMfeR.toFixed(2)}R`} />
+          <Cell label="Avg MAE" value={stats.avgMaeR == null ? "—" : `${stats.avgMaeR.toFixed(2)}R`} />
+          <Cell label="Captured R" value={stats.exactExcursionN ? `+${stats.capturedPositiveR.toFixed(2)}R / ${stats.totalMfeR.toFixed(2)}R` : "—"} />
+          <Cell label="Profit capture" value={stats.weightedCapturePct == null ? "—" : `${stats.weightedCapturePct.toFixed(1)}%`} />
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-2">
+          Uses only trades marked complete by the MT5 v1.27 tracker; older or partial trades are excluded.
         </div>
       </div>
 
@@ -3451,9 +3490,11 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
   }, [filtered]);
 
   function exportCSV() {
-    const headers = ["created_at", "pair", "timeframe", "setup", "direction", "entry", "stop_loss", "tp1", "tp2", "rr", "status", "outcome_r", "session"];
+    const headers = ["created_at", "pair", "timeframe", "setup", "direction", "entry", "stop_loss", "tp1", "tp2", "rr", "status", "outcome_r", "mfe_r", "mae_r", "profit_capture_pct", "mfe_money", "mae_money", "hold_seconds", "exit_reason", "excursion_tracking_complete", "session"];
     const rows = filtered.map((s) => [
-      s.created_at, s.pair, s.timeframe, s.setup, s.direction, s.entry, s.stop_loss, s.tp1, s.tp2, s.rr, s.status, s.outcome_r ?? "", sessionOf(s),
+      s.created_at, s.pair, s.timeframe, s.setup, s.direction, s.entry, s.stop_loss, s.tp1, s.tp2, s.rr, s.status, s.outcome_r ?? "",
+      s.mfe_r ?? "", s.mae_r ?? "", s.profit_capture_pct ?? "", s.mfe_money ?? "", s.mae_money ?? "",
+      s.hold_seconds ?? "", s.exit_reason ?? "", s.excursion_tracking_complete ?? "", sessionOf(s),
     ]);
     const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -3649,6 +3690,17 @@ function HistoryPanel({ signals }: { signals: Signal[] }) {
                           MetaApi Server
                         </span>
                       )}
+                      {s.excursion_tracking_complete && s.mfe_r != null && s.mae_r != null && (
+                        <>
+                          <span className="text-[10px] text-bull">MFE +{Number(s.mfe_r).toFixed(2)}R</span>
+                          <span className="text-[10px] text-bear">MAE {Number(s.mae_r).toFixed(2)}R</span>
+                          <span className="text-[10px] text-primary">CAP {s.profit_capture_pct != null ? `${Number(s.profit_capture_pct).toFixed(1)}%` : "—"}</span>
+                        </>
+                      )}
+                      {s.hold_seconds != null && (
+                        <span className="text-[10px] text-muted-foreground">{Math.floor(s.hold_seconds / 3600)}h {Math.floor((s.hold_seconds % 3600) / 60)}m</span>
+                      )}
+                      {s.exit_reason && <span className="text-[10px] text-muted-foreground uppercase">{s.exit_reason.replaceAll("_", " ")}</span>}
                       <span className="ml-auto font-bold" style={{
                         color: (s.outcome_r ?? 0) > 0 ? "var(--bull)" : (s.outcome_r ?? 0) < 0 ? "var(--bear)" : "var(--muted-foreground)"
                       }}>
