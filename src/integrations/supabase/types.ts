@@ -351,6 +351,16 @@ export type Database = {
           executed_at: string | null
           htf_bias: string | null
           id: string
+          excursion_tracking_complete: boolean | null
+          exit_reason: string | null
+          hold_seconds: number | null
+          mae_money: number | null
+          mae_price: number | null
+          mae_r: number | null
+          mfe_money: number | null
+          mfe_price: number | null
+          mfe_r: number | null
+          profit_capture_pct: number | null
           metaapi_breakeven_moved: boolean
           metaapi_executed_lot: number | null
           metaapi_execution_channel: string | null
@@ -397,6 +407,16 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          excursion_tracking_complete?: boolean | null
+          exit_reason?: string | null
+          hold_seconds?: number | null
+          mae_money?: number | null
+          mae_price?: number | null
+          mae_r?: number | null
+          mfe_money?: number | null
+          mfe_price?: number | null
+          mfe_r?: number | null
+          profit_capture_pct?: number | null
           metaapi_breakeven_moved?: boolean
           metaapi_executed_lot?: number | null
           metaapi_execution_channel?: string | null
@@ -443,6 +463,16 @@ export type Database = {
           executed_at?: string | null
           htf_bias?: string | null
           id?: string
+          excursion_tracking_complete?: boolean | null
+          exit_reason?: string | null
+          hold_seconds?: number | null
+          mae_money?: number | null
+          mae_price?: number | null
+          mae_r?: number | null
+          mfe_money?: number | null
+          mfe_price?: number | null
+          mfe_r?: number | null
+          profit_capture_pct?: number | null
           metaapi_breakeven_moved?: boolean
           metaapi_executed_lot?: number | null
           metaapi_execution_channel?: string | null
