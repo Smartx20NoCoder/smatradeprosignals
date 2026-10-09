@@ -1385,6 +1385,25 @@ function SignalRow({
         <Cell label="R:R" value={`1 : ${s.rr.toFixed(1)}`} />
       </div>
 
+      {s.closed_at && !s.paper_only && s.metaapi_execution_channel === "bridge" && s.excursion_tracking_complete === true && s.mfe_r != null && s.mae_r != null && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap text-[10px] uppercase tracking-wider">
+          <span className="px-2 py-1 rounded bg-bull/10 text-bull border border-bull/20">
+            MFE +{Number(s.mfe_r).toFixed(2)}R
+          </span>
+          <span className="px-2 py-1 rounded bg-bear/10 text-bear border border-bear/20">
+            MAE {Number(s.mae_r).toFixed(2)}R
+          </span>
+          <span className="px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20">
+            CAP {s.profit_capture_pct != null ? `${Number(s.profit_capture_pct).toFixed(1)}%` : "—"}
+          </span>
+          {s.hold_seconds != null && (
+            <span className="px-2 py-1 rounded bg-secondary/60 text-muted-foreground border border-border">
+              HOLD {Math.floor(s.hold_seconds / 3600)}h {Math.floor((s.hold_seconds % 3600) / 60)}m
+            </span>
+          )}
+        </div>
+      )}
+
       {warning && (
         <div className="mt-2 text-[11px] text-chart-4 bg-chart-4/10 border border-chart-4/30 rounded px-2 py-1">
           ⚠ {warning}
