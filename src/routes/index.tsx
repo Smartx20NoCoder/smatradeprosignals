@@ -1204,6 +1204,38 @@ function SignalRow({
     !s.paper_only &&
     (appSettings.pair_auto_execute?.[s.pair] === true);
 
+  function confirmStatusChange(status: StatusKey) {
+    const labelMap: Record<StatusKey, string> = {
+      pending: "Pending",
+      executed: s.paper_only ? "Paper In-Trade" : "In-Trade",
+      tp1: "TP 1",
+      tp2: "TP 2",
+      be: "Break Even",
+      loss: "Stop Loss",
+      expired: "Expired",
+    };
+    const label = labelMap[status] ?? status;
+    const liveContext = s.paper_only
+      ? "This signal is being paper-tracked."
+      : s.metaapi_position_id
+        ? "This signal has a bridge/live position record."
+        : "This changes the stored signal result.";
+    if (window.confirm(`Confirm manual status change to "${label}"?\n\n${liveContext}\n\nThis action is intended to prevent accidental taps while scrolling.`)) {
+      onStatus(s, status);
+    }
+  }
+
+  function confirmPartialClose() {
+    const liveContext = s.paper_only
+      ? "This signal is being paper-tracked."
+      : s.metaapi_position_id
+        ? "This signal has a bridge/live position record."
+        : "This changes the stored signal result.";
+    if (window.confirm(`Confirm "TP1 + BE runner (partial)"?\n\n${liveContext}\n\nContinue only if this was intentional.`)) {
+      onPartial(s);
+    }
+  }
+
   async function handleRetry() {
     setRetryState({ kind: "loading" });
     try {
@@ -1419,19 +1451,19 @@ function SignalRow({
       <div className="mt-3">
         <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Status — click to set</div>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-          <StatusTile label="Pending"  active={s.status === "pending" && !(s.paper_only && s.paper_status === "triggered")}  onClick={() => onStatus(s, "pending")} />
+          <StatusTile label="Pending"  active={s.status === "pending" && !(s.paper_only && s.paper_status === "triggered")}  onClick={() => confirmStatusChange("pending")} />
           <StatusTile label={s.paper_only && s.paper_status === "triggered" ? "Paper In-Trade" : "In-Trade"}
             active={s.status === "executed" || (s.paper_only && s.paper_status === "triggered")}
-            onClick={() => onStatus(s, "executed")}
+            onClick={() => confirmStatusChange("executed")}
             disabled={(!!blockedExecute && s.status !== "executed") || !!s.paper_only} tone="primary" />
-          <StatusTile label="TP 1"     active={s.status === "tp1" && !s.partial_close} onClick={() => onStatus(s, "tp1")} tone="bull" />
-          <StatusTile label="TP 2"     active={s.status === "tp2"}     onClick={() => onStatus(s, "tp2")} tone="bull" />
-          <StatusTile label="BE"       active={s.status === "be"}      onClick={() => onStatus(s, "be")} />
-          <StatusTile label="SL"       active={s.status === "loss"}    onClick={() => onStatus(s, "loss")} tone="bear" />
-          <StatusTile label="Expired"  active={s.status === "expired"} onClick={() => onStatus(s, "expired")} />
+          <StatusTile label="TP 1"     active={s.status === "tp1" && !s.partial_close} onClick={() => confirmStatusChange("tp1")} tone="bull" />
+          <StatusTile label="TP 2"     active={s.status === "tp2"}     onClick={() => confirmStatusChange("tp2")} tone="bull" />
+          <StatusTile label="BE"       active={s.status === "be"}      onClick={() => confirmStatusChange("be")} />
+          <StatusTile label="SL"       active={s.status === "loss"}    onClick={() => confirmStatusChange("loss")} tone="bear" />
+          <StatusTile label="Expired"  active={s.status === "expired"} onClick={() => confirmStatusChange("expired")} />
         </div>
         <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-          <button onClick={() => onPartial(s)}
+          <button onClick={confirmPartialClose}
             className="px-2 py-1 text-[10px] uppercase tracking-wider rounded border border-chart-4/60 text-chart-4 hover:bg-chart-4/15">
             TP1 + BE runner (partial)
           </button>
