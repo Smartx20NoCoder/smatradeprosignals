@@ -616,6 +616,174 @@ async function fetchCandles(
   return { candles: fresh, usedApi: 1, usedKey: fetchKey, cached: false };
 }
 
+
+async function finalizePaperTradesAfterCutoff(
+  supabase: ReturnType<typeof createClient>,
+  keys: KeySet,
+  settings: ActiveSettings,
+): Promise<{ checked: number; resolved: number; expired: number; ambiguous: number; apiCalls: number }> {
+  const now = Date.now();
+  const since = new Date(now - 24 * 3600_000).toISOString();
+  const { data: rows, error } = await supabase.from("signals")
+    .select("id,pair,direction,order_type,entry,stop_loss,tp2,created_at,paper_status,paper_triggered_at")
+    .eq("paper_only", true)
+    .in("paper_status", ["watching", "triggered"])
+    .gte("created_at", since);
+  if (error) throw error;
+
+  const due = ((rows ?? []) as any[]).filter((s) => {
+    const createdMs = new Date(String(s.created_at)).getTime();
+    if (!Number.isFinite(createdMs)) return false;
+    const d = new Date(createdMs);
+    const sessionEndMs = Date.UTC(
+      d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(),
+      settings.trading_hours_end_utc, 0, 0, 0,
+    );
+    return now >= sessionEndMs;
+  });
+
+  if (due.length === 0) return { checked: 0, resolved: 0, expired: 0, ambiguous: 0, apiCalls: 0 };
+
+  const configured: KeyIdx[] = ([1, 2, 3] as KeyIdx[]).filter((k) => !!keys[k]);
+  const keyState: KeyState = {
+    active: configured.includes(settings.active_td_key) ? settings.active_td_key : (configured[0] ?? 1),
+    configured,
+    exhausted: new Set<KeyIdx>(),
+  };
+
+  let apiCalls = 0, resolved = 0, expired = 0, ambiguous = 0;
+  const pairBars = new Map<string, Candle[]>();
+
+  for (const pair of Array.from(new Set(due.map((s) => String(s.pair))))) {
+    try {
+      const fetched = await fetchCandles(
+        supabase, keys, keyState, pair,
+        { label: "5m", td: "5min" }, 220, undefined, "paper_eod"
+      );
+      apiCalls += fetched.usedApi;
+      pairBars.set(pair, closedCandles(fetched.candles, 5).slice().sort((a, b) => a.t - b.t));
+    } catch (e) {
+      console.error("paper EOD candle fetch failed", pair, e);
+    }
+  }
+
+  for (const s of due) {
+    const bars = pairBars.get(String(s.pair));
+    if (!bars?.length) continue;
+
+    const createdMs = new Date(String(s.created_at)).getTime();
+    const signalDay = new Date(createdMs);
+    const sessionEndMs = Date.UTC(
+      signalDay.getUTCFullYear(), signalDay.getUTCMonth(), signalDay.getUTCDate(),
+      settings.trading_hours_end_utc, 0, 0, 0,
+    );
+    const validityEndMs = Math.min(createdMs + 6 * 3600_000, sessionEndMs);
+    const tfMs = 5 * 60_000;
+    const firstEligibleBar = Math.ceil(createdMs / tfMs) * tfMs;
+    const evalBars = bars.filter((b) => b.t >= firstEligibleBar && b.t < sessionEndMs);
+
+    const entry = Number(s.entry), sl = Number(s.stop_loss), tp2 = Number(s.tp2);
+    const risk = Math.abs(entry - sl);
+    if (!(risk > 0) || !Number.isFinite(tp2)) continue;
+
+    const isLong = String(s.direction).toLowerCase() === "long";
+    const ot = String(s.order_type ?? "").toLowerCase();
+    const isMarket = ot.includes("market") || (!ot.includes("stop") && !ot.includes("limit"));
+
+    let triggered = String(s.paper_status) === "triggered";
+    let triggerIdx = -1;
+
+    if (triggered) {
+      const triggerMs = s.paper_triggered_at ? new Date(String(s.paper_triggered_at)).getTime() : createdMs;
+      triggerIdx = Math.max(0, evalBars.findIndex((b) => b.t + tfMs >= triggerMs));
+    } else {
+      triggerIdx = isMarket && evalBars.length > 0
+        ? 0
+        : evalBars.findIndex((b) => b.l <= entry && b.h >= entry);
+      triggered = triggerIdx >= 0;
+    }
+
+    if (!triggered) {
+      await supabase.from("signals").update({
+        paper_status: "expired",
+        status: "expired",
+        outcome_r: 0,
+        paper_hit: new Date(validityEndMs).toISOString(),
+        paper_closed_at: new Date(validityEndMs).toISOString(),
+      }).eq("id", s.id);
+      expired++;
+      continue;
+    }
+
+    const triggeredAt = s.paper_triggered_at
+      ? String(s.paper_triggered_at)
+      : new Date(evalBars[Math.max(0, triggerIdx)].t + tfMs).toISOString();
+
+    let patch: Record<string, unknown> | null = null;
+    for (let bi = Math.max(0, triggerIdx); bi < evalBars.length; bi++) {
+      const b = evalBars[bi];
+      const hitSL = isLong ? b.l <= sl : b.h >= sl;
+      const hitTP = isLong ? b.h >= tp2 : b.l <= tp2;
+
+      if (hitSL && hitTP) {
+        patch = {
+          paper_status: "ambiguous", status: "expired", outcome_r: null,
+          paper_hit: new Date(b.t + tfMs).toISOString(),
+          paper_triggered_at: triggeredAt,
+          paper_closed_at: new Date(b.t + tfMs).toISOString(),
+        };
+        ambiguous++;
+        break;
+      }
+      if (hitTP) {
+        const r = isLong ? (tp2 - entry) / risk : (entry - tp2) / risk;
+        patch = {
+          paper_status: "tp2_hit", status: "tp2", outcome_r: Number(r.toFixed(2)),
+          paper_hit: new Date(b.t + tfMs).toISOString(),
+          paper_triggered_at: triggeredAt,
+          paper_closed_at: new Date(b.t + tfMs).toISOString(),
+        };
+        resolved++;
+        break;
+      }
+      if (hitSL) {
+        patch = {
+          paper_status: "sl_hit", status: "loss", outcome_r: -1,
+          paper_hit: new Date(b.t + tfMs).toISOString(),
+          paper_triggered_at: triggeredAt,
+          paper_closed_at: new Date(b.t + tfMs).toISOString(),
+        };
+        resolved++;
+        break;
+      }
+    }
+
+    if (!patch && evalBars.length > 0) {
+      const last = evalBars.at(-1)!;
+      const r = isLong ? (last.c - entry) / risk : (entry - last.c) / risk;
+      patch = {
+        paper_status: "session_closed", status: "closed", outcome_r: Number(r.toFixed(2)),
+        paper_hit: new Date(sessionEndMs).toISOString(),
+        paper_triggered_at: triggeredAt,
+        paper_closed_at: new Date(sessionEndMs).toISOString(),
+      };
+      resolved++;
+    }
+
+    if (patch) await supabase.from("signals").update(patch).eq("id", s.id);
+  }
+
+  // Keep API accounting honest for the small targeted EOD refresh.
+  if (apiCalls > 0) {
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      await supabase.rpc("increment_api_usage", { p_day: day, p_delta: apiCalls, p_key: keyState.active });
+    } catch (_) { /* non-fatal: lifecycle closure is more important than telemetry */ }
+  }
+
+  return { checked: due.length, resolved, expired, ambiguous, apiCalls };
+}
+
 // ---------- Setups ----------
 type RawSignal = {
   pair: string; timeframe: string; setup: string;
@@ -3177,7 +3345,26 @@ Deno.serve(async (req) => {
         }
       }
       if (!isWithinTradingHours(new Date(), settings)) {
-        const skipResult = { skipped: true, reason: `outside active trading window`, new_signals: 0, api_calls_used: 0, api_calls_today: 0, errors: [], report: [] };
+        // Normal signal generation stops outside the trading window, but paper
+        // lifecycle finalization must still run. Otherwise a triggered paper
+        // trade can remain "In-Trade" forever because the cron short-circuits
+        // before the in-scan session-close block.
+        let paperEod = { checked: 0, resolved: 0, expired: 0, ambiguous: 0, apiCalls: 0 };
+        try {
+          paperEod = await finalizePaperTradesAfterCutoff(supabase, keys, settings);
+        } catch (e) {
+          console.error("paper EOD finalizer failed", e);
+        }
+        const skipResult = {
+          skipped: true,
+          reason: `outside active trading window`,
+          new_signals: 0,
+          api_calls_used: paperEod.apiCalls,
+          api_calls_today: 0,
+          errors: [],
+          report: [],
+          paper_eod: paperEod,
+        };
         await finalize(skipResult, true);
         return new Response(JSON.stringify(skipResult), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
