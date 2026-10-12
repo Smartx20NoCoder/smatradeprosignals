@@ -1178,10 +1178,30 @@ function SignalRow({
       if (!auctionKeys.has(key)) continue;
       parts[key] = token.slice(eq + 1);
     }
-    if (parts.valid !== "1") return { label: "AUCTION N/A", align: "unavailable", title: s.notes };
+    if (parts.valid !== "1") {
+      return { label: "AUCTION N/A", align: "unavailable", directionTone: "neutral" as const, title: s.notes };
+    }
     const loc = (parts.location ?? "unknown").replaceAll("_", " ").toUpperCase();
     const align = parts.alignment ?? "neutral";
-    return { label: `AUCTION · ${loc}`, align, title: s.notes };
+
+    let directionText = align.replaceAll("_", " ").toUpperCase();
+    let directionTone: "bull" | "bear" | "neutral" = "neutral";
+
+    if (align === "support_continuation") {
+      directionText = long ? "BUY CONTINUATION" : "SELL CONTINUATION";
+      directionTone = long ? "bull" : "bear";
+    } else if (align === "support_reversal" || align === "support_value_reversion") {
+      directionText = long ? "BUY SUPPORT" : "SELL SUPPORT";
+      directionTone = long ? "bull" : "bear";
+    } else if (align.startsWith("contradiction")) {
+      directionText = "CONTRADICTION";
+      directionTone = "neutral";
+    } else if (align === "neutral") {
+      directionText = "NEUTRAL";
+      directionTone = "neutral";
+    }
+
+    return { label: `AUCTION · ${loc}`, align, directionText, directionTone, title: s.notes };
   })();
 
   // Correlation blocks moving to In-Trade
@@ -1280,14 +1300,14 @@ function SignalRow({
             <span
               title={auction.title}
               className={`px-1.5 py-0.5 text-[9px] uppercase rounded font-semibold ${
-                auction.align.startsWith("support")
+                auction.directionTone === "bull"
                   ? "bg-bull/15 text-bull"
-                  : auction.align.startsWith("contradiction")
-                  ? "bg-destructive/15 text-destructive"
+                  : auction.directionTone === "bear"
+                  ? "bg-bear/15 text-bear"
                   : "bg-muted text-muted-foreground"
               }`}
             >
-              {auction.label} · {auction.align.replaceAll("_", " ").toUpperCase()}
+              {auction.label}{auction.directionText ? ` · ${auction.directionText}` : ""}
             </span>
           )}
           {s.mfi_divergence && (
