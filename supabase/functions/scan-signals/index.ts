@@ -2101,6 +2101,45 @@ function isComponentDisabledForPair(setupConfig: Record<string, boolean>, pair: 
   return setupConfig[component] === false;
 }
 
+function auctionAlertLabel(s: Signal): string | null {
+  const notes = String((s as any).notes ?? "");
+  const marker = "AUCTION_SHADOW_V1|";
+  const start = notes.indexOf(marker);
+  if (start < 0) return null;
+
+  const allowed = new Set([
+    "valid", "location", "alignment",
+    "failed_long", "failed_short", "poc", "vah", "val",
+  ]);
+  const parts: Record<string, string> = {};
+  const tail = notes.slice(start + marker.length);
+  for (const token of tail.split("|")) {
+    const eq = token.indexOf("=");
+    if (eq <= 0) continue;
+    const key = token.slice(0, eq);
+    if (allowed.has(key)) parts[key] = token.slice(eq + 1);
+  }
+
+  if (parts.valid !== "1") return "Auction: N/A";
+
+  const location = (parts.location ?? "unknown").replaceAll("_", " ").toUpperCase();
+  const align = parts.alignment ?? "neutral";
+  const isLong = s.direction === "Long";
+
+  let direction = align.replaceAll("_", " ").toUpperCase();
+  if (align === "support_continuation") {
+    direction = isLong ? "BUY CONTINUATION" : "SELL CONTINUATION";
+  } else if (align === "support_reversal" || align === "support_value_reversion") {
+    direction = isLong ? "BUY SUPPORT" : "SELL SUPPORT";
+  } else if (align.startsWith("contradiction")) {
+    direction = isLong ? "BUY CONTRADICTION" : "SELL CONTRADICTION";
+  } else if (align === "neutral") {
+    direction = "NEUTRAL";
+  }
+
+  return `Auction: ${location} · ${direction}`;
+}
+
 async function sendTelegramAlerts(signals: Signal[], cfg: any) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -2143,6 +2182,7 @@ async function sendTelegramAlerts(signals: Signal[], cfg: any) {
       `R:R 1:${s.rr.toFixed(2)}  ·  Conf *${s.confidence}%*\n` +
       `📦 Lots: ${lotStr}${balStr}\n` +
       `Setup: ${s.setup}\n` +
+      `${auctionAlertLabel(s) ? auctionAlertLabel(s) + "\n" : ""}` +
       `Session: ${session}` +
       (s.htf_bias && s.htf_bias !== "neutral" ? `  ·  1H ${s.htf_bias}` : "");
     try {
