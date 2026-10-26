@@ -187,7 +187,7 @@ const DEFAULT_SESSION_CONFIG: SessionConfig = {
 };
 
 const DAILY_BUDGET_PER_KEY = 750;
-const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
+const PAIRS = ["XAU/USD", "BTC/USD", "ETH/USD", "GBP/USD", "GBP/JPY", "EUR/USD", "USD/JPY", "AUD/JPY", "AUD/USD"];
 const VERITAS_PAIRS_UI = new Set(["EUR/USD","GBP/USD","USD/JPY","XAU/USD","BTC/USD","ETH/USD"]);
 const TFS = ["5m", "15m", "1h"] as const;
 
@@ -311,8 +311,8 @@ function ScalpEdge() {
     metaapi_is_cent_account: false,
     metaapi_is_cent_account_live: false,
     pair_auto_execute: {
-      "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
-      "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+      "XAU/USD": true, "BTC/USD": true, "ETH/USD": false,
+      "GBP/USD": false, "GBP/JPY": false, "EUR/USD": false, "USD/JPY": false,
       "AUD/JPY": false, "AUD/USD": false,
     },
     setup_auto_execute: {
@@ -429,8 +429,8 @@ function ScalpEdge() {
       metaapi_is_cent_account: !!cfg.metaapi_is_cent_account,
       metaapi_is_cent_account_live: !!(cfg as any).metaapi_is_cent_account_live,
       pair_auto_execute: (cfg.pair_auto_execute as Record<string, boolean>) ?? {
-        "XAU/USD": true, "BTC/USD": true, "ETH/USD": false, "XRP/USD": false,
-        "GBP/USD": true, "GBP/JPY": true, "EUR/USD": false, "USD/JPY": true,
+        "XAU/USD": true, "BTC/USD": true, "ETH/USD": false,
+        "GBP/USD": false, "GBP/JPY": false, "EUR/USD": false, "USD/JPY": false,
         "AUD/JPY": false, "AUD/USD": false,
       },
       setup_auto_execute: ((cfg as any).setup_auto_execute as Record<string, boolean>) ?? {
@@ -1602,7 +1602,7 @@ function SettingsPanel({
             </div>
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground whitespace-nowrap">
-            {Object.values(appSettings.pair_auto_execute ?? {}).filter(Boolean).length} active
+            {PAIRS.filter((p) => appSettings.pair_auto_execute?.[p] === true).length} active
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -2131,7 +2131,7 @@ function MetaApiPanel({
   } | null>(null);
 
   // Test Strategy panel state
-  const TEST_STRAT_PAIRS = ["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"];
+  const TEST_STRAT_PAIRS = ["XAU/USD","BTC/USD","ETH/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"];
   const TEST_STRAT_SETUPS = ["EMA Pullback","BOS Retest","VERITAS","QSS","PRISM"];
   const [testStratPair, setTestStratPair] = useState("XAU/USD");
   const [testStratSetups, setTestStratSetups] = useState<string[]>(["VERITAS","QSS","PRISM"]);
@@ -2501,7 +2501,7 @@ function MetaApiPanel({
             disabled={testTrading}
             className="px-2 py-1.5 text-xs uppercase tracking-wider font-bold rounded border border-chart-4/60 bg-background text-chart-4 disabled:opacity-50"
           >
-            {["BTC/USD","XAU/USD","ETH/USD","XRP/USD","EUR/USD","GBP/USD","GBP/JPY","USD/JPY","AUD/USD","AUD/JPY"].map((p) => (
+            {["BTC/USD","XAU/USD","ETH/USD","EUR/USD","GBP/USD","GBP/JPY","USD/JPY","AUD/USD","AUD/JPY"].map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
@@ -2836,7 +2836,7 @@ function HealthPanel({
 
   return (
     <div className="mt-4 space-y-3">
-      <BridgeTelemetryCard />
+      <BridgeTelemetryCard appSettings={appSettings} />
 
 
       <div className="border border-border rounded bg-card p-4">
@@ -3968,9 +3968,11 @@ type BridgePoll = {
   note: string | null;
 };
 
-const BRIDGE_POOL_PAIRS = ["GBP/USD", "XAU/USD", "BTC/USD"];
+const BRIDGE_POOL_PAIRS = PAIRS;
 
-function BridgeTelemetryCard() {
+function BridgeTelemetryCard({ appSettings }: { appSettings: AppSettings }) {
+  const activeBridgePairs = BRIDGE_POOL_PAIRS.filter((p) => appSettings.pair_auto_execute?.[p] === true);
+  const activePairsKey = activeBridgePairs.join("|");
   const [polls, setPolls] = useState<BridgePoll[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [claimable, setClaimable] = useState<{ total: number; claimed: number } | null>(null);
@@ -3984,13 +3986,15 @@ function BridgeTelemetryCard() {
           .select("polled_at, endpoint, http_status, signals_returned, note")
           .order("polled_at", { ascending: false })
           .limit(10),
-        (supabase as any)
-          .from("signals")
-          .select("id, metaapi_execution_status")
-          .in("pair", BRIDGE_POOL_PAIRS)
-          .in("status", ["pending", "none"])
-          .in("metaapi_execution_status", ["none", "bridge_claimed"])
-          .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString()),
+        activeBridgePairs.length > 0
+          ? (supabase as any)
+              .from("signals")
+              .select("id, metaapi_execution_status")
+              .in("pair", activeBridgePairs)
+              .in("status", ["pending", "none"])
+              .in("metaapi_execution_status", ["none", "bridge_claimed"])
+              .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString())
+          : Promise.resolve({ data: [] }),
       ]);
       if (!alive) return;
       setPolls((data as BridgePoll[]) ?? []);
@@ -4004,7 +4008,7 @@ function BridgeTelemetryCard() {
     load();
     const t = setInterval(load, 20000);
     return () => { alive = false; clearInterval(t); };
-  }, []);
+  }, [activePairsKey]);
 
   const last = polls[0];
   const secondsAgo = last ? Math.floor((Date.now() - new Date(last.polled_at).getTime()) / 1000) : Infinity;
@@ -4061,7 +4065,7 @@ function BridgeTelemetryCard() {
             </span>
           </div>
           <div className="text-[9px] text-muted-foreground tracking-wider mt-0.5">
-            {BRIDGE_POOL_PAIRS.join(" · ")} · status pending/none · last 6h
+            {activeBridgePairs.length ? activeBridgePairs.join(" · ") : "No active pairs"} · status pending/none · last 6h
           </div>
         </div>
       </div>

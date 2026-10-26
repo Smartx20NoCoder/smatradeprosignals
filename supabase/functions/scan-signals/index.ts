@@ -37,7 +37,6 @@ const PAIRS = [
   "ETH/USD",   // VERITAS (when subscribed)
   // ── Standard Pairs ──
   "GBP/JPY",
-  "XRP/USD",
   "AUD/JPY",
   "AUD/USD",
 ];
@@ -80,7 +79,7 @@ function pairCurrencies(pair: string): string[] {
 // Weekend / Friday-late filter: forex + gold pause from Fri 22:00 UTC to Sun 22:00 UTC.
 // Only BTC/USD trades in that window.
 function isPairAllowedNow(pair: string, d: Date): boolean {
-  if (pair === "BTC/USD" || pair === "XRP/USD" || pair === "ETH/USD") return true;
+  if (pair === "BTC/USD" || pair === "ETH/USD") return true;
   const day = d.getUTCDay(); // 0 Sun, 5 Fri, 6 Sat
   const h = d.getUTCHours();
   if (day === 6) return false;                  // Saturday: closed
@@ -2242,7 +2241,7 @@ type ActiveSettings = {
 // NOTE: no longer used by the pair filter below (see v3.2 note at top of file) —
 // pair_auto_execute alone decides what gets scanned now. Left declared, unused,
 // in case scan-breadth-for-stats is revisited later.
-const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "XRP/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
+const CORE_PAIRS = new Set(["XAU/USD", "BTC/USD", "ETH/USD", "GBP/USD", "GBP/JPY", "USD/JPY"]);
 // Secondary pairs are always attempted but silently skipped on any fetch failure.
 const SECONDARY_PAIRS = new Set(["AUD/JPY", "AUD/USD"]);
 
