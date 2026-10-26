@@ -1594,6 +1594,47 @@ function SettingsPanel({
       <TradingHoursPanel appSettings={appSettings} saveAppSettings={saveAppSettings} />
 
       <div className="border border-border rounded bg-card p-4">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Active Pairs</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Pair-specific scanner control. OFF means the pair is not scanned, alerted, or sent to the bridge until you turn it back on.
+            </div>
+          </div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+            {Object.values(appSettings.pair_auto_execute ?? {}).filter(Boolean).length} active
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {PAIRS.map((p) => {
+            const cfg = appSettings.pair_auto_execute ?? {};
+            const on = cfg[p] === true;
+            return (
+              <label
+                key={p}
+                className={`flex items-center justify-between gap-2 px-2 py-2 border rounded text-xs transition-colors ${
+                  on ? "bg-primary/5 border-primary/30" : "bg-background border-border"
+                }`}
+              >
+                <span className={`font-mono font-semibold ${on ? "text-foreground" : "text-muted-foreground"}`}>
+                  {p}
+                </span>
+                <Toggle
+                  on={on}
+                  onChange={(v) =>
+                    saveAppSettings({ pair_auto_execute: { ...cfg, [p]: v } } as any)
+                  }
+                />
+              </label>
+            );
+          })}
+        </div>
+        <div className="mt-2 text-[10px] text-muted-foreground">
+          Existing open trades are not closed by this switch. It only controls new scanning/signals for that pair.
+        </div>
+      </div>
+
+      <div className="border border-border rounded bg-card p-4">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">TwelveData API Key</div>
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -2296,26 +2337,6 @@ function MetaApiPanel({
           </label>
         </div>
       )}
-
-      {/* Pair auto-execute toggles */}
-      <div className="border-t border-border pt-3 space-y-2">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Pair Auto-Execute</div>
-          <div className="text-[11px] text-muted-foreground">Disabled pairs are still scanned, alerted and paper-tracked — just not auto-executed.</div>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {["XAU/USD","BTC/USD","ETH/USD","XRP/USD","GBP/USD","GBP/JPY","EUR/USD","USD/JPY","AUD/JPY","AUD/USD"].map((p) => {
-            const cfg = appSettings.pair_auto_execute ?? {};
-            const on = cfg[p] !== false;
-            return (
-              <label key={p} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background border border-border rounded text-xs">
-                <span className="font-mono">{p}</span>
-                <Toggle on={on} onChange={(v) => saveAppSettings({ pair_auto_execute: { ...cfg, [p]: v } } as any)} />
-              </label>
-            );
-          })}
-        </div>
-      </div>
 
       {/* Setup auto-execute toggles */}
       <div className="border-t border-border pt-3 space-y-2">
