@@ -3069,20 +3069,42 @@ async function runScanJob(
       },
     }));
 
-    // Dedupe only the same strategy fingerprint. A different strategy on the
-    // same pair/direction must still be persisted so it can act as confirmation
-    // (or contradiction) and receive an independent paper outcome.
+    // Deduplicate identical signal opportunities while retaining independent
+    // strategy families. Postgres returns timestamptz as e.g.
+    // "2026-10-30 01:00:00+00", whereas the scanner produces
+    // "2026-10-30T01:00:00.000Z". Raw-string comparison missed these
+    // duplicates whenever a 5-minute scan rechecked the same 15m candle.
+    const fingerprint = (s: { pair: string; direction: string; setup: string; candle_time?: string | null }): string | null => {
+      if (!s.candle_time) return null;
+      const ms = new Date(s.candle_time).getTime();
+      if (!Number.isFinite(ms)) return null;
+      return `${s.pair}|${s.direction}|${s.setup}|${new Date(ms).toISOString()}`;
+    };
+
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-    const { data: recent } = await supabase.from("signals")
+    const { data: recent, error: recentError } = await supabase.from("signals")
       .select("pair,direction,setup,candle_time").gte("created_at", since);
+    if (recentError) {
+      // Fail closed: skipping a scan is safer than filling the board (and
+      // potentially the bridge) with duplicates while deduplication is offline.
+      throw new Error(`Signal dedupe history unavailable: ${recentError.message}`);
+    }
 
-    const seenFingerprint = new Set((recent ?? [])
-      .filter((r: any) => r.candle_time != null)
-      .map((r: any) => `${r.pair}|${r.direction}|${r.setup}|${r.candle_time}`));
+    const seenFingerprints = new Set<string>();
+    for (const previous of recent ?? []) {
+      const key = fingerprint(previous as { pair: string; direction: string; setup: string; candle_time: string | null });
+      if (key) seenFingerprints.add(key);
+    }
 
-    const dedupedInsert = merged.filter(s =>
-      !seenFingerprint.has(`${s.pair}|${s.direction}|${s.setup}|${s.candle_time}`)
-    );
+    // Check both persisted history AND this scan's candidates. This prevents
+    // accidental duplicate candidates within a single batch.
+    const dedupedInsert = merged.filter((s) => {
+      const key = fingerprint(s);
+      if (!key) return true;
+      if (seenFingerprints.has(key)) return false;
+      seenFingerprints.add(key);
+      return true;
+    });
     // Apply manual-trading threshold gate: signals below min_confidence or min_rr
     // are NOT saved and NOT alerted (keeps signals tab + Telegram aligned with what
     // you'd trade manually). Only gates NEW signals; previously-saved paper-tracked
