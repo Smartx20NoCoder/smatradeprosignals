@@ -81,6 +81,7 @@ Deno.serve(async (req: Request) => {
         realized_pnl: numberOrNull("realized_pnl"),
         account_equity: numberOrNull("account_equity"),
         account_balance: numberOrNull("account_balance"),
+        account_currency: String(body.account_currency ?? "").slice(0, 20) || null,
         daily_start_equity: numberOrNull("daily_start_equity"),
         daily_drawdown_pct: numberOrNull("daily_drawdown_pct"),
         projected_risk_pct: numberOrNull("projected_risk_pct"),
