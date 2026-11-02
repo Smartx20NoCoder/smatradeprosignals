@@ -109,6 +109,8 @@ Deno.serve(async (req) => {
       risk_pct: Number(c?.metaapi_risk_per_trade_pct ?? 2),
       min_lot: Number(c?.metaapi_min_lot ?? 0.10),
       max_lot: Number(c?.metaapi_max_lot ?? 0.50),
+      max_daily_loss_pct: Number(c?.metaapi_max_daily_loss_pct ?? 5),
+      max_trades: Number(c?.metaapi_max_trades ?? 3),
       is_cent_account: isCentAccount,
     };
 
